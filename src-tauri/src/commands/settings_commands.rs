@@ -1,0 +1,49 @@
+use crate::app_state::AppState;
+use crate::commands::command_result;
+use crate::error::CommandResult;
+use crate::models::settings::{Settings, SettingsState};
+
+pub(crate) fn get_settings_inner(state: &AppState) -> CommandResult<SettingsState> {
+    command_result(state.settings_state())
+}
+
+#[tauri::command]
+pub fn get_settings(state: tauri::State<'_, AppState>) -> CommandResult<SettingsState> {
+    get_settings_inner(&state)
+}
+
+pub(crate) fn save_settings_inner(
+    state: &AppState,
+    settings: Settings,
+) -> CommandResult<SettingsState> {
+    command_result(state.save_settings(settings))
+}
+
+#[tauri::command]
+pub fn save_settings(
+    state: tauri::State<'_, AppState>,
+    settings: Settings,
+) -> CommandResult<SettingsState> {
+    save_settings_inner(&state, settings)
+}
+
+pub(crate) fn set_autostart_inner(state: &AppState, enabled: bool) -> CommandResult<SettingsState> {
+    command_result(state.set_autostart(enabled))
+}
+
+#[tauri::command]
+pub fn set_autostart(
+    state: tauri::State<'_, AppState>,
+    enabled: bool,
+) -> CommandResult<SettingsState> {
+    set_autostart_inner(&state, enabled)
+}
+
+pub(crate) fn open_codex_directory_inner(state: &AppState) -> CommandResult<()> {
+    command_result(state.open_codex_directory())
+}
+
+#[tauri::command]
+pub fn open_codex_directory(state: tauri::State<'_, AppState>) -> CommandResult<()> {
+    open_codex_directory_inner(&state)
+}

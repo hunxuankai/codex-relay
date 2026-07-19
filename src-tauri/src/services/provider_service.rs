@@ -1,6 +1,7 @@
 use crate::error::AppError;
 use crate::infrastructure::file_fingerprint::FileSetFingerprint;
 use crate::infrastructure::path_service::AppPaths;
+use crate::models::backup::BackupSummary;
 use crate::models::provider::{
     ApiKeyChange, CreateProviderInput, ProviderListState, ProviderMutationOutcome, ProviderProfile,
     SwitchOutcome, UpdateProviderInput, WireApi,
@@ -26,6 +27,7 @@ const CONSISTENT_READ_ATTEMPTS: usize = 3;
 pub struct ProviderService {
     paths: AppPaths,
     transaction_service: TransactionService,
+    backup_service: BackupService,
     secret_service: ProviderSecretService,
     auth_service: AuthService,
 }
@@ -33,13 +35,31 @@ pub struct ProviderService {
 impl ProviderService {
     pub fn new(paths: AppPaths, app_version: impl Into<String>) -> Self {
         let backup_service = BackupService::new(paths.backups_dir.clone(), app_version);
-        let transaction_service = TransactionService::new(paths.clone(), backup_service);
+        let transaction_service = TransactionService::new(paths.clone(), backup_service.clone());
         Self {
+            backup_service,
             secret_service: ProviderSecretService::new(paths.providers_file.clone()),
             auth_service: AuthService::new(paths.auth_file.clone()),
             paths,
             transaction_service,
         }
+    }
+
+    pub fn list_backups(&self) -> Result<Vec<BackupSummary>, AppError> {
+        self.backup_service.list_backups()
+    }
+
+    pub async fn restore_backup(
+        &self,
+        directory_name: &str,
+    ) -> Result<ProviderMutationOutcome, AppError> {
+        self.transaction_service
+            .restore_backup(directory_name)
+            .await?;
+        Ok(ProviderMutationOutcome {
+            providers: self.list_providers()?.providers,
+            message: "配置备份已恢复。".into(),
+        })
     }
 
     pub fn list_providers(&self) -> Result<ProviderListState, AppError> {

@@ -39,6 +39,13 @@ pub struct AutostartState {
     pub is_consistent: bool,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsState {
+    pub settings: Settings,
+    pub autostart: AutostartState,
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
