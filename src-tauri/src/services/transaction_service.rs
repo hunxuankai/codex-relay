@@ -248,6 +248,30 @@ impl TransactionService {
         })
     }
 
+    pub async fn restore_backup(
+        &self,
+        directory_name: &str,
+    ) -> Result<TransactionOutcome, AppError> {
+        let selected_snapshot = self.backup_service.load_snapshot(directory_name)?;
+        let expected_files = self.current_fingerprints()?;
+        let changes = FileChanges {
+            config: change_from_snapshot(selected_snapshot.config.as_deref()),
+            auth: change_from_snapshot(selected_snapshot.auth.as_deref()),
+            providers: change_from_snapshot(selected_snapshot.providers.as_deref()),
+        };
+
+        self.execute(
+            TransactionRequest {
+                operation: TransactionOperation::RestoreBackup,
+                provider_id: None,
+                expected_files: Some(expected_files),
+                changes,
+            },
+            |paths| validate_snapshot_matches(paths, &selected_snapshot),
+        )
+        .await
+    }
+
     fn capture_snapshot(&self) -> Result<FileSnapshot, AppError> {
         Ok(FileSnapshot {
             config: self.file_ops.read_optional(&self.paths.config_file)?,
@@ -456,6 +480,38 @@ fn validate_managed_file(kind: ManagedFileKind, bytes: &[u8]) -> Result<(), AppE
     }
 }
 
+fn change_from_snapshot(bytes: Option<&[u8]>) -> FileChange {
+    match bytes {
+        Some(bytes) => FileChange::Write(bytes.to_vec()),
+        None => FileChange::Delete,
+    }
+}
+
+fn validate_snapshot_matches(paths: &AppPaths, snapshot: &FileSnapshot) -> Result<(), AppError> {
+    for (path, expected) in [
+        (&paths.config_file, snapshot.config.as_deref()),
+        (&paths.auth_file, snapshot.auth.as_deref()),
+        (&paths.providers_file, snapshot.providers.as_deref()),
+    ] {
+        let actual = match fs::read(path) {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Err(error) => return Err(AppError::from(error)),
+        };
+        if actual.as_deref() != expected {
+            return Err(AppError::new(
+                "RESTORE_VERIFICATION_FAILED",
+                "备份恢复后的文件验证失败。",
+                format!(
+                    "restored file does not match selected snapshot: {}",
+                    path.display()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn external_modification_conflict() -> AppError {
     AppError::new(
         "EXTERNAL_MODIFICATION_CONFLICT",
@@ -480,7 +536,7 @@ fn rollback_incomplete(operation_error: &AppError, rollback_error: &AppError) ->
 mod tests {
     use super::*;
     use crate::infrastructure::file_fingerprint::FileSetFingerprint;
-    use crate::models::transaction::TransactionOperation;
+    use crate::models::transaction::{ConfigTransaction, TransactionOperation};
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -864,5 +920,39 @@ wire_api = "responses"
         right.await.unwrap().unwrap();
 
         assert_eq!(file_ops.max_active_writes.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn restore_backup_first_backs_up_current_state_and_restores_exact_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_initial_files(&paths);
+        let backup = BackupService::new(paths.backups_dir.clone(), "0.1.0");
+        let selected = backup
+            .create_backup(
+                &ConfigTransaction {
+                    id: "selected-backup".into(),
+                    operation: TransactionOperation::SwitchProvider,
+                    provider_id: Some("provider-b".into()),
+                    started_at: "2026-07-20T22:00:00+08:00".into(),
+                },
+                &FileSnapshot {
+                    config: Some(CONFIG_B.to_vec()),
+                    auth: Some(AUTH_B.to_vec()),
+                    providers: Some(PROVIDERS.to_vec()),
+                },
+            )
+            .unwrap();
+        let service = TransactionService::new(paths.clone(), backup.clone());
+
+        service
+            .restore_backup(&selected.directory_name)
+            .await
+            .unwrap();
+
+        assert_eq!(fs::read(&paths.config_file).unwrap(), CONFIG_B);
+        assert_eq!(fs::read(&paths.auth_file).unwrap(), AUTH_B);
+        assert_eq!(fs::read(&paths.providers_file).unwrap(), PROVIDERS);
+        assert_eq!(backup.list_backups().unwrap().len(), 2);
     }
 }
