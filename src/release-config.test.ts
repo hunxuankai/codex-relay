@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 const tauri = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'))
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'))
 const prepareDevData = readFileSync('scripts/prepare-dev-data.ps1', 'utf8')
+const rustEntryPoint = readFileSync('src-tauri/src/main.rs', 'utf8')
 
 describe('Windows release configuration', () => {
   it('uses stable product, binary, icon, and NSIS current-user metadata', () => {
@@ -36,5 +37,11 @@ describe('Windows release configuration', () => {
 
     expect(generatedApiKeys).not.toHaveLength(0)
     expect(generatedApiKeys.every((apiKey) => /^test-key-[a-z0-9-]+-not-real$/.test(apiKey))).toBe(true)
+  })
+
+  it('uses the Windows GUI subsystem for release builds', () => {
+    expect(rustEntryPoint).toContain(
+      '#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]',
+    )
   })
 })
