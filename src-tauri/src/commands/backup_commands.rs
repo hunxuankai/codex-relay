@@ -22,8 +22,18 @@ pub(crate) async fn restore_backup_inner(
 
 #[tauri::command]
 pub async fn restore_backup(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     directory_name: String,
 ) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
-    Ok(restore_backup_inner(&state, directory_name).await)
+    let application_write = match state.begin_application_write() {
+        Ok(application_write) => application_write,
+        Err(error) => return Ok(CommandResult::failure(&error)),
+    };
+    let result = restore_backup_inner(&state, directory_name).await;
+    drop(application_write);
+    if let Some(outcome) = result.data.as_ref() {
+        crate::tray::after_provider_mutation(&app, outcome.message.clone(), false);
+    }
+    Ok(result)
 }

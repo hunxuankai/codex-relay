@@ -33,36 +33,84 @@ pub trait FileWatchEventSink: Send + Sync {
 
 enum WatchMessage {
     Path(PathBuf),
+    ApplicationWriteFinished,
     Stop,
 }
 
-struct WatchWorker {
+#[derive(Default)]
+struct ApplicationWriteState {
+    in_progress: usize,
+    expected_fingerprint: Option<FileSetFingerprint>,
+}
+
+pub struct ApplicationWriteGuard {
+    paths: AppPaths,
     sender: Sender<WatchMessage>,
-    application_write: Arc<Mutex<Option<FileSetFingerprint>>>,
+    state: Arc<Mutex<ApplicationWriteState>>,
+}
+
+impl Drop for ApplicationWriteGuard {
+    fn drop(&mut self) {
+        let fingerprints = FileSetFingerprint::from_paths(
+            &self.paths.config_file,
+            &self.paths.auth_file,
+            &self.paths.providers_file,
+        )
+        .ok();
+        if let Ok(mut state) = self.state.lock() {
+            state.in_progress = state.in_progress.saturating_sub(1);
+            if state.in_progress == 0 {
+                state.expected_fingerprint = fingerprints;
+            }
+        }
+        let _ = self.sender.send(WatchMessage::ApplicationWriteFinished);
+    }
+}
+
+struct WatchWorker {
+    paths: AppPaths,
+    sender: Sender<WatchMessage>,
+    application_write: Arc<Mutex<ApplicationWriteState>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl WatchWorker {
     fn start(paths: AppPaths, sink: Arc<dyn FileWatchEventSink>, debounce: Duration) -> Self {
         let (sender, receiver) = mpsc::channel();
-        let application_write = Arc::new(Mutex::new(None));
+        let application_write = Arc::new(Mutex::new(ApplicationWriteState::default()));
         let worker_application_write = application_write.clone();
+        let worker_paths = paths.clone();
         let thread = thread::spawn(move || {
             let mut pending = BTreeSet::new();
-            while let Ok(WatchMessage::Path(path)) = receiver.recv() {
-                if let Some(kind) = classify_path(&paths, &path) {
-                    pending.insert(kind);
+            loop {
+                match receiver.recv() {
+                    Ok(WatchMessage::Path(path)) => {
+                        if let Some(kind) = classify_path(&worker_paths, &path) {
+                            pending.insert(kind);
+                        }
+                    }
+                    Ok(WatchMessage::ApplicationWriteFinished) => continue,
+                    Ok(WatchMessage::Stop) | Err(_) => return,
                 }
 
                 loop {
                     match receiver.recv_timeout(debounce) {
                         Ok(WatchMessage::Path(path)) => {
-                            if let Some(kind) = classify_path(&paths, &path) {
+                            if let Some(kind) = classify_path(&worker_paths, &path) {
                                 pending.insert(kind);
                             }
                         }
+                        Ok(WatchMessage::ApplicationWriteFinished) => {}
                         Ok(WatchMessage::Stop) => return,
-                        Err(RecvTimeoutError::Timeout) => break,
+                        Err(RecvTimeoutError::Timeout) => {
+                            let write_in_progress = worker_application_write
+                                .lock()
+                                .map(|state| state.in_progress > 0)
+                                .unwrap_or(false);
+                            if !write_in_progress {
+                                break;
+                            }
+                        }
                         Err(RecvTimeoutError::Disconnected) => return,
                     }
                 }
@@ -71,9 +119,9 @@ impl WatchWorker {
                     continue;
                 }
                 let fingerprints = match FileSetFingerprint::from_paths(
-                    &paths.config_file,
-                    &paths.auth_file,
-                    &paths.providers_file,
+                    &worker_paths.config_file,
+                    &worker_paths.auth_file,
+                    &worker_paths.providers_file,
                 ) {
                     Ok(fingerprints) => fingerprints,
                     Err(_) => {
@@ -82,12 +130,12 @@ impl WatchWorker {
                     }
                 };
                 let suppressed = {
-                    let mut expected = worker_application_write
+                    let mut state = worker_application_write
                         .lock()
                         .expect("file-watch application-write lock poisoned");
-                    let suppressed = expected.as_ref() == Some(&fingerprints);
-                    if expected.is_some() {
-                        *expected = None;
+                    let suppressed = state.expected_fingerprint.as_ref() == Some(&fingerprints);
+                    if state.expected_fingerprint.is_some() {
+                        state.expected_fingerprint = None;
                     }
                     suppressed
                 };
@@ -102,6 +150,7 @@ impl WatchWorker {
         });
 
         Self {
+            paths,
             sender,
             application_write,
             thread: Some(thread),
@@ -119,16 +168,21 @@ impl WatchWorker {
         })
     }
 
-    fn mark_application_write(&self, fingerprints: FileSetFingerprint) -> Result<(), AppError> {
-        let mut expected = self.application_write.lock().map_err(|_| {
+    fn begin_application_write(&self) -> Result<ApplicationWriteGuard, AppError> {
+        let mut state = self.application_write.lock().map_err(|_| {
             AppError::new(
                 "FILE_WATCH_STATE_FAILED",
                 "无法更新配置文件监控状态。",
                 "file-watch application-write lock poisoned",
             )
         })?;
-        *expected = Some(fingerprints);
-        Ok(())
+        state.in_progress += 1;
+        state.expected_fingerprint = None;
+        Ok(ApplicationWriteGuard {
+            paths: self.paths.clone(),
+            sender: self.sender.clone(),
+            state: self.application_write.clone(),
+        })
     }
 }
 
@@ -190,8 +244,8 @@ impl FileWatchService {
         })
     }
 
-    pub fn mark_application_write(&self, fingerprints: FileSetFingerprint) -> Result<(), AppError> {
-        self.worker.mark_application_write(fingerprints)
+    pub fn begin_application_write(&self) -> Result<ApplicationWriteGuard, AppError> {
+        self.worker.begin_application_write()
     }
 }
 
@@ -282,22 +336,43 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let paths = create_paths(&directory);
         fs::write(&paths.config_file, "model_provider = \"provider-a\"\n").unwrap();
-        let fingerprints = FileSetFingerprint::from_paths(
-            &paths.config_file,
-            &paths.auth_file,
-            &paths.providers_file,
-        )
-        .unwrap();
         let (sender, receiver) = mpsc::channel();
         let worker = WatchWorker::start(
             paths.clone(),
             Arc::new(ChannelSink { sender }),
             Duration::from_millis(20),
         );
-        worker.mark_application_write(fingerprints).unwrap();
+        let application_write = worker.begin_application_write().unwrap();
 
         worker.notify_path(paths.config_file.clone()).unwrap();
+        drop(application_write);
         assert!(receiver.recv_timeout(Duration::from_millis(100)).is_err());
+
+        fs::write(&paths.config_file, "model_provider = \"external\"\n").unwrap();
+        worker.notify_path(paths.config_file.clone()).unwrap();
+        let event = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(event.kinds, vec![WatchedFileKind::Config]);
+    }
+
+    #[test]
+    fn in_progress_application_write_is_suppressed_past_debounce() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        fs::write(&paths.config_file, "model_provider = \"provider-a\"\n").unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let worker = WatchWorker::start(
+            paths.clone(),
+            Arc::new(ChannelSink { sender }),
+            Duration::from_millis(20),
+        );
+        let application_write = worker.begin_application_write().unwrap();
+
+        fs::write(&paths.config_file, "model_provider = \"provider-b\"\n").unwrap();
+        worker.notify_path(paths.config_file.clone()).unwrap();
+        assert!(receiver.recv_timeout(Duration::from_millis(80)).is_err());
+
+        drop(application_write);
+        assert!(receiver.recv_timeout(Duration::from_millis(80)).is_err());
 
         fs::write(&paths.config_file, "model_provider = \"external\"\n").unwrap();
         worker.notify_path(paths.config_file.clone()).unwrap();

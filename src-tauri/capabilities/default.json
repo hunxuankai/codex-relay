@@ -3,5 +3,9 @@
   "identifier": "default",
   "description": "Default permissions for Codex Relay",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "autostart:default",
+    "notification:default"
+  ]
 }

@@ -7,6 +7,7 @@ use chrono::Utc;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 const MIN_WINDOW_WIDTH: u32 = 720;
@@ -17,11 +18,15 @@ const MAX_WINDOW_HEIGHT: u32 = 4320;
 #[derive(Clone, Debug)]
 pub struct SettingsService {
     paths: AppPaths,
+    update_lock: Arc<Mutex<()>>,
 }
 
 impl SettingsService {
     pub fn new(paths: AppPaths) -> Self {
-        Self { paths }
+        Self {
+            paths,
+            update_lock: Arc::new(Mutex::new(())),
+        }
     }
 
     pub fn bootstrap(&self) -> Result<Settings, AppError> {
@@ -34,11 +39,29 @@ impl SettingsService {
     }
 
     pub fn load_or_create(&self) -> Result<Settings, AppError> {
+        let _guard = self.lock_updates()?;
+        self.load_or_create_unlocked()
+    }
+
+    pub fn save(&self, settings: &Settings) -> Result<(), AppError> {
+        let _guard = self.lock_updates()?;
+        self.save_unlocked(settings)
+    }
+
+    pub fn update(&self, update: impl FnOnce(&mut Settings)) -> Result<Settings, AppError> {
+        let _guard = self.lock_updates()?;
+        let mut settings = self.load_or_create_unlocked()?;
+        update(&mut settings);
+        self.save_unlocked(&settings)?;
+        self.load_or_create_unlocked()
+    }
+
+    fn load_or_create_unlocked(&self) -> Result<Settings, AppError> {
         let bytes = match fs::read(&self.paths.settings_file) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == ErrorKind::NotFound => {
                 let settings = Settings::default();
-                self.save(&settings)?;
+                self.save_unlocked(&settings)?;
                 return Ok(settings);
             }
             Err(error) => return Err(AppError::from(error)),
@@ -57,7 +80,7 @@ impl SettingsService {
         })
     }
 
-    pub fn save(&self, settings: &Settings) -> Result<(), AppError> {
+    fn save_unlocked(&self, settings: &Settings) -> Result<(), AppError> {
         fs::create_dir_all(&self.paths.app_data_dir).map_err(AppError::from)?;
         let mut normalized = settings.clone();
         normalized.window.width = normalized
@@ -80,6 +103,16 @@ impl SettingsService {
                         error.to_string(),
                     )
                 })
+        })
+    }
+
+    fn lock_updates(&self) -> Result<std::sync::MutexGuard<'_, ()>, AppError> {
+        self.update_lock.lock().map_err(|_| {
+            AppError::new(
+                "SETTINGS_LOCK_FAILED",
+                "无法更新软件设置。",
+                "settings update lock poisoned",
+            )
         })
     }
 

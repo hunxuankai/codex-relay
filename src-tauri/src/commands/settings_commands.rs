@@ -21,10 +21,15 @@ pub(crate) fn save_settings_inner(
 
 #[tauri::command]
 pub fn save_settings(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     settings: Settings,
 ) -> CommandResult<SettingsState> {
-    save_settings_inner(&state, settings)
+    let result = save_settings_inner(&state, settings);
+    if result.success {
+        crate::tray::after_settings_change(&app);
+    }
+    result
 }
 
 pub(crate) fn set_autostart_inner(state: &AppState, enabled: bool) -> CommandResult<SettingsState> {
@@ -33,10 +38,15 @@ pub(crate) fn set_autostart_inner(state: &AppState, enabled: bool) -> CommandRes
 
 #[tauri::command]
 pub fn set_autostart(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     enabled: bool,
 ) -> CommandResult<SettingsState> {
-    set_autostart_inner(&state, enabled)
+    let result = set_autostart_inner(&state, enabled);
+    if result.success {
+        crate::tray::after_settings_change(&app);
+    }
+    result
 }
 
 pub(crate) fn open_codex_directory_inner(state: &AppState) -> CommandResult<()> {

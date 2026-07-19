@@ -24,6 +24,7 @@ mod tests {
     use crate::infrastructure::path_service::AppPaths;
     use crate::models::health::HealthLevel;
     use crate::models::provider::CreateProviderInput;
+    use crate::models::settings::Settings;
     use crate::services::autostart_service::{AutostartBackend, AutostartService};
     use crate::services::self_check_service::{CodexCommandProbe, CodexProbeResult};
     use std::fs;
@@ -141,6 +142,31 @@ mod tests {
         assert!(data.settings.autostart_enabled);
         assert!(data.autostart.actual_enabled);
         assert!(data.autostart.is_consistent);
+    }
+
+    #[test]
+    fn saving_preferences_preserves_latest_window_bounds() {
+        let (_directory, state) = create_state();
+        let latest_window = crate::models::settings::WindowBounds {
+            width: 1100,
+            height: 760,
+            x: Some(120),
+            y: Some(80),
+        };
+        state
+            .settings_service
+            .update(|settings| settings.window = latest_window.clone())
+            .unwrap();
+        let stale_form = Settings {
+            close_to_tray: false,
+            ..Settings::default()
+        };
+
+        state.save_settings(stale_form).unwrap();
+        let saved = state.settings_service.load_or_create().unwrap();
+
+        assert!(!saved.close_to_tray);
+        assert_eq!(saved.window, latest_window);
     }
 
     #[test]
