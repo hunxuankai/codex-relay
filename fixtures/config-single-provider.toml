@@ -1,0 +1,7 @@
+model_provider = "provider-a"
+
+[model_providers.provider-a]
+name = "Provider A"
+base_url = "https://provider-a.example.com/v1"
+wire_api = "responses"
+

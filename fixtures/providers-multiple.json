@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "providers": {
+    "provider-a": {
+      "apiKey": "test-key-a-not-real"
+    },
+    "provider-b": {
+      "apiKey": "test-key-b-not-real"
+    }
+  }
+}
+

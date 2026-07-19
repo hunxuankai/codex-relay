@@ -1,0 +1,22 @@
+# This leading comment must survive every edit.
+model = "test-model"
+model_provider = "provider-a"
+
+# Provider A comment.
+[model_providers.provider-a]
+name = "Provider A"
+base_url = "https://provider-a.example.com/v1"
+wire_api = "responses"
+custom_header = "preserve-me"
+
+[model_providers.provider-b]
+name = "Provider B"
+base_url = "https://provider-b.example.com/v1"
+wire_api = "responses"
+
+[features]
+goals = true
+
+[mcp_servers.sample]
+command = "sample-server"
+

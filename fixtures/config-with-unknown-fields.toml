@@ -1,0 +1,16 @@
+model_provider = "provider-a"
+approval_policy = "on-request"
+
+[model_providers.provider-a]
+name = "Provider A"
+base_url = "https://provider-a.example.com/v1"
+wire_api = "responses"
+unknown_number = 42
+unknown_array = ["a", "b"]
+
+[sandbox_workspace_write]
+network_access = false
+
+[profiles.personal]
+model_provider = "provider-a"
+

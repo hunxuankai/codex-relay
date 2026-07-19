@@ -1,0 +1,14 @@
+model = "test-model"
+model_provider = "provider-a"
+
+[model_providers.provider-a]
+name = "Provider A"
+base_url = "https://provider-a.example.com/v1"
+wire_api = "responses"
+
+[model_providers.provider-b]
+name = "Provider B"
+base_url = "https://provider-b.example.com/v1"
+wire_api = "responses"
+model = "test-model-b"
+
