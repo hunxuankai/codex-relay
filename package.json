@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
+    "dev:safe": "powershell -ExecutionPolicy Bypass -File scripts/prepare-dev-data.ps1",
     "dev:frontend": "vite",
     "build": "tauri build",
     "build:frontend": "vite build",

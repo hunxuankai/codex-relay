@@ -16,10 +16,11 @@ use crate::services::provider_secret_service::{
     ProviderSecret, ProviderSecretService, ProviderSecretStore, normalize_api_key, serialize_store,
 };
 use crate::services::transaction_service::{
-    FileChange, FileChanges, TransactionRequest, TransactionService,
+    FileChange, FileChanges, FileOps, StdFileOps, TransactionRequest, TransactionService,
 };
 use std::fs;
 use std::io::ErrorKind;
+use std::sync::Arc;
 
 const CONSISTENT_READ_ATTEMPTS: usize = 3;
 
@@ -34,8 +35,17 @@ pub struct ProviderService {
 
 impl ProviderService {
     pub fn new(paths: AppPaths, app_version: impl Into<String>) -> Self {
+        Self::with_file_ops(paths, app_version, Arc::new(StdFileOps))
+    }
+
+    pub fn with_file_ops(
+        paths: AppPaths,
+        app_version: impl Into<String>,
+        file_ops: Arc<dyn FileOps>,
+    ) -> Self {
         let backup_service = BackupService::new(paths.backups_dir.clone(), app_version);
-        let transaction_service = TransactionService::new(paths.clone(), backup_service.clone());
+        let transaction_service =
+            TransactionService::with_file_ops(paths.clone(), backup_service.clone(), file_ops);
         Self {
             backup_service,
             secret_service: ProviderSecretService::new(paths.providers_file.clone()),
@@ -47,6 +57,10 @@ impl ProviderService {
 
     pub fn list_backups(&self) -> Result<Vec<BackupSummary>, AppError> {
         self.backup_service.list_backups()
+    }
+
+    pub fn paths(&self) -> &AppPaths {
+        &self.paths
     }
 
     pub async fn restore_backup(
