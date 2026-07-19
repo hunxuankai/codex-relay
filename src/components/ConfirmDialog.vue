@@ -105,15 +105,16 @@ onBeforeUnmount(() => document.removeEventListener('keydown', handleKeydown))
   display: grid;
   place-items: center;
   padding: 1rem;
-  background: rgb(16 24 40 / 55%);
+  background: var(--overlay);
 }
 
 .confirm-dialog {
   width: min(28rem, 100%);
   border-radius: 1rem;
   padding: 1.25rem;
-  background: #fff;
-  box-shadow: 0 1.5rem 4rem rgb(16 24 40 / 28%);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  box-shadow: var(--shadow);
 }
 
 .dialog-title,
@@ -128,7 +129,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', handleKeydown))
 }
 
 .danger-button {
-  color: #fff;
-  background: #b42318;
+  color: var(--on-danger);
+  background: var(--danger-button-background);
 }
 </style>

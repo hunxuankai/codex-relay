@@ -139,14 +139,14 @@ function save() {
 }
 
 .eyebrow {
-  color: #356ae6;
+  color: var(--accent);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .settings-section {
-  border: 1px solid #d0d5dd;
+  border: 1px solid var(--border);
   border-radius: 0.8rem;
   padding: 1rem;
 }
@@ -157,11 +157,11 @@ function save() {
 }
 
 .setting-row small {
-  color: #667085;
+  color: var(--text-secondary);
 }
 
 .warning {
-  color: #9a6700;
+  color: var(--warning);
 }
 
 .settings-actions {

@@ -228,8 +228,8 @@ async function importCurrentKey() {
 }
 
 .providers-column {
-  border-right: 1px solid #e4e7ec;
-  background: #f8fafc;
+  border-right: 1px solid var(--border);
+  background: var(--surface-muted);
 }
 
 .provider-detail {
@@ -241,7 +241,7 @@ async function importCurrentKey() {
 .detail-placeholder {
   align-self: center;
   max-width: 34rem;
-  color: #475467;
+  color: var(--text-secondary);
 }
 
 .selected-provider-detail,
@@ -268,12 +268,12 @@ async function importCurrentKey() {
   display: grid;
   grid-template-columns: 8rem minmax(0, 1fr);
   gap: 1rem;
-  border-bottom: 1px solid #e4e7ec;
+  border-bottom: 1px solid var(--border);
   padding-bottom: 0.75rem;
 }
 
 .selected-provider-fields dt {
-  color: #667085;
+  color: var(--text-secondary);
 }
 
 .selected-provider-fields dd {
@@ -286,10 +286,10 @@ async function importCurrentKey() {
 }
 
 .import-key-callout {
-  border: 1px solid #f3c969;
+  border: 1px solid var(--warning-border);
   border-radius: 0.8rem;
   padding: 0.8rem;
-  background: #fffaeb;
+  background: var(--warning-soft);
 }
 
 .import-key-callout p {
@@ -298,7 +298,7 @@ async function importCurrentKey() {
 
 .eyebrow {
   margin: 0;
-  color: #356ae6;
+  color: var(--accent);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -311,7 +311,7 @@ async function importCurrentKey() {
 
   .providers-column {
     border-right: 0;
-    border-bottom: 1px solid #e4e7ec;
+    border-bottom: 1px solid var(--border);
   }
 }
 </style>

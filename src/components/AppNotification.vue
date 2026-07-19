@@ -26,12 +26,12 @@ defineProps<{
 }
 
 .notification-success {
-  color: #087443;
-  background: #ecfdf3;
+  color: var(--success);
+  background: var(--success-soft);
 }
 
 .notification-error {
-  color: #b42318;
-  background: #fef3f2;
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 </style>

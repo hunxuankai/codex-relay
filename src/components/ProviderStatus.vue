@@ -35,14 +35,14 @@ defineProps<{
 
 .status-current,
 .status-ready {
-  color: #16734a;
+  color: var(--success);
 }
 
 .status-warning {
-  color: #9a5b00;
+  color: var(--warning);
 }
 
 .status-error {
-  color: #b42318;
+  color: var(--danger);
 }
 </style>

@@ -103,7 +103,7 @@ async function confirmRestore() {
 }
 
 .eyebrow {
-  color: #356ae6;
+  color: var(--accent);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -116,7 +116,8 @@ async function confirmRestore() {
 }
 
 .backup-card {
-  border: 1px solid #d0d5dd;
+  border: 1px solid var(--border);
+  background: var(--surface);
   border-radius: 0.8rem;
   padding: 1rem;
 }

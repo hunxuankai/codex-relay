@@ -116,10 +116,11 @@ function importCurrentKey() {
 
 .onboarding-card {
   width: min(100%, 38rem);
-  border: 1px solid #d0d5dd;
+  border: 1px solid var(--border);
   border-radius: 1rem;
   padding: 1.5rem;
-  background: #fff;
+  background: var(--surface);
+  box-shadow: var(--shadow);
 }
 
 .onboarding-card h1,
@@ -129,7 +130,7 @@ function importCurrentKey() {
 }
 
 .eyebrow {
-  color: #356ae6;
+  color: var(--accent);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -138,9 +139,9 @@ function importCurrentKey() {
 .import-callout {
   display: grid;
   gap: 0.75rem;
-  border: 1px solid #f3c969;
+  border: 1px solid var(--warning-border);
   border-radius: 0.8rem;
   padding: 1rem;
-  background: #fffaeb;
+  background: var(--warning-soft);
 }
 </style>

@@ -87,7 +87,7 @@ const summaryLabel = computed(() => {
 }
 
 .eyebrow {
-  color: #356ae6;
+  color: var(--accent);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -95,25 +95,26 @@ const summaryLabel = computed(() => {
 
 .health-summary,
 .health-check {
-  border: 1px solid #d0d5dd;
+  border: 1px solid var(--border);
+  background: var(--surface);
   border-radius: 0.75rem;
   padding: 0.75rem;
 }
 
 .health-summary[data-level='normal'],
 .health-check[data-level='normal'] {
-  border-color: #75b798;
+  border-color: var(--success);
 }
 
 .health-summary[data-level='warning'],
 .health-check[data-level='warning'] {
-  border-color: #f3c969;
+  border-color: var(--warning-border);
 }
 
 .health-summary[data-level='error'],
 .health-check[data-level='error'],
 .health-error {
-  color: #b42318;
+  color: var(--danger);
 }
 
 .health-checks {

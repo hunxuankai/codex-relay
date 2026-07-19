@@ -128,7 +128,7 @@ const emit = defineEmits<{
 .eyebrow,
 .provider-id,
 .provider-details dt {
-  color: #667085;
+  color: var(--text-secondary);
   font-size: 0.75rem;
 }
 
@@ -143,14 +143,16 @@ const emit = defineEmits<{
 .provider-card {
   display: grid;
   gap: 0.75rem;
-  border: 1px solid #d0d5dd;
+  border: 1px solid var(--border);
+  background: var(--surface);
   border-radius: 0.8rem;
   padding: 0.9rem;
 }
 
 .provider-card.selected {
-  border-color: #356ae6;
-  box-shadow: 0 0 0 2px rgb(53 106 230 / 15%);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .provider-select {
@@ -185,7 +187,7 @@ const emit = defineEmits<{
 
 .validation-message {
   margin: 0;
-  color: #b42318;
+  color: var(--danger);
 }
 
 .provider-actions {
@@ -197,6 +199,6 @@ const emit = defineEmits<{
 }
 
 .empty-state {
-  color: #667085;
+  color: var(--text-secondary);
 }
 </style>

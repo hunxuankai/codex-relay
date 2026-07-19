@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, shallowRef } from 'vue'
+import backupsIcon from './assets/icons/backups.svg'
+import healthIcon from './assets/icons/health.svg'
+import providersIcon from './assets/icons/providers.svg'
+import settingsIcon from './assets/icons/settings.svg'
 import AppNotification from './components/AppNotification.vue'
 import HealthStatus from './components/HealthStatus.vue'
 import { useHealth } from './composables/useHealth'
@@ -165,10 +169,30 @@ onUnmounted(() => stopNotification?.())
         <h1>Provider 控制台</h1>
       </div>
       <nav class="app-nav" aria-label="主导航">
-        <button type="button" aria-label="打开 Providers" @click="selectView('providers')">Providers</button>
-        <button type="button" aria-label="打开自检" @click="selectView('health')">自检</button>
-        <button type="button" aria-label="打开备份与恢复" @click="selectView('backups')">备份</button>
-        <button type="button" aria-label="打开设置" @click="selectView('settings')">设置</button>
+        <button
+          type="button"
+          aria-label="打开 Providers"
+          :aria-current="activeView === 'providers' ? 'page' : undefined"
+          @click="selectView('providers')"
+        ><img :src="providersIcon" alt="" />Providers</button>
+        <button
+          type="button"
+          aria-label="打开自检"
+          :aria-current="activeView === 'health' ? 'page' : undefined"
+          @click="selectView('health')"
+        ><img :src="healthIcon" alt="" />自检</button>
+        <button
+          type="button"
+          aria-label="打开备份与恢复"
+          :aria-current="activeView === 'backups' ? 'page' : undefined"
+          @click="selectView('backups')"
+        ><img :src="backupsIcon" alt="" />备份</button>
+        <button
+          type="button"
+          aria-label="打开设置"
+          :aria-current="activeView === 'settings' ? 'page' : undefined"
+          @click="selectView('settings')"
+        ><img :src="settingsIcon" alt="" />设置</button>
       </nav>
     </header>
 
@@ -195,7 +219,7 @@ onUnmounted(() => stopNotification?.())
       <SettingsView v-else />
     </section>
 
-    <footer class="status-bar" aria-label="应用状态" aria-live="polite">
+    <footer class="status-bar" aria-label="应用状态" aria-live="polite" role="status">
       <span>配置目录：{{ healthState.report.value?.configDirectory ?? '正在检测' }}</span>
       <span>当前 Provider：{{ providerState.activeProvider.value?.name ?? '未设置' }}</span>
       <span>最近操作：{{ operationText }}</span>
@@ -232,8 +256,9 @@ onUnmounted(() => stopNotification?.())
 
 .app-header {
   justify-content: space-between;
-  border-bottom: 1px solid #d0d5dd;
+  border-bottom: 1px solid var(--border);
   padding: 1rem 1.25rem;
+  background: var(--surface);
 }
 
 .app-header h1,
@@ -242,7 +267,7 @@ onUnmounted(() => stopNotification?.())
 }
 
 .eyebrow {
-  color: #356ae6;
+  color: var(--accent);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -253,15 +278,33 @@ onUnmounted(() => stopNotification?.())
   overflow: auto;
 }
 
+.app-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.app-nav button[aria-current='page'] {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.app-nav img {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
 .health-view {
   padding: 1.25rem;
 }
 
 .status-bar {
   flex-wrap: wrap;
-  border-top: 1px solid #d0d5dd;
+  border-top: 1px solid var(--border);
   padding: 0.65rem 1rem;
   font-size: 0.82rem;
+  background: var(--surface);
 }
 
 .status-bar button {

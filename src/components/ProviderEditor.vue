@@ -276,7 +276,7 @@ async function submit() {
 }
 
 .eyebrow {
-  color: #667085;
+  color: var(--text-secondary);
   font-size: 0.78rem;
 }
 
@@ -292,7 +292,7 @@ async function submit() {
 
 .field-error,
 .current-warning {
-  color: #b42318;
+  color: var(--danger);
 }
 
 .field-error {

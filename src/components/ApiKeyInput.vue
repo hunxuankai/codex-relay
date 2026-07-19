@@ -94,17 +94,17 @@ function confirmClear() {
 
 .field-help {
   margin: 0;
-  color: #667085;
+  color: var(--text-secondary);
   font-size: 0.82rem;
 }
 
 .danger-link {
   width: fit-content;
-  color: #b42318;
+  color: var(--danger);
 }
 
 .clear-confirmation {
   flex-wrap: wrap;
-  color: #b42318;
+  color: var(--danger);
 }
 </style>
