@@ -8,8 +8,16 @@ import ProviderStatus from '../components/ProviderStatus.vue'
 import { useProviders } from '../composables/useProviders'
 import type { CreateProviderInput, UpdateProviderInput } from '../types/provider'
 
+const props = withDefaults(defineProps<{ startCreating?: boolean }>(), {
+  startCreating: false,
+})
+const emit = defineEmits<{
+  providerCreated: []
+  createCancelled: []
+}>()
+
 const providerState = useProviders()
-const editorMode = shallowRef<'create' | 'edit' | null>(null)
+const editorMode = shallowRef<'create' | 'edit' | null>(props.startCreating ? 'create' : null)
 const editingProviderId = shallowRef<string | null>(null)
 const deleteProviderId = shallowRef<string | null>(null)
 const confirmImportCurrentKey = shallowRef(false)
@@ -41,9 +49,19 @@ function closeEditor() {
   editingProviderId.value = null
 }
 
+function cancelEditor() {
+  const cancelledCreate = editorMode.value === 'create'
+  closeEditor()
+  if (cancelledCreate) emit('createCancelled')
+}
+
 async function submitEditor(input: CreateProviderInput | UpdateProviderInput) {
-  if ('apiKey' in input) await providerState.create(input)
-  else await providerState.update(input)
+  if ('apiKey' in input) {
+    const outcome = await providerState.create(input)
+    if (outcome) emit('providerCreated')
+  } else {
+    await providerState.update(input)
+  }
   if (!providerState.error.value) closeEditor()
 }
 
@@ -99,7 +117,7 @@ async function importCurrentKey() {
         :existing-ids="providerState.providers.value.map((provider) => provider.id)"
         :busy="providerState.busy.value"
         @submit="submitEditor"
-        @cancel="closeEditor"
+        @cancel="cancelEditor"
       />
       <article
         v-else-if="providerState.selectedProvider.value"

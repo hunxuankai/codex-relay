@@ -179,6 +179,15 @@ mod tests {
         assert_eq!(result.data.unwrap().level, HealthLevel::Normal);
     }
 
+    #[test]
+    fn exit_command_marks_the_explicit_exit_guard() {
+        let (_directory, state) = create_state();
+
+        settings_commands::request_exit_inner(&state);
+
+        assert!(state.tray_runtime.exit_requested());
+    }
+
     #[tokio::test]
     async fn backup_commands_list_transaction_backups_after_switch() {
         let (_directory, state) = create_state();

@@ -36,6 +36,7 @@ function controller() {
   const error = shallowRef<{ code: string; message: string } | null>(null)
   const create = vi.fn().mockImplementation(async () => {
     successMessage.value = 'Provider 已保存。'
+    return { providers: providers.value, message: successMessage.value }
   })
   const update = vi.fn().mockImplementation(async () => {
     successMessage.value = 'Provider 已更新。'
@@ -89,12 +90,35 @@ describe('ProvidersView', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(state.create).toHaveBeenCalledOnce()
+    expect(wrapper.emitted('providerCreated')).toHaveLength(1)
 
     await wrapper.get('[aria-label="编辑 Provider A"]').trigger('click')
     await wrapper.get('[name="provider-name"]').setValue('Provider A Updated')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(state.update).toHaveBeenCalledOnce()
+  })
+
+  it('opens the create editor when requested by onboarding', () => {
+    const state = controller()
+    mockUseProviders.mockReturnValue(state)
+
+    const wrapper = mount(ProvidersView, { props: { startCreating: true } })
+
+    expect(wrapper.find('[aria-label="新增 Provider"]').exists()).toBe(true)
+    expect(wrapper.find('[name="provider-id"]').exists()).toBe(true)
+  })
+
+  it('reports onboarding create cancellation without completing setup', async () => {
+    const state = controller()
+    mockUseProviders.mockReturnValue(state)
+    const wrapper = mount(ProvidersView, { props: { startCreating: true } })
+
+    const cancelButton = wrapper.findAll('button').find((button) => button.text() === '取消')
+    expect(cancelButton).toBeDefined()
+    await cancelButton?.trigger('click')
+
+    expect(wrapper.emitted('createCancelled')).toHaveLength(1)
   })
 
   it('requires delete confirmation before refreshing the list', async () => {

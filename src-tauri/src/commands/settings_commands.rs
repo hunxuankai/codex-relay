@@ -57,3 +57,18 @@ pub(crate) fn open_codex_directory_inner(state: &AppState) -> CommandResult<()> 
 pub fn open_codex_directory(state: tauri::State<'_, AppState>) -> CommandResult<()> {
     open_codex_directory_inner(&state)
 }
+
+pub(crate) fn request_exit_inner(state: &AppState) -> CommandResult<()> {
+    state.tray_runtime.request_exit();
+    CommandResult::success(())
+}
+
+#[tauri::command]
+pub fn exit_application(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<()> {
+    let result = request_exit_inner(&state);
+    app.exit(0);
+    result
+}

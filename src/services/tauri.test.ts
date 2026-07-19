@@ -15,6 +15,7 @@ import {
   RelayCommandError,
   createProvider,
   deleteProvider,
+  exitApplication,
   getProviderApiKey,
   getSettings,
   importCurrentAuthKey,
@@ -112,6 +113,7 @@ describe('Tauri service boundary', () => {
       .mockResolvedValueOnce(success(mutation))
       .mockResolvedValueOnce(success(health))
       .mockResolvedValueOnce(success(health))
+      .mockResolvedValueOnce(success(undefined))
 
     const createInput: CreateProviderInput = {
       id: 'provider-a',
@@ -149,6 +151,7 @@ describe('Tauri service boundary', () => {
     await restoreBackup('backup-1')
     await runCriticalSelfCheck()
     await runExtendedSelfCheck()
+    await exitApplication()
 
     expect(invokeMock.mock.calls).toEqual([
       ['list_providers'],
@@ -166,6 +169,7 @@ describe('Tauri service boundary', () => {
       ['restore_backup', { directoryName: 'backup-1' }],
       ['run_critical_self_check'],
       ['run_extended_self_check'],
+      ['exit_application'],
     ])
   })
 

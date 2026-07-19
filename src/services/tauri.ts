@@ -97,6 +97,10 @@ export function openCodexDirectory(): Promise<void> {
   return call('open_codex_directory')
 }
 
+export function exitApplication(): Promise<void> {
+  return call('exit_application')
+}
+
 export function listBackups(): Promise<BackupSummary[]> {
   return call('list_backups')
 }
