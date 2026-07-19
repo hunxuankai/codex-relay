@@ -8,6 +8,8 @@
     "dev:safe": "powershell -ExecutionPolicy Bypass -File scripts/prepare-dev-data.ps1",
     "dev:frontend": "vite",
     "build": "tauri build",
+    "build:release": "tauri build",
+    "bundle:nsis": "tauri build --bundles nsis",
     "build:frontend": "vite build",
     "build:debug": "tauri build --debug --no-bundle",
     "typecheck": "vue-tsc --noEmit -p tsconfig.app.json",

@@ -25,16 +25,29 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost https://ipc.localhost; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
     }
   },
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "category": "Utility",
+    "shortDescription": "Safely manage local Codex providers on Windows",
+    "longDescription": "Codex Relay manages Codex provider configuration, local API keys, backups, health checks, tray switching, and autostart for the current Windows user.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "displayLanguageSelector": false
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false,
+        "startMenuFolder": "Codex Relay",
+        "installerIcon": "icons/icon.ico"
       }
     }
   }

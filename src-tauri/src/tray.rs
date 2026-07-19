@@ -196,11 +196,34 @@ impl TauriFileWatchSink {
 
 impl FileWatchEventSink for TauriFileWatchSink {
     fn emit(&self, event: ConfigFilesChanged) -> Result<(), AppError> {
-        self.app
-            .emit(CONFIG_FILES_CHANGED_EVENT, event)
-            .map_err(|error| runtime_error("EVENT_EMIT_FAILED", "无法刷新主界面。", error))?;
-        refresh_tray_from_disk(&self.app)
+        dispatch_external_file_change(
+            event,
+            |event| {
+                self.app
+                    .emit(CONFIG_FILES_CHANGED_EVENT, event)
+                    .map_err(|error| runtime_error("EVENT_EMIT_FAILED", "无法刷新主界面。", error))
+            },
+            || refresh_tray_from_disk(&self.app),
+            || schedule_extended_self_check(&self.app),
+        )
     }
+}
+
+fn dispatch_external_file_change<Emit, Refresh, Schedule>(
+    event: ConfigFilesChanged,
+    emit_event: Emit,
+    refresh_providers: Refresh,
+    schedule_self_check: Schedule,
+) -> Result<(), AppError>
+where
+    Emit: FnOnce(ConfigFilesChanged) -> Result<(), AppError>,
+    Refresh: FnOnce() -> Result<(), AppError>,
+    Schedule: FnOnce(),
+{
+    emit_event(event)?;
+    let refresh_result = refresh_providers();
+    schedule_self_check();
+    refresh_result
 }
 
 pub fn create_initial_tray(app: &tauri::AppHandle) -> Result<(), AppError> {
@@ -373,6 +396,11 @@ pub fn run_startup_checks(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
     let critical = state.self_check_service.run_critical_checks();
     let _ = app.emit(SELF_CHECK_COMPLETED_EVENT, critical);
+    schedule_extended_self_check(app);
+}
+
+fn schedule_extended_self_check(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
     let service = state.self_check_service.clone();
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -817,5 +845,37 @@ mod tests {
         assert!(!runtime.exit_requested());
         runtime.request_exit();
         assert!(runtime.exit_requested());
+    }
+
+    #[test]
+    fn external_file_change_refreshes_ui_and_schedules_self_check() {
+        let actions = std::cell::RefCell::new(Vec::new());
+        let event = ConfigFilesChanged {
+            kinds: vec![crate::services::file_watch_service::WatchedFileKind::Config],
+            fingerprints: crate::infrastructure::file_fingerprint::FileSetFingerprint {
+                config: crate::infrastructure::file_fingerprint::FileFingerprint::missing(),
+                auth: crate::infrastructure::file_fingerprint::FileFingerprint::missing(),
+                providers: crate::infrastructure::file_fingerprint::FileFingerprint::missing(),
+            },
+        };
+
+        dispatch_external_file_change(
+            event,
+            |_| {
+                actions.borrow_mut().push("config-event");
+                Ok(())
+            },
+            || {
+                actions.borrow_mut().push("provider-refresh");
+                Ok(())
+            },
+            || actions.borrow_mut().push("self-check"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            actions.into_inner(),
+            vec!["config-event", "provider-refresh", "self-check"]
+        );
     }
 }
