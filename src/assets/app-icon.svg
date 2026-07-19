@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Codex Relay">
+  <rect width="512" height="512" rx="112" fill="#1769e0"/>
+  <path d="M128 174h208l-52-52 34-34 110 110-110 110-34-34 52-52H128z" fill="#fff"/>
+  <path d="M384 338H176l52 52-34 34L84 314l110-110 34 34-52 52h208z" fill="#b9d4ff"/>
+</svg>

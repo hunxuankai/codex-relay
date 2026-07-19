@@ -1,0 +1,38 @@
+[package]
+name = "codex-relay"
+version = "0.1.0"
+description = "Safely manage local Codex model providers"
+authors = ["Codex Relay contributors"]
+edition = "2024"
+
+[lib]
+name = "codex_relay_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.5", features = ["tray-icon"] }
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-notification = "2.3.3"
+tauri-plugin-single-instance = "2.4.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.150"
+toml_edit = "0.25.13"
+tokio = { version = "1.53.0", features = ["process", "rt-multi-thread", "sync", "time"] }
+url = "2.5.8"
+uuid = { version = "1.24.0", features = ["v4", "serde"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+sha2 = "0.11.0"
+notify = "8.2.0"
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+thiserror = "2.0.19"
+regex = "1.12.2"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+serial_test = "3.5.0"
+

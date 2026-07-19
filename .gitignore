@@ -1,0 +1,14 @@
+node_modules/
+dist/
+target/
+src-tauri/target/
+dev-data/*
+!dev-data/.gitkeep
+test-data/
+*.log
+.env
+.env.*
+providers.json
+auth.json
+src-tauri/gen/
+
