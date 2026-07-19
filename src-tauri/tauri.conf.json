@@ -3,7 +3,7 @@
   "productName": "Codex Relay",
   "mainBinaryName": "CodexRelay",
   "version": "0.1.0",
-  "identifier": "com.codexrelay.app",
+  "identifier": "com.codexrelay.desktop",
   "build": {
     "beforeDevCommand": "npm run dev:frontend",
     "devUrl": "http://localhost:1420",

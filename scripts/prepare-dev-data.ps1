@@ -27,7 +27,7 @@ wire_api = "responses"
 
 $auth = @'
 {
-  "OPENAI_API_KEY": "test-key-not-real"
+  "OPENAI_API_KEY": "test-key-provider-a-not-real"
 }
 '@
 
@@ -36,7 +36,7 @@ $providers = @'
   "version": 1,
   "providers": {
     "provider-a": {
-      "apiKey": "test-key-not-real"
+      "apiKey": "test-key-provider-a-not-real"
     },
     "provider-b": {
       "apiKey": "test-key-b-not-real"
