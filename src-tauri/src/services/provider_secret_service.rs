@@ -106,14 +106,7 @@ impl ProviderSecretService {
 
     pub fn set_api_key(&self, provider_id: &str, api_key: &str) -> Result<(), AppError> {
         let provider_id = validate_provider_id(provider_id)?;
-        let api_key = trim_accidental_newlines(api_key);
-        if api_key.is_empty() {
-            return Err(AppError::new(
-                "EMPTY_API_KEY",
-                "API Key 不能为空。",
-                "attempted to save an empty API key",
-            ));
-        }
+        let api_key = normalize_api_key(api_key)?;
 
         let mut store = self.load_or_create()?;
         store
@@ -201,10 +194,18 @@ fn parse_store(bytes: &[u8]) -> Result<ProviderSecretStore, AppError> {
     Ok(store)
 }
 
-fn trim_accidental_newlines(api_key: &str) -> String {
-    api_key
+pub fn normalize_api_key(api_key: &str) -> Result<String, AppError> {
+    let normalized = api_key
         .trim_matches(|character| matches!(character, '\r' | '\n'))
-        .to_owned()
+        .to_owned();
+    if normalized.is_empty() {
+        return Err(AppError::new(
+            "EMPTY_API_KEY",
+            "API Key 不能为空。",
+            "attempted to save an empty API key",
+        ));
+    }
+    Ok(normalized)
 }
 
 fn ensure_parent_exists(path: &Path) -> Result<(), AppError> {
