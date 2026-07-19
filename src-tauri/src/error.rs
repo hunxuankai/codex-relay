@@ -69,6 +69,10 @@ impl AppError {
         &self.public_message
     }
 
+    pub(crate) fn internal_detail(&self) -> &str {
+        &self.internal_detail
+    }
+
     pub fn to_command_error(&self) -> CommandError {
         CommandError {
             code: self.code.clone(),

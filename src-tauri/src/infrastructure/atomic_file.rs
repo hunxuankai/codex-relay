@@ -64,15 +64,13 @@ where
     }
 
     let original_existed = path.exists();
-    if original_existed {
-        if let Err(error) = fs::rename(path, &backup_path) {
-            remove_if_exists(&temporary_path);
-            return Err(AppError::new(
-                "TARGET_BACKUP_FAILED",
-                "无法准备配置文件替换。",
-                error.to_string(),
-            ));
-        }
+    if original_existed && let Err(error) = fs::rename(path, &backup_path) {
+        remove_if_exists(&temporary_path);
+        return Err(AppError::new(
+            "TARGET_BACKUP_FAILED",
+            "无法准备配置文件替换。",
+            error.to_string(),
+        ));
     }
 
     if let Err(error) = fs::rename(&temporary_path, path) {
