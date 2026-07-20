@@ -214,7 +214,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add .gitignore package.json package-lock.json index.html tsconfig*.json vite.config.ts vitest.setup.ts src src-tauri 项目提示词.txt
+git add .gitignore package.json package-lock.json index.html tsconfig*.json vite.config.ts vitest.setup.ts src src-tauri
 git commit -m "chore: initialize Tauri Vue application"
 ```
 
