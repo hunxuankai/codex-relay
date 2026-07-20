@@ -27,12 +27,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from common.active_task import resolve_active_task
 from common.paths import (
     DIR_TASKS,
     DIR_WORKFLOW,
     FILE_JOURNAL_PREFIX,
     get_repo_root,
-    get_current_task,
     get_developer,
     get_workspace_dir,
 )
@@ -65,6 +65,14 @@ DEFAULT_TESTING = "- 本次会话未记录验证结果。"
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+def _get_session_owned_task(repo_root: Path) -> str | None:
+    """Return only a non-stale task owned by this exact session."""
+    active = resolve_active_task(repo_root)
+    if active.source_type != "session" or active.stale:
+        return None
+    return active.task_path
+
 
 def get_latest_journal_info(dev_dir: Path) -> tuple[Path | None, int, int]:
     """Get latest journal file info.
@@ -382,8 +390,9 @@ def _auto_commit_workspace(repo_root: Path) -> None:
     """Stage Trellis-owned workspace + current-task paths and commit.
 
     Path scope is restricted to specific products: the current developer's
-    journal files + index.md, and ONLY the current task directory (resolved
-    via ``get_current_task``). We never `git add` the whole `.trellis/` tree
+    journal files + index.md, and ONLY the exact session's current task
+    directory. Session fallback is intentionally rejected at this write
+    boundary. We never `git add` the whole `.trellis/` tree
     or iterate over all active task dirs (#303: parallel-window dirty task
     dirs must not be bundled into the session auto-commit). If `.gitignore`
     blocks the specific paths we warn + skip — never retry with ``-f``.
@@ -402,7 +411,7 @@ def _auto_commit_workspace(repo_root: Path) -> None:
     commit_msg = get_session_commit_message(repo_root)
     # Resolve the current task so staging is scoped to its dir only. The ref
     # is ``.trellis/tasks/<name>`` (or under archive/) — pass the bare name.
-    current = get_current_task(repo_root)
+    current = _get_session_owned_task(repo_root)
     if current:
         task_name = Path(current).name
         paths = safe_trellis_paths_to_add(repo_root, task_name=task_name)
@@ -580,9 +589,10 @@ def main() -> int:
     elif args.stdin:
         extra_content = sys.stdin.read()
 
-    # Load active task once — shared by package and branch resolution
+    # Only exact session ownership may influence package/branch metadata.
+    # A fallback task can belong to another window after this session archives.
     repo_root = get_repo_root()
-    current = get_current_task(repo_root)
+    current = _get_session_owned_task(repo_root)
     task_data = load_task(repo_root / current) if current else None
 
     package = args.package

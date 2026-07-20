@@ -14,10 +14,11 @@
     "build:debug": "tauri build --debug --no-bundle",
     "typecheck": "vue-tsc --noEmit -p tsconfig.app.json",
     "test": "vitest run",
+    "test:trellis": "python -m unittest discover -s .trellis/scripts/tests -p \"test_*.py\"",
     "test:watch": "vitest",
     "check:frontend": "npm run typecheck && npm run test",
     "check:rust": "cargo fmt --check --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml",
-    "check": "npm run check:frontend && npm run check:rust"
+    "check": "npm run test:trellis && npm run check:frontend && npm run check:rust"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

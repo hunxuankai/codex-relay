@@ -137,10 +137,10 @@ _SUBAGENT_CONFIG_DIRS: tuple[str, ...] = (
 _CODEX_CONFIG_DIR = ".codex"
 
 _SEED_EXAMPLE = (
-    "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. "
-    "Put spec/research files only — no code paths. "
-    "Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. "
-    "Delete this line once real entries are added."
+    "请填写 {\"file\": \"<path>\", \"reason\": \"<why>\"}。"
+    "只填写规范/研究文件，不要填写代码路径。"
+    "运行 `python .trellis/scripts/get_context.py --mode packages` 查看可用规范。"
+    "添加真实条目后删除本行。"
 )
 
 
@@ -173,26 +173,26 @@ def _write_seed_jsonl(path: Path) -> None:
 def _default_prd_content(title: str, description: str | None = None) -> str:
     """Return the default PRD skeleton created with every task."""
     goal = (description or "").strip() or "TBD."
-    heading = title.strip() or "Untitled task"
+    heading = title.strip() or "未命名任务"
     return f"""# {heading}
 
-## Goal
+## 目标
 
 {goal}
 
-## Requirements
+## 需求
 
 - TBD
 
-## Acceptance Criteria
+## 验收标准
 
 - [ ] TBD
 
-## Notes
+## 说明
 
-- Keep `prd.md` focused on requirements, constraints, and acceptance criteria.
-- Lightweight tasks can remain PRD-only.
-- For complex tasks, add `design.md` for technical design and `implement.md` for execution planning before `task.py start`.
+- `prd.md` 只记录需求、约束和验收标准。
+- 轻量任务可以只保留 PRD。
+- 复杂任务在运行 `task.py start` 前还需添加记录技术设计的 `design.md`，以及记录实施计划的 `implement.md`。
 """
 
 
