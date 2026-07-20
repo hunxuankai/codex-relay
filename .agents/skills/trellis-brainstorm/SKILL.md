@@ -25,7 +25,7 @@ description: "在实施前引导协作式需求发现。创建任务目录、初
 
 ## 前置条件
 
-仅在用户已同意创建任务并准备进入 Trellis 规划后使用此 Skill。
+仅在 AI 已判断需要 Trellis 任务并准备进入规划后使用此 Skill。
 
 如果尚无任务，创建一个：
 
@@ -36,6 +36,8 @@ TASK_DIR=$(python ./.trellis/scripts/task.py create "<short task title>" --slug 
 从用户请求中提取简洁标题。slug 不要带日期前缀；`task.py create` 会自动添加 `MM-DD-` 目录前缀。
 
 `task.py create` 会创建默认 `prd.md`。提出后续问题前，先把当前理解更新到该文件。
+创建后简短告知用户即可，不要另行询问是否允许创建任务。自动创建任务不等于获得
+实施授权；开始实施前仍须确认用户已明确要求或批准实施。
 
 ## 规划流程
 

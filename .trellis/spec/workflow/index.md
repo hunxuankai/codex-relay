@@ -2,13 +2,14 @@
 
 ## 开发前检查
 
-- 创建、规划、实施、检查或完成非平凡任务：读取 [trellis-superpowers.md](trellis-superpowers.md)。
+- 判断是否需要任务，或创建、规划、实施、检查、完成 Trellis 任务：读取 [trellis-superpowers.md](trellis-superpowers.md)。
 - 恢复长任务、对话压缩或跨会话继续：读取 [context-recovery.md](context-recovery.md)。
 - 新增、迁移、删除或归档文档：读取 [documentation.md](documentation.md)。
 
 ## 质量检查
 
-- 是否只有一个 Trellis 任务拥有当前工作生命周期？
+- 是否已按规模、复杂度、风险和持久化需要正确判断任务需求？
+- 是否只有一个相关 Trellis 任务拥有当前工作生命周期，且没有混入无关工作？
 - `implement.md` 是否包含新鲜进度、决策、证据和下一步？
 - 是否只加载当前任务相关 spec，而非整个规范树？
 - 长期规则、任务过程和一次性验证结果是否放在正确位置？

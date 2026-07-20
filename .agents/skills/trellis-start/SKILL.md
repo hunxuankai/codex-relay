@@ -39,7 +39,9 @@ cat .trellis/spec/<package>/<layer>/index.md   # for each relevant layer
 索引文件会列出真正开始编码时需要读取的具体规范文档。
 
 ## 步骤 4：决定下一步
-步骤 1 已给出当前任务及其状态。检查任务目录：
+步骤 1 已给出当前任务及其状态。先比较当前请求与任务 `prd.md`、`relatedFiles`
+和已记录范围；只有范围相关时才继续使用活动任务。不相关时保持旧任务原状，并按
+“没有相关活动任务”的规则重新判断。检查任务目录：
 
 - **活动任务状态为 `planning` 且没有 `prd.md`** → 阶段 1.1。加载 `trellis-brainstorm` Skill。
 - **活动任务状态为 `planning` 且已有 `prd.md`** → 留在阶段 1。轻量任务可以只有 PRD；复杂任务需要 `design.md` 和 `implement.md`。运行 `task.py start` 前加载对应的阶段 1 步骤细则。
@@ -47,7 +49,7 @@ cat .trellis/spec/<package>/<layer>/index.md   # for each relevant layer
   ```bash
   python ./.trellis/scripts/get_context.py --mode phase --step 2.1 --platform codex
   ```
-- **没有活动任务** → 先分类。对于简单对话或小任务，只询问本轮是否创建 Trellis 任务。对于复杂工作，询问是否可以创建 Trellis 任务并进入规划。如果用户拒绝，本会话跳过 Trellis。
+- **没有相关活动任务** → 由 AI 根据规模、复杂度、风险和持久化需要自主决定是否创建 Trellis 任务。一次性答复、简单只读查询，以及范围清楚、低风险、局部且可在当前会话完成并验证的小改动可直接处理。跨模块或多阶段、需求或方案复杂、涉及安全/配置迁移/发布/卸载/数据保留、需要持久化规划或证据、可能跨会话，或用户明确要求时，直接创建任务并简短告知用户，无需另行征得创建许可。
 
 ---
 
