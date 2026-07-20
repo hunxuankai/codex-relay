@@ -1,78 +1,78 @@
-# Change Local Context Loading
+# 修改本地上下文加载
 
-Context loading determines when AI reads workflow, task, spec, research, workspace, and git status. Read this page when the user says "AI does not know the current task," "the agent did not read specs," or "there is too much/too little context."
+上下文加载决定 AI 何时读取工作流、任务、规范、研究、工作区和 Git 状态。当用户表示“AI 不知道当前任务”“Agent 没有读取规范”或“上下文太多/太少”时，阅读本页。
 
-## Read These Files First
+## 编辑前先读取这些文件
 
 1. `.trellis/workflow.md`
 2. `.trellis/scripts/get_context.py`
 3. `.trellis/scripts/common/session_context.py`
 4. `.trellis/scripts/common/task_context.py`
 5. `.trellis/scripts/common/active_task.py`
-6. Current platform hooks or agent files
-7. The current task's `implement.jsonl` / `check.jsonl`
+6. 当前平台的 hook 或 Agent 文件
+7. 当前任务的 `implement.jsonl` / `check.jsonl`
 
-## Context Sources
+## 上下文来源
 
-| Source | Purpose |
+| 来源 | 用途 |
 | --- | --- |
-| `.trellis/workflow.md` | Workflow and next-action hints. |
-| `.trellis/tasks/<task>/prd.md` | Current task requirements. |
-| `.trellis/tasks/<task>/design.md` | Complex task technical design. |
-| `.trellis/tasks/<task>/implement.md` | Complex task execution plan. |
-| `.trellis/tasks/<task>/implement.jsonl` | Spec/research to read before implementation. |
-| `.trellis/tasks/<task>/check.jsonl` | Spec/research to read during checking. |
-| `.trellis/spec/` | Project specs. |
-| `.trellis/workspace/` | Session records. |
-| git status | Current working tree changes. |
+| `.trellis/workflow.md` | 工作流和下一步操作提示。 |
+| `.trellis/tasks/<task>/prd.md` | 当前任务需求。 |
+| `.trellis/tasks/<task>/design.md` | 复杂任务的技术设计。 |
+| `.trellis/tasks/<task>/implement.md` | 复杂任务的实施计划。 |
+| `.trellis/tasks/<task>/implement.jsonl` | 实施前需要读取的规范/研究资料。 |
+| `.trellis/tasks/<task>/check.jsonl` | 检查时需要读取的规范/研究资料。 |
+| `.trellis/spec/` | 项目规范。 |
+| `.trellis/workspace/` | 会话记录。 |
+| Git 状态 | 当前工作树改动。 |
 
-## Common Needs And Edit Points
+## 常见需求与编辑位置
 
-| Need | Edit point |
+| 需求 | 编辑位置 |
 | --- | --- |
-| Inject more/less information in new sessions | `session_context.py` or the platform `session-start` hook. |
-| Change hints on each user input | `[workflow-state:STATUS]` block in `.trellis/workflow.md`. The `inject-workflow-state` hook is parser-only and reads the block verbatim. |
-| Agent did not read specs | Task JSONL, agent prelude, `inject-subagent-context` hook. |
-| Active task is lost | `active_task.py` and platform session identity propagation. |
-| Change JSONL validation rules | `task_context.py`. |
+| 在新会话中注入更多/更少信息 | `session_context.py` 或平台的 `session-start` hook。 |
+| 修改每次用户输入时的提示 | `.trellis/workflow.md` 中的 `[workflow-state:STATUS]` 块。`inject-workflow-state` hook 只负责解析，并按原文读取该块。 |
+| Agent 未读取规范 | 任务 JSONL、Agent 前置指令、`inject-subagent-context` hook。 |
+| 活动任务丢失 | `active_task.py` 与平台会话身份传播。 |
+| 修改 JSONL 验证规则 | `task_context.py`。 |
 
-## JSONL Rules
+## JSONL 规则
 
-`implement.jsonl` / `check.jsonl` are the key context loading interface:
+`implement.jsonl` / `check.jsonl` 是关键的上下文加载接口：
 
 ```jsonl
 {"file": ".trellis/spec/backend/index.md", "reason": "Backend conventions"}
 {"file": ".trellis/tasks/04-28-x/research/api.md", "reason": "API research"}
 ```
 
-Include only spec/research files. Do not put code files that will be modified into these manifests; agents read code files themselves during implementation.
+其中只应包含规范/研究文件。不要把即将修改的代码文件放入这些清单；Agent 会在实施期间自行读取代码文件。
 
-## Change Session Context
+## 修改会话上下文
 
-If the user wants every new session to see more project state, edit:
+如果用户希望每个新会话都能看到更多项目状态，请编辑：
 
 - `.trellis/scripts/common/session_context.py`
-- the corresponding platform `session-start` hook
+- 对应平台的 `session-start` hook
 
-Context cannot grow without bound. Prefer injecting indexes and paths so the AI can read detailed files on demand.
+上下文不能无限增长。优先注入索引和路径，让 AI 按需读取详细文件。
 
-## Change Sub-Agent Context
+## 修改子 Agent 上下文
 
-First determine which mode the platform uses:
+首先确定平台使用哪种模式：
 
-- hook push: edit the `inject-subagent-context` hook.
-- agent pull: edit the read steps in the corresponding `trellis-implement` / `trellis-check` agent file.
+- hook 推送：编辑 `inject-subagent-context` hook。
+- Agent 拉取：编辑对应 `trellis-implement` / `trellis-check` Agent 文件中的读取步骤。
 
-In both modes, make sure the agent ultimately reads:
+两种模式都必须确保 Agent 最终读取：
 
-1. active task
-2. the corresponding JSONL
-3. spec/research referenced by the JSONL
+1. 活动任务
+2. 对应的 JSONL
+3. JSONL 引用的规范/研究文件
 4. `prd.md`
-5. `design.md` if present
-6. `implement.md` if present
+5. 存在时读取 `design.md`
+6. 存在时读取 `implement.md`
 
-## Troubleshooting Order
+## 故障排查顺序
 
 ```bash
 python ./.trellis/scripts/task.py current --source
@@ -81,4 +81,4 @@ python ./.trellis/scripts/task.py validate <task>
 python ./.trellis/scripts/get_context.py --mode packages
 ```
 
-Confirm the task and JSONL are correct before editing hooks/agents.
+编辑 hook/Agent 前，先确认任务和 JSONL 正确。

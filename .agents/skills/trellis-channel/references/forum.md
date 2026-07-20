@@ -1,25 +1,23 @@
-# Forum Channels
+# Forum Channel
 
-Forum channels are durable, topic-style channels. They are created with
-`--type forum` at channel-creation time and are immutable after that. They are
-not normal chat streams: the default read path is
-**forum summary -> one thread timeline -> current context**.
+Forum channel 是持久的主题式 channel。创建 channel 时通过 `--type forum`
+指定，之后类型不可更改。它不是普通聊天流；默认读取路径是
+**forum 摘要 -> 单个 thread 时间线 -> 当前上下文**。
 
-## Forum vs Regular Channel
+## Forum 与普通 Channel
 
-A channel's type is set with `--type` on `channel create` and never changes:
+Channel 类型在 `channel create` 时通过 `--type` 设置，之后永不改变：
 
-- `chat` (default) — flat message timeline. `channel messages` always renders
-  the event stream. Forum-only flags such as `--thread` and `--action` are
-  rejected here.
-- `forum` — thread-oriented. `channel messages` without filters renders a
-  thread-board summary instead of raw events. The `post`, `forum`, `thread`,
-  and `thread rename` subcommands only apply to forum channels.
+- `chat`（默认）：扁平消息时间线。`channel messages` 始终呈现事件流；
+  `--thread` 和 `--action` 等 forum 专属参数在此类型中会被拒绝。
+- `forum`：以 thread 为中心。不带过滤条件的 `channel messages` 呈现
+  thread 看板摘要，而不是原始事件。`post`、`forum`、`thread` 和
+  `thread rename` 子命令只适用于 forum channel。
 
-Both types share the same scope model (`--scope project` is the default;
-`--scope global` puts the channel in the cross-project bucket).
+两种类型使用相同的作用域模型（默认为 `--scope project`；
+`--scope global` 将 channel 放入跨项目存储桶）。
 
-## Create A Forum Channel
+## 创建 Forum Channel
 
 ```bash
 trellis channel create design-feedback \
@@ -30,14 +28,13 @@ trellis channel create design-feedback \
   --by main
 ```
 
-Use `--scope project` for a board scoped to one repo, `--scope global` for a
-cross-project board.
+单仓库看板使用 `--scope project`，跨项目看板使用 `--scope global`。
 
-## Threads: Open, Comment, Status, Summary
+## Thread：打开、评论、状态与摘要
 
-Threads live inside a forum channel. Each thread is identified by a stable
-`--thread <key>` (lowercase kebab-case is conventional). The first action on
-a thread is `opened`; everything afterwards uses the same `--thread` key.
+Thread 位于 forum channel 内。每个 thread 由稳定的 `--thread <key>` 标识
+（约定使用小写 kebab-case）。Thread 的第一个操作是 `opened`；之后所有操作
+都使用同一个 `--thread` 键。
 
 ```bash
 trellis channel post design-feedback opened \
@@ -69,22 +66,20 @@ trellis channel post design-feedback summary \
   --summary "Adopted the option-B layout; ticket TRELLIS-123 owns the fix."
 ```
 
-Key distinctions:
+关键区别：
 
-- `--description` is the **durable** thread description (the answer to "what
-  is this thread about?"). It is set on `opened` and edited by re-running
-  `post` with `--description`.
-- `--text` / `--stdin` / `--text-file` is the **event body** — the comment or
-  payload attached to this specific timeline entry.
-- `--labels` and `--assignees` are CSV and **replace** the current value; they
-  do not append.
-- `--summary` is the rolling thread summary. Setting it on `status closed` is
-  the standard way to mark a thread resolved with context.
+- `--description` 是**持久的** thread 描述，用于回答“这个 thread 讨论什么？”
+  它在 `opened` 时设置，也可再次运行带 `--description` 的 `post` 来编辑。
+- `--text` / `--stdin` / `--text-file` 是**事件正文**，即附加到本条时间线
+  记录的评论或载荷。
+- `--labels` 和 `--assignees` 是 CSV，并会**替换**当前值，而不是追加。
+- `--summary` 是滚动更新的 thread 摘要。在 `status closed` 时设置摘要，
+  是带上下文标记 thread 已解决的标准方式。
 
-`--thread` is required for every action except `opened` (where it is also
-required in practice — there is no anonymous thread).
+除 `opened` 外，每个操作都要求 `--thread`（实际使用中，`opened` 也需要该参数，
+因为不存在匿名 thread）。
 
-## Read A Forum
+## 读取 Forum
 
 ```bash
 trellis channel messages design-feedback --scope global
@@ -93,21 +88,20 @@ trellis channel thread design-feedback login-empty-state --scope global
 trellis channel messages design-feedback --scope global --raw --thread login-empty-state
 ```
 
-If a peer says "I commented on the forum", run `channel forum` first to see
-which thread changed, then drill into that thread with `channel thread <name>
-<thread>`. Do not jump straight to ad-hoc `events.jsonl` parsing.
+如果协作者说“我在 forum 中添加了评论”，先运行 `channel forum` 查看哪个
+thread 发生变化，再用 `channel thread <name> <thread>` 深入查看。不要直接
+临时解析 `events.jsonl`。
 
-## Context
+## 上下文
 
-Context entries are durable background that should always be in scope when
-reading a channel or a thread. They are **not** timeline events; they are
-projected separately and replayed for every reader.
+上下文条目是读取 channel 或 thread 时应始终纳入范围的持久背景。它们**不是**
+时间线事件，而是单独投影并为每位读取者重放。
 
-Use the `context` subcommands. The legacy `--linked-context-file` /
-`--linked-context-raw` flags on `create` and `post` are deprecated aliases
-that fold into the canonical `--context-file` / `--context-raw`.
+使用 `context` 子命令。`create` 和 `post` 上旧的 `--linked-context-file` /
+`--linked-context-raw` 参数是已弃用别名，会合并到标准的 `--context-file` /
+`--context-raw`。
 
-### Add Context
+### 添加上下文
 
 ```bash
 # Channel-level context (whole forum)
@@ -122,24 +116,24 @@ trellis channel context add design-feedback \
   --file "$PWD/.trellis/tasks/05-13-login-redesign/design.md"
 ```
 
-- `--thread <key>` switches between channel-level and thread-level context.
-- `--file` paths **must be absolute**; relative paths are rejected.
-- `--raw` is plain text inline content.
-- Both flags are repeatable; at least one is required for `add` / `delete`.
-- `--as <agent>` records authorship; defaults to `main`.
+- `--thread <key>` 用于在 channel 级和 thread 级上下文之间切换。
+- `--file` 路径**必须是绝对路径**；相对路径会被拒绝。
+- `--raw` 是纯文本内联内容。
+- 两个参数都可重复；`add` / `delete` 至少需要其中一个。
+- `--as <agent>` 记录作者身份，默认为 `main`。
 
-### List Context
+### 列出上下文
 
 ```bash
 trellis channel context list design-feedback --scope global
 trellis channel context list design-feedback --scope global --thread login-empty-state --raw
 ```
 
-`--raw` on `list` emits one JSON entry per line (useful for piping); without
-it you get a human-readable `file <path>` / `raw <truncated text>` listing.
-An empty store prints `(no context)`.
+`list` 上的 `--raw` 每行输出一个 JSON 条目，便于管道处理；不使用该参数时，
+得到人类可读的 `file <path>` / `raw <truncated text>` 列表。存储为空时输出
+`(no context)`。
 
-### Delete Context
+### 删除上下文
 
 ```bash
 trellis channel context delete design-feedback \
@@ -148,24 +142,23 @@ trellis channel context delete design-feedback \
   --raw "stale note"
 ```
 
-You delete by **value**, not by id: pass the same `--file` or `--raw` value
-that was added. Repeat the flag to delete multiple entries in one call.
+删除依据是**值**而不是 ID：传入与添加时相同的 `--file` 或 `--raw` 值。
+重复使用参数可在一次调用中删除多个条目。
 
-### Reading Order
+### 读取顺序
 
-When reading a thread, work top-down:
+读取 thread 时按以下顺序自上而下处理：
 
-1. Thread `description` (the durable "what is this about").
-2. Context entries (channel-level + thread-level).
-3. Timeline (`opened`, `comment`, `status`, `summary`).
+1. Thread `description`（持久的“讨论主题是什么”）。
+2. 上下文条目（channel 级 + thread 级）。
+3. 时间线（`opened`、`comment`、`status`、`summary`）。
 
-If a context file is missing or unreadable, state that explicitly and
-continue with the remaining data — do not fabricate the content.
+如果上下文文件缺失或无法读取，请明确说明，并继续处理其余数据；不要捏造内容。
 
-## Title Projection
+## 标题投影
 
-`title` projects a stable display title onto the channel without renaming the
-storage address. The channel `name` you pass to every command stays the same.
+`title` 为 channel 投影稳定的显示标题，而不重命名存储地址。传给每个命令的
+channel `name` 保持不变。
 
 ```bash
 trellis channel title set design-feedback \
@@ -175,16 +168,14 @@ trellis channel title set design-feedback \
 trellis channel title clear design-feedback --scope global
 ```
 
-- `title set` requires `--title`.
-- `--as <agent>` records authorship; defaults to `main`.
-- This is a presentation-layer change. Tooling and scripts keep using the
-  original channel name.
+- `title set` 要求提供 `--title`。
+- `--as <agent>` 记录作者身份，默认为 `main`。
+- 这属于展示层变更。工具和脚本继续使用原始 channel 名称。
 
-## Thread Rename
+## 重命名 Thread
 
-`thread rename` is the correction path when a thread was opened with the
-wrong key (typo, wrong slug convention, etc.). Threads do not support hard
-deletion — rename is the supported corrective action.
+如果创建 thread 时使用了错误的键（拼写错误、slug 约定错误等），
+`thread rename` 是修正路径。Thread 不支持硬删除，重命名是受支持的纠正操作。
 
 ```bash
 trellis channel thread rename design-feedback old-key new-key \
@@ -192,24 +183,23 @@ trellis channel thread rename design-feedback old-key new-key \
   --as main
 ```
 
-- `--as <agent>` is **required**.
-- `post <name> rename` is rejected — you must use `thread rename`.
+- **必须**提供 `--as <agent>`。
+- `post <name> rename` 会被拒绝；必须使用 `thread rename`。
 
-## Deletion Discipline
+## 删除约束
 
-Do not model single-comment deletion or hard thread deletion as normal
-workflow. Forum threads are append-only collaboration history. To correct
-state, use:
+不要把删除单条评论或硬删除 thread 设计成正常工作流。Forum thread 是只追加的
+协作历史。需要纠正状态时，请使用：
 
-- `post ... status` to mark a thread closed / blocked / etc.
-- `post ... summary` to record the resolution.
-- `post ... --labels` to re-label (replaces the set).
-- `thread rename` to correct a bad thread key.
+- `post ... status` 将 thread 标记为 closed、blocked 等状态。
+- `post ... summary` 记录解决结果。
+- `post ... --labels` 重新设置标签（替换整个集合）。
+- `thread rename` 修正错误的 thread 键。
 
-## Internal Changelog Pattern
+## 内部变更日志模式
 
-A common use of a global forum channel is an internal release / runtime
-changelog. One thread per notable change keeps history searchable:
+全局 forum channel 的常见用途是内部发布/运行时变更日志。每项重要变更使用
+一个 thread，可以让历史保持可搜索：
 
 ```bash
 trellis channel create release-notes \
@@ -229,5 +219,5 @@ trellis channel post release-notes opened \
   --text-file /tmp/release-notes.md
 ```
 
-Use stable, descriptive thread keys (e.g. `release-2026-q1`,
-`runtime-event-schema-change`) so later readers can find them by name.
+使用稳定且有描述性的 thread 键（例如 `release-2026-q1`、
+`runtime-event-schema-change`），方便后续读取者按名称查找。

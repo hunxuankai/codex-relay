@@ -1,8 +1,8 @@
-# Local Files Generated After Init
+# Init 后生成的本地文件
 
-`trellis init` writes the Trellis runtime into the user project. Later, `trellis update` tries to update Trellis-managed template files, but it uses `.trellis/.template-hashes.json` to determine which files have already been modified by the user.
+`trellis init` 把 Trellis 运行时写入用户项目。之后，`trellis update` 会尝试更新 Trellis 管理的模板文件，但会使用 `.trellis/.template-hashes.json` 判断哪些文件已被用户修改。
 
-This page only describes files that are visible and editable inside the user project.
+本文只描述用户项目内可见且可编辑的文件。
 
 ## `.trellis/`
 
@@ -20,61 +20,61 @@ This page only describes files that are visible and editable inside the user pro
 └── workspace/
 ```
 
-| Path | Usually editable? | Notes |
+| 路径 | 通常可编辑？ | 说明 |
 | --- | --- | --- |
-| `.trellis/workflow.md` | Yes | Local workflow documentation and AI routing rules. |
-| `.trellis/config.yaml` | Yes | Project configuration, hooks, packages, journal line limits, and related settings. |
-| `.trellis/spec/` | Yes | Project specs, intended to be updated regularly by users and AI. |
-| `.trellis/tasks/` | Yes | Task material and research artifacts, maintained by the task workflow. |
-| `.trellis/workspace/` | Yes | Session records, usually written by `add_session.py`. |
-| `.trellis/scripts/` | Carefully | Local runtime. It can be customized, but only after understanding the call chain. |
-| `.trellis/.runtime/` | No | Runtime state, usually written automatically by hooks/scripts. |
-| `.trellis/.developer` | Carefully | Current developer identity. |
-| `.trellis/.version` | No | Trellis version record used by update/migration logic. |
-| `.trellis/.template-hashes.json` | No | Template hash record. Do not hand-write business rules here. |
+| `.trellis/workflow.md` | 是 | 本地工作流文档和 AI 路由规则。 |
+| `.trellis/config.yaml` | 是 | 项目配置、钩子、包、日志行数限制和相关设置。 |
+| `.trellis/spec/` | 是 | 项目规范，预期由用户和 AI 定期更新。 |
+| `.trellis/tasks/` | 是 | 任务材料和研究产物，由任务工作流维护。 |
+| `.trellis/workspace/` | 是 | 会话记录，通常由 `add_session.py` 写入。 |
+| `.trellis/scripts/` | 谨慎编辑 | 本地运行时。可以定制，但必须先理解调用链。 |
+| `.trellis/.runtime/` | 否 | 运行时状态，通常由钩子/脚本自动写入。 |
+| `.trellis/.developer` | 谨慎编辑 | 当前开发者身份。 |
+| `.trellis/.version` | 否 | update/迁移逻辑使用的 Trellis 版本记录。 |
+| `.trellis/.template-hashes.json` | 否 | 模板哈希记录。不要在这里手写业务规则。 |
 
-## Platform Directories
+## 平台目录
 
-Different platforms generate different directories. Common categories:
+不同平台生成不同目录。常见类别：
 
-| Category | Example paths | Purpose |
+| 类别 | 示例路径 | 用途 |
 | --- | --- | --- |
-| hooks | `.claude/hooks/`, `.codex/hooks/`, `.cursor/hooks/` | Inject session context, workflow-state, and sub-agent context. |
-| settings | `.claude/settings.json`, `.codex/hooks.json`, `.qoder/settings.json`, `.trae/hooks.json` | Tell the platform when to run hooks or plugins. |
-| agents | `.claude/agents/`, `.codex/agents/`, `.kiro/agents/`, `.zcode/agents/` | Define agents such as `trellis-research`, `trellis-implement`, and `trellis-check`. |
-| skills | `.claude/skills/`, `.agents/skills/`, `.qoder/skills/`, `.zcode/skills/` | Skills that auto-trigger or can be read by AI. |
-| commands/prompts/workflows | `.cursor/commands/`, `.github/prompts/`, `.devin/workflows/`, `.zcode/commands/` | Explicit user-invoked command or workflow entry points. |
+| 钩子 | `.claude/hooks/`、`.codex/hooks/`、`.cursor/hooks/` | 注入会话上下文、workflow-state 和子代理上下文。 |
+| 设置 | `.claude/settings.json`、`.codex/hooks.json`、`.qoder/settings.json`、`.trae/hooks.json` | 告诉平台何时运行钩子或插件。 |
+| 代理 | `.claude/agents/`、`.codex/agents/`、`.kiro/agents/`、`.zcode/agents/` | 定义 `trellis-research`、`trellis-implement`、`trellis-check` 等代理。 |
+| Skill | `.claude/skills/`、`.agents/skills/`、`.qoder/skills/`、`.zcode/skills/` | 可自动触发或由 AI 读取的 Skill。 |
+| 命令/提示词/工作流 | `.cursor/commands/`、`.github/prompts/`、`.devin/workflows/`、`.zcode/commands/` | 用户显式调用的命令或工作流入口。 |
 
-When modifying a platform directory, also confirm whether `.trellis/workflow.md` still describes the same flow.
+修改平台目录时，还要确认 `.trellis/workflow.md` 是否仍描述相同流程。
 
-## Meaning Of Template Hashes
+## 模板哈希的含义
 
-`.trellis/.template-hashes.json` records the content hash from the last time Trellis wrote a template file. `trellis update` uses it to distinguish three cases:
+`.trellis/.template-hashes.json` 记录 Trellis 上次写入模板文件时的内容哈希。`trellis update` 用它区分三种情况：
 
-| Case | Update behavior |
+| 情况 | 更新行为 |
 | --- | --- |
-| File was not modified by the user | It can be updated automatically. |
-| File was modified by the user | Prompt the user to overwrite, keep, or generate `.new`. |
-| File is no longer a current template | It may be deleted, renamed, or preserved according to migration rules. |
+| 文件未被用户修改 | 可以自动更新。 |
+| 文件已被用户修改 | 提示用户覆盖、保留或生成 `.new`。 |
+| 文件不再是当前模板 | 根据迁移规则删除、重命名或保留。 |
 
-When an AI customizes local Trellis files, it does not need to maintain hashes manually. It is normal for Trellis update to recognize the result as "modified by the user."
+AI 定制本地 Trellis 文件时，不需要手动维护哈希。Trellis update 把结果识别为“用户已修改”是正常行为。
 
-## Local Customization Boundaries
+## 本地定制边界
 
-Editable by default:
+默认可编辑：
 
 - `.trellis/workflow.md`
 - `.trellis/config.yaml`
 - `.trellis/spec/**`
 - `.trellis/scripts/**`
-- Platform hooks, settings, agents, skills, commands, prompts, and workflows
+- 平台钩子、设置、代理、Skill、命令、提示词和工作流
 
-Do not edit by default:
+默认不要编辑：
 
-- Global npm install directory
+- 全局 npm 安装目录
 - `node_modules/@mindfoldhq/trellis`
-- Trellis GitHub repository source code
-- Concrete state files under `.trellis/.runtime/**`
-- Hash contents inside `.trellis/.template-hashes.json`
+- Trellis GitHub 仓库源码
+- `.trellis/.runtime/**` 下的具体状态文件
+- `.trellis/.template-hashes.json` 中的哈希内容
 
-Switch to the Trellis CLI source-code perspective only when the user explicitly wants to contribute upstream.
+只有用户明确希望贡献上游时，才切换到 Trellis CLI 源码视角。

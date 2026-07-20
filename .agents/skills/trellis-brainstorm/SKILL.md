@@ -1,173 +1,173 @@
 ---
 name: trellis-brainstorm
-description: "Guides collaborative requirements discovery before implementation. Creates task directory, seeds PRD, asks high-value questions one at a time, researches technical choices, and converges on MVP scope. Use when requirements are unclear, there are multiple valid approaches, or the user describes a new feature or complex task."
+description: "在实施前引导协作式需求发现。创建任务目录、初始化 PRD、逐个提出高价值问题、研究技术选择，并收敛 MVP 范围。需求不清晰、存在多种有效方案，或用户描述新功能/复杂任务时使用。"
 ---
 
-# Trellis Brainstorm
+# Trellis 需求探索
 
-## Non-Negotiable Interview Contract
+## 不可协商的访谈契约
 
-Interview me relentlessly about every aspect of this plan until we reach a shared understanding. Walk down each branch of the design tree, resolving dependencies between decisions one-by-one. For each question, provide your recommended answer.
+持续追问本计划的每个方面，直到我们形成共同理解。沿设计树的每条分支逐步深入，逐一解决决策之间的依赖。每个问题都要提供推荐答案。
 
-Ask the questions one at a time.
+每次只问一个问题。
 
-## Non-Negotiable Evidence Rule
+## 不可协商的证据规则
 
-If a question can be answered by exploring the codebase, explore the codebase instead.
+如果问题可以通过探索代码库回答，就直接探索代码库。
 
-This is mandatory. Before asking the user a question, first check whether the answer is already available in code, tests, configs, docs, existing specs, or task history.
+这是强制要求。向用户提问前，先检查答案是否已存在于代码、测试、配置、文档、现有规范或任务历史中。
 
-Do not ask the user to confirm facts that the repository can answer. Ask only for product intent, preference, scope, risk tolerance, or decisions that remain ambiguous after inspection.
+不要让用户确认仓库能够回答的事实。只询问产品意图、偏好、范围、风险承受度，或检查后仍然模糊的决定。
 
 ---
 
-Use this skill during Phase 1 planning to turn the user's request into clear requirements and planning artifacts.
+在阶段 1 规划期间使用此 Skill，把用户请求转化为清晰需求和规划材料。
 
-## Preconditions
+## 前置条件
 
-Use this skill only after task-creation consent has been given and the user is ready to enter Trellis planning.
+仅在用户已同意创建任务并准备进入 Trellis 规划后使用此 Skill。
 
-If no task exists yet, create one:
+如果尚无任务，创建一个：
 
 ```bash
 TASK_DIR=$(python ./.trellis/scripts/task.py create "<short task title>" --slug <slug>)
 ```
 
-Use a concise title from the user's request. Use a slug without a date prefix. `task.py create` adds the `MM-DD-` directory prefix automatically.
+从用户请求中提取简洁标题。slug 不要带日期前缀；`task.py create` 会自动添加 `MM-DD-` 目录前缀。
 
-`task.py create` creates the default `prd.md`. Update that file with the current understanding before asking follow-up questions.
+`task.py create` 会创建默认 `prd.md`。提出后续问题前，先把当前理解更新到该文件。
 
-## Planning Flow
+## 规划流程
 
-1. Capture the user's request and initial known facts in `prd.md`.
-2. Inspect available evidence before asking questions:
-   - code, tests, fixtures, and configs
-   - README files, docs, existing specs, and domain notes
-   - related Trellis tasks, research files, and session history when present
-3. Separate what you found into:
-   - confirmed facts
-   - product intent still needed from the user
-   - scope or risk decisions still needed from the user
-   - likely out-of-scope items
-4. Ask the single highest-value remaining question.
-5. Include your recommended answer with the question.
-6. After each user answer, update `prd.md` before continuing.
-7. For complex tasks, create or update `design.md` and `implement.md` before implementation starts.
-8. Before final review or `task.py start`, run the PRD convergence pass below.
+1. 在 `prd.md` 中记录用户请求和最初已知事实。
+2. 提问前检查可用证据：
+   - 代码、测试、fixture 和配置
+   - README、文档、现有规范和领域注记
+   - 相关 Trellis 任务、研究文件和已有会话历史
+3. 把发现内容区分为：
+   - 已确认事实
+   - 仍需用户提供的产品意图
+   - 仍需用户决定的范围或风险事项
+   - 可能不在范围内的事项
+4. 提出剩余问题中价值最高的一个。
+5. 随问题提供推荐答案。
+6. 用户每次回答后，先更新 `prd.md`，再继续。
+7. 对复杂任务，在实施开始前创建或更新 `design.md` 和 `implement.md`。
+8. 最终审查或运行 `task.py start` 前，执行下方 PRD 收敛检查。
 
-Do not invent a project-specific product/spec hierarchy. If the repository already has product, domain, or spec docs, use them. If it does not, proceed with the evidence that exists.
+不要虚构项目专属的产品/规范层级。如果仓库已有产品、领域或规范文档，就使用它们；否则依据现有证据继续。
 
-## Question Rules
+## 提问规则
 
-Ask only one question per message.
+每条消息只问一个问题。
 
-Each question must include:
+每个问题必须包含：
 
-- the decision needed
-- why the answer matters
-- your recommended answer
-- the trade-off if the user chooses differently
+- 需要作出的决定
+- 答案为何重要
+- 推荐答案
+- 用户选择其他答案时的权衡
 
-Do not ask process questions such as whether to search, inspect files, or continue brainstorming. Do the evidence work directly. Ask the user only when the remaining issue is a product decision, preference, scope boundary, or risk tolerance choice.
+不要询问是否搜索、检查文件或继续需求探索等流程问题。直接完成证据工作。只有剩余事项属于产品决定、偏好、范围边界或风险承受度选择时才询问用户。
 
-## Thinking Framework: First Principles Analysis
+## 思考框架：第一性原理分析
 
-When requirements are vague, solutions feel over-engineered, or you're about to add complexity "because everyone does" — decompose to fundamental truths before reasoning upward.
+当需求模糊、方案显得过度设计，或即将因为“大家都这样做”而增加复杂度时，先拆解到基本事实，再向上推理。
 
-### Step 1: Restate the Problem
+### 步骤 1：重述问题
 
-Strip away implementation details to one sentence.
+剥离实现细节，用一句话描述问题。
 
-> Bad: "We need to add Redis caching to the user profile endpoint"
-> Good: "User profile data takes too long to load"
+> 不佳：“我们需要为用户资料端点添加 Redis 缓存”
+> 良好：“用户资料数据加载时间过长”
 
-### Step 2: List Fundamental Truths
+### 步骤 2：列出基本事实
 
-What is absolutely true (not opinion or convention)?
+哪些是绝对成立的事实（而非意见或惯例）？
 
-| Category | Examples |
+| 类别 | 示例 |
 |----------|----------|
-| **Physical constraints** | Network latency ≥ 0, disk I/O has limits |
-| **Business rules** | "Users must see their own data" |
-| **Technical invariants** | "Data must be consistent" |
-| **User needs** | "The user wants X within Y seconds" |
+| **物理约束** | 网络延迟 ≥ 0，磁盘 I/O 有上限 |
+| **业务规则** | “用户必须看到自己的数据” |
+| **技术不变量** | “数据必须保持一致” |
+| **用户需求** | “用户希望在 Y 秒内得到 X” |
 
-### Step 3: Challenge Assumptions
+### 步骤 3：质疑假设
 
-For each component of the current plan:
+针对当前计划的每个组成部分：
 
-- **Fact or convention?** "We always use REST" — why?
-- **What if we removed this?** If nothing breaks, it's unnecessary.
-- **Solving the actual problem or a symptom?** Trace the causal chain.
-- **Who benefits from this complexity?** If "nobody", simplify.
+- **事实还是惯例？**“我们一直使用 REST”——为什么？
+- **移除它会怎样？** 如果没有任何内容被破坏，它就是不必要的。
+- **解决真实问题还是症状？** 追踪因果链。
+- **谁从这种复杂度中获益？** 如果“没人”，就简化。
 
-### Step 4: Build Up from Truths
+### 步骤 4：从事实向上构建
 
-1. Start with the minimum viable mechanism satisfying all truths
-2. Add complexity only when a specific truth demands it
-3. Each addition must answer: "Which truth requires this?"
+1. 从满足所有事实的最小可行机制开始
+2. 只有特定事实要求时才增加复杂度
+3. 每项新增内容都必须回答：“哪个事实要求这样做？”
 
-### Step 5: Validate
+### 步骤 5：验证
 
-- Does the solution solve the original problem?
-- What assumptions need verification?
-- What's the simplest experiment to test this?
+- 方案是否解决了原始问题？
+- 哪些假设需要验证？
+- 验证它的最简单实验是什么？
 
-## Artifact Rules
+## 材料规则
 
-`prd.md` records requirements and acceptance:
+`prd.md` 记录需求和验收：
 
-- goal and user value
-- confirmed facts
-- requirements
-- acceptance criteria
-- out of scope
-- open questions that still block planning
+- 目标和用户价值
+- 已确认事实
+- 需求
+- 验收标准
+- 范围外事项
+- 仍阻塞规划的开放问题
 
-`design.md` records technical design for complex tasks:
+`design.md` 记录复杂任务的技术设计：
 
-- architecture and boundaries
-- data flow and contracts
-- compatibility and migration notes
-- important trade-offs
-- operational or rollback considerations
+- 架构和边界
+- 数据流和契约
+- 兼容性与迁移说明
+- 重要权衡
+- 运维或回滚考虑
 
-`implement.md` records execution planning for complex tasks:
+`implement.md` 记录复杂任务的执行规划：
 
-- ordered implementation checklist
-- validation commands
-- risky files or rollback points
-- follow-up checks before `task.py start`
+- 有序实施清单
+- 验证命令
+- 风险文件或回滚点
+- `task.py start` 前的后续检查
 
-Lightweight tasks may have only `prd.md`. Complex tasks must have `prd.md`, `design.md`, and `implement.md` before `task.py start`.
+轻量任务可以只有 `prd.md`。复杂任务在运行 `task.py start` 前必须具有 `prd.md`、`design.md` 和 `implement.md`。
 
-`implement.md` is not a replacement for `implement.jsonl`. On sub-agent-dispatch workflows, `implement.jsonl` and `check.jsonl` must each contain at least one real spec/research entry before `task.py start`; the seed `_example` row does not count. Inline workflows skip this JSONL gate because Phase 2 loads context through `trellis-before-dev`.
+`implement.md` 不能替代 `implement.jsonl`。在子代理派发工作流中，运行 `task.py start` 前，`implement.jsonl` 和 `check.jsonl` 都必须至少包含一条真实规范/研究记录；种子 `_example` 行不计数。inline 工作流跳过此 JSONL 门禁，因为阶段 2 通过 `trellis-before-dev` 加载上下文。
 
-## PRD Convergence Pass
+## PRD 收敛检查
 
-Before declaring planning ready or running `task.py start`, rewrite `prd.md` once against the final structure described in the artifact rules above. This is not optional cleanup; it is the final planning gate.
+宣布规划就绪或运行 `task.py start` 前，按照上述材料规则的最终结构重写一次 `prd.md`。这不是可选清理，而是最终规划门禁。
 
-The pass must be lossless:
+该检查必须无损：
 
-- Collapse repeated facts into one authoritative section.
-- Fold temporary brainstorm sections such as `What I already know`, `Assumptions`, and resolved `Open Questions` into Goal, Background, Requirements, Technical Notes, or Acceptance Criteria.
-- Remove resolved open questions instead of leaving empty or already-answered sections.
-- Merge parallel bug and requirement lists when they describe the same work; keep each defect's severity, evidence, and file:line anchors on the owning requirement.
-- Preserve every file:line anchor, decision, constraint, requirement ID, and acceptance-criteria mapping.
-- Keep only genuinely blocking open questions.
+- 把重复事实合并到一个权威章节。
+- 把 `What I already know`、`Assumptions` 和已解决的 `Open Questions` 等临时需求探索章节归入目标、背景、需求、技术注记或验收标准。
+- 删除已解决的开放问题，不要遗留空章节或已有答案的章节。
+- 如果并行的缺陷清单和需求清单描述同一工作，则将其合并；每个缺陷的严重程度、证据和 `file:line` 锚点保留在所属需求上。
+- 保留每个 `file:line` 锚点、决定、约束、需求 ID 和验收标准映射。
+- 只保留真正阻塞规划的开放问题。
 
-After the pass, read `prd.md` top to bottom and verify that no fact is repeated across sections unless the repetition adds new information.
+检查完成后，从头到尾读取 `prd.md`，确认事实不会跨章节重复，除非重复内容提供了新信息。
 
-## Quality Bar
+## 质量标准
 
-Before declaring planning ready:
+宣布规划就绪前：
 
-- `prd.md` contains testable acceptance criteria.
-- `prd.md` has passed the PRD convergence pass: no unresolved temporary brainstorm sections, no duplicate facts across sections, and no lost anchors, decisions, or acceptance mappings.
-- Repository-answerable questions have already been answered through inspection.
-- Remaining open questions are genuinely about user intent or scope.
-- Complex tasks have `design.md` and `implement.md`.
-- Sub-agent-dispatch tasks have real curated entries in both `implement.jsonl` and `check.jsonl`; seed-only manifests are not ready.
-- The user has reviewed the final planning artifacts or explicitly approved proceeding.
+- `prd.md` 包含可测试的验收标准。
+- `prd.md` 已通过 PRD 收敛检查：没有未解决的临时需求探索章节、没有跨章节重复事实，也没有丢失锚点、决定或验收映射。
+- 仓库能够回答的问题已经通过检查得到答案。
+- 剩余开放问题确实属于用户意图或范围。
+- 复杂任务具有 `design.md` 和 `implement.md`。
+- 子代理派发任务的 `implement.jsonl` 和 `check.jsonl` 都包含真实整理记录；只有种子记录的清单尚未就绪。
+- 用户已审查最终规划材料或明确批准继续。
 
-Do not start implementation until the user approves or asks for implementation.
+在用户批准或要求实施前，不要开始实施。

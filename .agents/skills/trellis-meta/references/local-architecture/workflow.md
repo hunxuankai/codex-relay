@@ -1,16 +1,16 @@
-# Local Workflow System
+# 本地工作流系统
 
-`.trellis/workflow.md` is the Trellis workflow source of truth inside the user project. An AI does not need Trellis source code to understand how the current project should move tasks forward; this file is enough.
+`.trellis/workflow.md` 是用户项目内 Trellis 工作流的事实来源。AI 不需要 Trellis 源码就能理解当前项目应如何推进任务；该文件已经足够。
 
-## File Responsibilities
+## 文件职责
 
-`.trellis/workflow.md` has three responsibilities:
+`.trellis/workflow.md` 有三项职责：
 
-1. **Explain workflow phases**: Plan, Execute, Finish.
-2. **Define skill routing**: which skill or agent the AI should use when the user expresses a certain intent.
-3. **Provide workflow-state prompt blocks**: hooks can inject the prompt block for the current state into the conversation.
+1. **说明工作流阶段**：规划、实施、完成。
+2. **定义 Skill 路由**：用户表达某种意图时，AI 应使用哪个 Skill 或代理。
+3. **提供 workflow-state 提示块**：钩子可把当前状态对应的提示块注入对话。
 
-## Current Phase Model
+## 当前阶段模型
 
 ```text
 Phase 1: Plan    -> clarify what to build, produce prd.md and required research
@@ -18,20 +18,20 @@ Phase 2: Execute -> implement against the PRD and specs, then check
 Phase 3: Finish  -> final verification, preserve lessons, and wrap up
 ```
 
-Each phase contains numbered steps, such as `1.3 Configure context`. These numbers are not runtime fields in `task.json`; they are workflow structure for AI and humans to read.
+每个阶段包含编号步骤，例如 `1.3 Configure context`。这些编号不是 `task.json` 中的运行时字段，而是供 AI 和人类阅读的工作流结构。
 
-## Skill Routing
+## Skill 路由
 
-`workflow.md` separates routing by platform capability:
+`workflow.md` 按平台能力区分路由：
 
-- Platforms with sub-agent support: dispatch `trellis-implement` by default for implementation and `trellis-check` for checking.
-- Platforms without sub-agent support: the main session reads skills such as `trellis-before-dev`, then executes directly.
+- 支持子代理的平台：默认派发 `trellis-implement` 实施，派发 `trellis-check` 检查。
+- 不支持子代理的平台：主会话读取 `trellis-before-dev` 等 Skill，然后直接执行。
 
-When changing local AI behavior, update the routing descriptions in `workflow.md` first, then check whether the corresponding platform skill, command, or agent files need to stay in sync.
+修改本地 AI 行为时，先更新 `workflow.md` 中的路由说明，再检查对应平台 Skill、命令或代理文件是否需要同步。
 
-## Workflow-State Prompt Blocks
+## Workflow-State 提示块
 
-The bottom of `workflow.md` can contain state blocks like this:
+`workflow.md` 底部可以包含如下状态块：
 
 ```text
 [workflow-state:no_task]
@@ -39,37 +39,37 @@ The bottom of `workflow.md` can contain state blocks like this:
 [/workflow-state:no_task]
 ```
 
-Hooks choose the right block based on current task status and inject it into the conversation. Common states include:
+钩子根据当前任务状态选择正确的块并注入对话。常见状态包括：
 
-| State | Meaning |
+| 状态 | 含义 |
 | --- | --- |
-| `no_task` | The current session has no active task. |
-| `planning` | The task is still in requirements, research, or context configuration. |
-| `in_progress` | The task has entered implementation and checking. |
-| `completed` | The task is complete and waiting for wrap-up or archive. |
+| `no_task` | 当前会话没有活动任务。 |
+| `planning` | 任务仍处于需求、研究或上下文配置阶段。 |
+| `in_progress` | 任务已进入实施和检查阶段。 |
+| `completed` | 任务已完成，等待收尾或归档。 |
 
-If the user wants to change policies such as "whether to create a task when there is no task," "when task creation may be skipped," or "whether sub-agents are required," edit these state blocks and the routing table above them.
+如果用户希望修改“没有任务时是否创建任务”“何时可以跳过任务创建”或“是否必须使用子代理”等策略，应编辑这些状态块及其上方的路由表。
 
-## Local Modification Patterns
+## 本地修改模式
 
-Common changes:
+常见改动：
 
-| Goal | Edit point |
+| 目标 | 编辑位置 |
 | --- | --- |
-| Add a phase | Update the Phase Index, phase body, routing, and state blocks. |
-| Change task creation policy | Update the `no_task` state block and Phase 1 description. |
-| Change the default implementation/check path | Update Phase 2 and skill routing. |
-| Change the wrap-up flow | Update Phase 3 and `finish-work` related descriptions. Note the current split: Phase 3.4 = AI-driven code commits (batched, user-confirmed), Phase 3.5 = `/finish-work` (archive + record session). `/finish-work` refuses to run if the working tree is dirty. |
-| Change platform differences | Update routing descriptions grouped by platform. |
+| 添加阶段 | 更新阶段索引、阶段正文、路由和状态块。 |
+| 修改任务创建策略 | 更新 `no_task` 状态块和阶段 1 说明。 |
+| 修改默认实施/检查路径 | 更新阶段 2 和 Skill 路由。 |
+| 修改收尾流程 | 更新阶段 3 和 `finish-work` 相关说明。注意当前拆分：阶段 3.4 = AI 驱动代码提交（分批、经用户确认）；阶段 3.5 = `/finish-work`（归档 + 记录会话）。工作树有未提交内容时，`/finish-work` 会拒绝运行。 |
+| 修改平台差异 | 更新按平台分组的路由说明。 |
 
-After editing, make the AI reread `.trellis/workflow.md`; do not assume the flow from the old conversation is still valid.
+编辑后让 AI 重新读取 `.trellis/workflow.md`；不要假设旧对话中的流程仍然有效。
 
-## Relationship To Platform Files
+## 与平台文件的关系
 
-`workflow.md` is the semantic center of the local workflow, but each platform can also have its own entry files:
+`workflow.md` 是本地工作流的语义中心，但每个平台也可能有自己的入口文件：
 
-- skills, such as `trellis-brainstorm` and `trellis-check`.
-- commands/prompts/workflows, such as continue and finish-work.
-- hooks, such as session-start or workflow-state injection.
+- Skill，例如 `trellis-brainstorm` 和 `trellis-check`。
+- 命令/提示词/工作流，例如 continue 和 finish-work。
+- 钩子，例如 session-start 或 workflow-state 注入。
 
-If only `workflow.md` changes, platform entry files may still contain old language. When the user wants to change "what the AI actually does," also inspect the relevant platform directory.
+如果只修改 `workflow.md`，平台入口文件可能仍包含旧说明。用户希望改变“AI 实际执行什么”时，也要检查相关平台目录。

@@ -1,34 +1,34 @@
 ---
 name: trellis-start
-description: "Initializes an AI development session by reading workflow guides, developer identity, git status, active tasks, and project guidelines from .trellis/. Classifies incoming tasks and routes to brainstorm, direct edit, or task workflow. Use when beginning a new coding session, resuming work, starting a new task, or re-establishing project context."
+description: "通过读取 .trellis/ 中的工作流指南、开发者身份、Git 状态、活动任务和项目规范来初始化 AI 开发会话。对传入任务分类，并路由到需求探索、直接编辑或任务工作流。开始新编码会话、恢复工作、启动新任务或重建项目上下文时使用。"
 ---
 
-# Start Session
+# 启动会话
 
-Initialize a Trellis-managed development session. This platform has no session-start hook, so manually load the equivalent compact context by following these steps.
+初始化由 Trellis 管理的开发会话。此平台没有会话启动钩子，因此按以下步骤手动加载等价的精简上下文。
 
 ---
 
-## Step 1: Current state
-Identity, git status, current task, active tasks, journal location.
+## 步骤 1：当前状态
+开发者身份、Git 状态、当前任务、活动任务和日志位置。
 
 ```bash
 python ./.trellis/scripts/get_context.py
 ```
 
-If this output includes a line beginning `Trellis update available:`, copy the full line verbatim when summarizing session context. Do not shorten operational command hints.
+如果输出包含以 `Trellis update available:` 开头的行，汇总会话上下文时原样复制整行，不要缩短其中的操作命令提示。
 
-## Step 2: Workflow overview
-Compact Phase Index, request triage rules, planning artifact contract, and the step-detail command.
+## 步骤 2：工作流概览
+精简阶段索引、请求分流规则、规划材料契约和步骤细则命令。
 
 ```bash
 python ./.trellis/scripts/get_context.py --mode phase
 ```
 
-Full guide in `.trellis/workflow.md` (read on demand).
+完整指南位于 `.trellis/workflow.md`（按需读取）。
 
-## Step 3: Guideline indexes
-Discover packages + spec layers, then read each relevant index file.
+## 步骤 3：规范索引
+发现包和规范层，然后读取每个相关索引文件。
 
 ```bash
 python ./.trellis/scripts/get_context.py --mode packages
@@ -36,29 +36,29 @@ cat .trellis/spec/guides/index.md
 cat .trellis/spec/<package>/<layer>/index.md   # for each relevant layer
 ```
 
-Index files list the specific guideline docs to read when you actually start coding.
+索引文件会列出真正开始编码时需要读取的具体规范文档。
 
-## Step 4: Decide next action
-From Step 1 you know the current task and status. Check the task directory:
+## 步骤 4：决定下一步
+步骤 1 已给出当前任务及其状态。检查任务目录：
 
-- **Active task status `planning` + no `prd.md`** → Phase 1.1. Load the `trellis-brainstorm` skill.
-- **Active task status `planning` + `prd.md` exists** → stay in Phase 1. Lightweight tasks can be PRD-only; complex tasks need `design.md` + `implement.md`. Load the relevant Phase 1 step detail before `task.py start`.
-- **Active task status `in_progress`** → Phase 2 step 2.1. Load the step detail:
+- **活动任务状态为 `planning` 且没有 `prd.md`** → 阶段 1.1。加载 `trellis-brainstorm` Skill。
+- **活动任务状态为 `planning` 且已有 `prd.md`** → 留在阶段 1。轻量任务可以只有 PRD；复杂任务需要 `design.md` 和 `implement.md`。运行 `task.py start` 前加载对应的阶段 1 步骤细则。
+- **活动任务状态为 `in_progress`** → 阶段 2 的步骤 2.1。加载步骤细则：
   ```bash
   python ./.trellis/scripts/get_context.py --mode phase --step 2.1 --platform codex
   ```
-- **No active task** → classify first. For simple conversation / small task, ask only whether this turn should create a Trellis task. For complex work, ask whether you may create a Trellis task and enter planning. If the user says no, skip Trellis for this session.
+- **没有活动任务** → 先分类。对于简单对话或小任务，只询问本轮是否创建 Trellis 任务。对于复杂工作，询问是否可以创建 Trellis 任务并进入规划。如果用户拒绝，本会话跳过 Trellis。
 
 ---
 
-## Skill routing (quick reference)
+## Skill 路由（快速参考）
 
-| User intent | Skill |
+| 用户意图 | Skill |
 |---|---|
-| New feature / unclear requirements | `trellis-brainstorm` |
-| About to write code | `trellis-before-dev` |
-| Done coding / quality check | `trellis-check` |
-| Stuck / fixed same bug multiple times | `trellis-break-loop` |
-| Learned something worth capturing | `trellis-update-spec` |
+| 新功能 / 需求不清晰 | `trellis-brainstorm` |
+| 即将编写代码 | `trellis-before-dev` |
+| 编码完成 / 质量检查 | `trellis-check` |
+| 卡住 / 多次修复同一缺陷 | `trellis-break-loop` |
+| 学到值得沉淀的内容 | `trellis-update-spec` |
 
-Full rules + anti-rationalization table in `.trellis/workflow.md`.
+完整规则和防止自我合理化的对照表见 `.trellis/workflow.md`。

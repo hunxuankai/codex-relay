@@ -1,24 +1,23 @@
-# Command Reference
+# 命令参考
 
-Authoritative current command reference for `trellis channel` subcommands,
-validated against the source in `packages/cli/src/commands/channel/`
-(`index.ts` Commander wiring and each subcommand handler).
+本页是当前 `trellis channel` 子命令的权威参考，已根据
+`packages/cli/src/commands/channel/` 中的源码（`index.ts` Commander 连接
+以及各子命令处理器）验证。
 
-Every subcommand accepts `--scope <project|global>` unless noted; `project`
-is the default and resolves against the current cwd's project bucket.
+除非另有说明，每个子命令都接受 `--scope <project|global>`；默认值为
+`project`，并根据当前 cwd 解析项目存储桶。
 
-## Top-level
+## 顶层命令
 
 ```
 trellis channel <subcommand>
 ```
 
-> Multi-agent collaboration runtime — spawn / coordinate / interrupt worker
-> agents through a shared event log.
+> 多 Agent 协作运行时：通过共享事件日志启动、协调和中断 Worker Agent。
 
 ---
 
-## Create / List
+## 创建/列出
 
 ### `create <name>`
 
@@ -40,12 +39,11 @@ trellis channel create <name>
   [--ephemeral]                           # hide from default list, prunable
 ```
 
-Behavior:
-- Appends a `create` event; immutable `type` (cannot mutate forum↔chat after).
-- `--ephemeral` channels are hidden from `channel list` by default and are
-  the sweep target for `channel prune --ephemeral`.
-- `--linked-context-*` are folded into `--context-*`; emit a deprecation
-  notice when used.
+行为：
+- 追加 `create` 事件；`type` 不可变，之后不能在 forum 与 chat 之间切换。
+- `--ephemeral` channel 默认不显示在 `channel list` 中，是
+  `channel prune --ephemeral` 的清理目标。
+- `--linked-context-*` 会合并到 `--context-*`；使用时发出弃用通知。
 
 ### `list`
 
@@ -58,15 +56,15 @@ trellis channel list
   [--all-projects]                        # scan every project bucket
 ```
 
-Behavior:
-- Default scope: current cwd's project. `--all-projects` scans every bucket.
-- Pretty mode prints `NAME WORKERS EVENTS LAST KIND TYPE TASK`, sorted by
-  recency, with a footer noting hidden ephemeral count.
-- `--json` switches to a JSON array.
+行为：
+- 默认作用域为当前 cwd 的项目。`--all-projects` 扫描每个存储桶。
+- 美化模式按最近活动排序，输出 `NAME WORKERS EVENTS LAST KIND TYPE TASK`，
+  并在页脚注明隐藏的临时 channel 数量。
+- `--json` 切换为 JSON 数组。
 
 ---
 
-## Chat Messages
+## Chat 消息
 
 ### `send <name> [text]`
 
@@ -79,18 +77,17 @@ trellis channel send <name> [text]
   [--delivery-mode appendOnly|requireKnownWorker|requireRunningWorker]
 ```
 
-Behavior:
-- Body precedence: positional `[text]` → `--stdin` → `--text-file`.
-- `--to` with one entry stores a string; multiple stores an array; omitted
-  means broadcast.
-- `--delivery-mode` selects targeted-delivery validation:
-  - `appendOnly` (default-ish — just record),
-  - `requireKnownWorker` (the named target must have a `spawned` event),
-  - `requireRunningWorker` (the worker must currently be live).
-- Prints the appended event as one JSON line on stdout.
+行为：
+- 正文优先级：位置参数 `[text]` -> `--stdin` -> `--text-file`。
+- `--to` 只有一个条目时存为字符串，多个条目时存为数组；省略表示广播。
+- `--delivery-mode` 选择定向投递验证：
+  - `appendOnly`（近似默认值，只记录事件），
+  - `requireKnownWorker`（指定目标必须有 `spawned` 事件），
+  - `requireRunningWorker`（Worker 当前必须存活）。
+- 在 stdout 上以单行 JSON 输出追加的事件。
 
-> **Note:** `send` has **no** `--tag` and **no** `--kind` flag. See
-> [`tag-vs-kind`](#tag-vs-kind--how-event-shape-is-actually-controlled) below.
+> **注意：**`send` **没有** `--tag` 或 `--kind` 参数。参见下文
+> [`tag-vs-kind`](#tag-vs-kind--how-event-shape-is-actually-controlled)。
 
 ### `messages <name>`
 
@@ -109,12 +106,11 @@ trellis channel messages <name>
   [--no-progress]                         # hide progress events
 ```
 
-Behavior:
-- Auto-detects forum channels: with no filters it renders the thread board
-  instead of the event stream. `--thread` / `--action` are forum-only and
-  error against chat channels.
-- `--kind` is validated against `CHANNEL_EVENT_KINDS` (single value, not
-  CSV — that's the `wait` side).
+行为：
+- 自动检测 forum channel；没有过滤条件时呈现 thread 看板，而不是事件流。
+  `--thread` / `--action` 只适用于 forum，在 chat channel 上会报错。
+- 根据 `CHANNEL_EVENT_KINDS` 验证 `--kind`；这里只接受单值，不接受 CSV，
+  CSV 是 `wait` 的行为。
 
 ### `wait <name>`
 
@@ -132,52 +128,49 @@ trellis channel wait <name>
   [--all]                                 # require every --from to match
 ```
 
-Behavior:
-- Streams matching events as JSON, one per line.
-- Default `--to` filter is the caller's own agent (broadcast events still
-  match — broadcast + explicit-to-me).
-- `--all` requires `--from` and blocks until every listed agent has produced
-  a matching event.
-- **Timeout exits 124** and prints `timeout: still waiting on ...` to stderr
-  when `--all` was in play.
+行为：
+- 以 JSON 流式输出匹配事件，每行一个。
+- 默认 `--to` 过滤目标为调用方自身 Agent；广播事件仍然匹配，即广播 +
+  显式发给自己的事件。
+- `--all` 要求同时提供 `--from`，并阻塞到列出的每个 Agent 都产生匹配事件。
+- **超时以 124 退出**；使用 `--all` 时向 stderr 输出
+  `timeout: still waiting on ...`。
 
 ---
 
-## tag-vs-kind — how event shape is actually controlled
+<a id="tag-vs-kind--how-event-shape-is-actually-controlled"></a>
 
-There is **no `--tag` flag** anywhere in the v0.6.0 channel CLI; `--kind` is
-not a legacy alias for any `--tag` flag.
+## tag-vs-kind：事件形态的实际控制方式
 
-Concrete model in the current source:
+v0.6.0 channel CLI 中任何位置都**没有 `--tag` 参数**；`--kind` 也不是
+任何 `--tag` 参数的旧版别名。
 
-- `--kind` is the only event-type filter, and it is constrained to the
-  trellis-emitted whitelist (`CHANNEL_EVENT_KINDS` in
-  `packages/core/src/channel/internal/store/events.ts`):
+当前源码中的具体模型：
+
+- `--kind` 是唯一的事件类型过滤器，并受 Trellis 发出的白名单约束
+  （`packages/core/src/channel/internal/store/events.ts` 中的
+  `CHANNEL_EVENT_KINDS`）：
   - `create`, `join`, `leave`, `message`, `thread`, `context`, `channel`,
     `spawned`, `killed`, `respawned`, `progress`, `done`, `error`,
     `waiting`, `awake`, `undeliverable`, `interrupt_requested`,
     `turn_started`, `turn_finished`, `interrupted`, `supervisor_warning`
-  - Passing anything else throws
-    `Invalid --kind '<x>'. Must be one of: …`.
-- `--kind` lives on `wait` (CSV, OR semantics) and `messages` (single
-  value). `send` and `run` cannot emit a custom kind — every `send` writes
-  a `message` event.
-- Mid-turn worker abort is **not** a tag. It is the dedicated
-  `channel interrupt` command, which appends an `interrupt_requested` /
-  `interrupted` pair and provider-level interrupts the worker.
+  - 传入其他值会抛出 `Invalid --kind '<x>'. Must be one of: …`。
+- `--kind` 位于 `wait`（CSV，OR 语义）和 `messages`（单值）上。`send` 和
+  `run` 不能发出自定义 kind；每次 `send` 都写入 `message` 事件。
+- 在 turn 中途终止 Worker **不是** tag，而是由专用的 `channel interrupt`
+  命令完成。该命令产生 `interrupt_requested` / `interrupted` 事件，并在
+  Provider 层中断 Worker。
 
-Practical rule for dispatchers waiting on workers:
+派发方等待 Worker 时的实用规则：
 
-- Use `--kind done,turn_finished` for "worker finished a turn" — these are
-  system events that the supervisor fires automatically. Do not depend on
-  the worker LLM remembering to emit any custom signal.
-- Use `trellis channel interrupt` (the command) only when you actually want
-  mid-turn abort behavior.
-- Do **not** invent user-side tags as completion signals. There is no
-  `--tag` filter; a worker writing a custom string into its final message
-  is just text inside a `message` event and cannot be matched by `wait`.
+- “Worker 完成一个 turn”使用 `--kind done,turn_finished`；这些系统事件由
+  Supervisor 自动发出，不要依赖 Worker LLM 记得发送任何自定义信号。
+- 只有确实需要在 turn 中途终止时，才使用 `trellis channel interrupt` 命令。
+- **不要**发明用户侧 tag 作为完成信号。不存在 `--tag` 过滤器；Worker 将
+  自定义字符串写进最终消息，只会成为 `message` 事件中的文本，`wait` 无法
+  据此匹配。
 
-Long bodies always go through stdin or a file:
+长正文始终通过 stdin 或文件传入：
 
 ```bash
 trellis channel send T --as A --stdin < /tmp/message.md
@@ -186,7 +179,7 @@ trellis channel send T --as A --text-file /tmp/message.md
 
 ---
 
-## Interrupt
+## 中断
 
 ### `interrupt <name> [text]`
 
@@ -198,15 +191,15 @@ trellis channel interrupt <name> [text]
   [--stdin | --text-file <path>]
 ```
 
-Behavior:
-- Appends an `interrupt` event with `reason: "user"` and a replacement
-  instruction body; supervisor performs provider-level interrupt where
-  supported (Claude `/interrupt`, Codex turn cancel).
-- Prints the appended event JSON on stdout.
+行为：
+- 追加带有 `reason: "user"` 和替代指令正文的 `interrupt_requested` 事件；
+  Supervisor 在支持时执行 Provider 层中断（Claude `/interrupt`、Codex turn
+  取消），随后追加 `interrupted` 结果事件。
+- 在 stdout 上输出本次追加的 `interrupt_requested` 事件 JSON。
 
 ---
 
-## Workers
+## Worker
 
 ### `spawn <name>`
 
@@ -234,17 +227,16 @@ trellis channel spawn <name>
                                           # default 6, 0 disables
 ```
 
-Behavior:
-- Provider is validated against the adapter registry
-  (`packages/cli/src/commands/channel/adapters/`); current: `claude`,
-  `codex`.
-- Worker stays inbox-idle until the first `send --to <worker>`.
-- Records a `spawned` event with `pid`, `provider`, `agent`, `files`,
-  `manifests`.
-- OOM-guard precedence: CLI flag → env var
-  (`TRELLIS_CHANNEL_WORKER_IDLE_TIMEOUT`,
-  `TRELLIS_CHANNEL_MAX_LIVE_WORKERS`) →
-  `.trellis/config.yaml#channel.worker_guard` → built-in defaults.
+行为：
+- 根据适配器注册表（`packages/cli/src/commands/channel/adapters/`）验证
+  Provider；当前支持 `claude`、`codex`。
+- Worker 保持 inbox 空闲，直到第一次收到 `send --to <worker>`。
+- 记录包含 `pid`、`provider`、`agent`、`files`、`manifests` 的
+  `spawned` 事件。
+- OOM 防护优先级：CLI 参数 -> 环境变量
+  （`TRELLIS_CHANNEL_WORKER_IDLE_TIMEOUT`、
+  `TRELLIS_CHANNEL_MAX_LIVE_WORKERS`）->
+  `.trellis/config.yaml#channel.worker_guard` -> 内置默认值。
 
 ### `run [name]`
 
@@ -261,15 +253,14 @@ trellis channel run [name?]
   [--timeout <Ns|Nm|Nh>]                  # default 5m
 ```
 
-Behavior:
-- One-shot. Auto-generates `run-<hex>` if `name` omitted.
-- Creates an ephemeral channel (`createMode=run`), spawns a single worker,
-  sends the prompt, waits for `done`, prints the final assistant text to
-  stdout, then removes the channel on success. On failure the channel is
-  kept for inspection and exit code is 1.
+行为：
+- 一次性执行。省略 `name` 时自动生成 `run-<hex>`。
+- 创建临时 channel（`createMode=run`）、启动单个 Worker、发送 prompt、等待
+  `done`、将最终 Assistant 文本打印到 stdout，并在成功时删除 channel。
+  失败时保留 channel 供检查，退出码为 1。
 
-> `run` has **no** `--tag` flag. Completion is detected via the `done`
-> event the supervisor emits.
+> `run` **没有** `--tag` 参数。完成状态通过 Supervisor 发出的 `done` 事件
+> 检测。
 
 ### `kill <name>`
 
@@ -280,11 +271,11 @@ trellis channel kill <name>
   [--force]                               # SIGKILL immediately
 ```
 
-Behavior:
-- Default path: SIGTERM → 8 s grace → SIGKILL escalation; the CLI writes a
-  `killed` event when SIGKILL was needed so the log stays truthful.
-- Cleans `pid`, `worker-pid`, `config`, `spawnlock` sidecar files; keeps
-  `log`, `session-id`, `thread-id` for forensics / resume.
+行为：
+- 默认路径按 SIGTERM -> 8 秒宽限 -> SIGKILL 逐级升级；需要 SIGKILL 时，
+  CLI 写入 `killed` 事件，确保日志如实记录。
+- 清理 `pid`、`worker-pid`、`config`、`spawnlock` sidecar 文件；保留
+  `log`、`session-id`、`thread-id` 用于取证/恢复。
 
 ### `rm <name>`
 
@@ -293,9 +284,9 @@ trellis channel rm <name>
   [--scope project|global]
 ```
 
-Behavior:
-- Kills any live workers, then deletes the entire channel directory.
-- Prints `Removed channel '<name>'`.
+行为：
+- 终止所有存活 Worker，然后删除整个 channel 目录。
+- 输出 `Removed channel '<name>'`。
 
 ### `prune`
 
@@ -308,17 +299,17 @@ trellis channel prune
   [--keep <names,csv>]                    # exclusion list
 ```
 
-Behavior:
-- Filter flags are mutually exclusive — error otherwise.
-- Default is dry-run; `--yes` flips to real delete.
-- Without `--scope`, scans **every** project bucket (intentional, repo-wide
-  cleanup); with `--scope project|global`, limited to that bucket.
-- Live-worker channels are always skipped regardless of filter.
-- Output: per-candidate line `name  last-ts  (reason)` plus a final summary.
+行为：
+- 过滤参数互斥；同时使用会报错。
+- 默认执行 dry-run；`--yes` 切换为真正删除。
+- 不带 `--scope` 时扫描**每个**项目存储桶，这是有意设计的全仓清理；使用
+  `--scope project|global` 时只扫描对应存储桶。
+- 无论使用何种过滤条件，始终跳过有存活 Worker 的 channel。
+- 输出：每个候选项一行 `name  last-ts  (reason)`，最后输出汇总。
 
 ---
 
-## Forum Channels
+## Forum Channel
 
 ### `post <name> <action>`
 
@@ -340,13 +331,12 @@ trellis channel post <name> <action>
   [--linked-context-raw  <text>]          # [deprecated alias]
 ```
 
-Behavior:
-- `<action>` is free-form on the CLI surface; conventional values include
-  `opened`, `comment`, `status`, `labels`, `assignees`, `summary`,
-  `processed`.
-- `action=rename` is rejected — use `thread rename` instead.
-- `--labels` / `--assignees` are replace-semantics, not append.
-- Output: appended event JSON on stdout.
+行为：
+- CLI 接口上的 `<action>` 是自由格式；约定值包括 `opened`、`comment`、
+  `status`、`labels`、`assignees`、`summary`、`processed`。
+- `action=rename` 会被拒绝；改用 `thread rename`。
+- `--labels` / `--assignees` 采用替换语义，而不是追加。
+- 在 stdout 上输出追加的事件 JSON。
 
 ### `forum <name>`
 
@@ -357,9 +347,9 @@ trellis channel forum <name>
   [--raw]
 ```
 
-Behavior:
-- Lists threads (reduced state). `--status` filters by current thread
-  status. `--raw` prints one JSON per thread.
+行为：
+- 列出 reducer 归并后的 thread 状态。`--status` 按当前 thread 状态过滤；
+  `--raw` 为每个 thread 输出一个 JSON。
 
 ### `thread <name> <thread>` / `thread rename`
 
@@ -373,15 +363,15 @@ trellis channel thread rename <name> <old-thread> <new-thread>
   [--scope project|global]
 ```
 
-Behavior:
-- `thread <name> <key>` shows one thread's timeline:
-  header `<thread> [<status>] <title>`, then description / labels /
-  assignees / summary / timeline lines. `--raw` switches to raw events.
-- `thread rename` is the only mutation; `post --action rename` is rejected.
+行为：
+- `thread <name> <key>` 显示一个 thread 的时间线：先输出
+  `<thread> [<status>] <title>` 头部，再输出 description / labels /
+  assignees / summary / timeline 行。`--raw` 切换为原始事件。
+- `thread rename` 是唯一的修改操作；`post --action rename` 会被拒绝。
 
 ---
 
-## Context / Title
+## 上下文/标题
 
 ### `context add` / `context delete` / `context list`
 
@@ -407,10 +397,10 @@ trellis channel context list <name>
   [--raw]                                 # one JSON entry per line
 ```
 
-Behavior:
-- `add` / `delete` append a `context` event and print the event JSON.
-- `list` projects current context entries; pretty output is
-  `file <path>` / `raw <truncated text>` lines, `(no context)` when empty.
+行为：
+- `add` / `delete` 追加 `context` 事件并输出事件 JSON。
+- `list` 投影当前上下文条目；美化输出为 `file <path>` /
+  `raw <truncated text>` 行，为空时输出 `(no context)`。
 
 ### `title set <name>` / `title clear <name>`
 
@@ -425,56 +415,53 @@ trellis channel title clear <name>
   [--scope project|global]
 ```
 
-Behavior:
-- Appends a `title` event projecting a stable display title onto the
-  channel. Output: event JSON.
+行为：
+- 追加 `kind: "channel", action: "title"` 事件，为 channel 投影稳定的显示
+  标题。输出事件 JSON。
 
 ---
 
-## Hidden / Internal
+## 隐藏/内部命令
 
-| Command | Purpose |
+| 命令 | 用途 |
 |---|---|
-| `channel __supervisor <channel> <worker> <config>` | Forked entry point invoked by `spawn`. Do not invoke directly. |
-| `channel __parse-trace <adapter> <file>` | Dev helper — replays a recorded stream-json / wire trace through the matching adapter and prints the resulting channel events. Adapter is validated against the provider registry. |
+| `channel __supervisor <channel> <worker> <config>` | `spawn` 调用的派生入口。不要直接调用。 |
+| `channel __parse-trace <adapter> <file>` | 开发辅助命令：通过匹配的适配器重放已记录的 stream-json / wire trace，并打印生成的 channel 事件。根据 Provider 注册表验证适配器。 |
 
 ---
 
-## Event Model
+## 事件模型
 
-`CHANNEL_EVENT_KINDS` (whitelist enforced by `parseChannelKind`):
+`CHANNEL_EVENT_KINDS`（由 `parseChannelKind` 强制执行的白名单）：
 
 `create`, `join`, `leave`, `message`, `thread`, `context`, `channel`,
 `spawned`, `killed`, `respawned`, `progress`, `done`, `error`, `waiting`,
 `awake`, `undeliverable`, `interrupt_requested`, `turn_started`,
 `turn_finished`, `interrupted`, `supervisor_warning`.
 
-`MEANINGFUL_EVENT_KINDS` (default-visible subset used by `wait` /
-`messages` when no explicit `--kind` is given):
+`MEANINGFUL_EVENT_KINDS`（未显式提供 `--kind` 时，`wait` / `messages`
+使用的默认可见子集）：
 
 `create`, `join`, `leave`, `message`, `thread`, `context`, `channel`,
 `spawned`, `killed`, `respawned`, `done`, `error`.
 
-Non-meaningful kinds (e.g. `progress`, `waiting`, `awake`,
-`supervisor_warning`, the `turn_*` / `interrupt*` set) still flow through
-the store; opt in via `--kind` or `--include-progress`.
+不属于 `MEANINGFUL_EVENT_KINDS` 的 kind（例如 `progress`、`waiting`、
+`awake`、`supervisor_warning`、`turn_*` / `interrupt*` 集合）仍会流经存储；通过
+`--kind` 或 `--include-progress` 选择查看。
 
-Forum channels are event-sourced; use the CLI reducers
-(`forum`, `thread`, `context list`) for state projection.
+Forum channel 采用事件溯源；使用 CLI reducer（`forum`、`thread`、
+`context list`）进行状态投影。
 
 ---
 
-## Output Conventions
+## 输出约定
 
-- **Mutations** (`send`, `interrupt`, `post`, `context add/delete`,
-  `title set/clear`, `thread rename`) print the appended event as one JSON
-  line on **stdout**.
-- **Streaming reads** (`wait`, `messages --follow`) print one JSON event
-  per line on stdout.
-- **Pretty reads** (`list`, `messages`, `forum`, `thread`, `context list`)
-  print colored, padded tables / timelines.
-- **`run`** prints only the final assistant text on stdout (so callers can
-  pipe); diagnostic notes go to stderr.
-- **Errors** go through `chalk.red("Error:")` to stderr and `exit 1`.
-- **`wait` timeout** specifically exits **124**.
-
+- **修改操作**（`send`、`interrupt`、`post`、`context add/delete`、
+  `title set/clear`、`thread rename`）在 **stdout** 上以单行 JSON 输出追加的事件。
+- **流式读取**（`wait`、`messages --follow`）在 stdout 上每行输出一个 JSON 事件。
+- **美化读取**（`list`、`messages`、`forum`、`thread`、`context list`）
+  输出带颜色和填充的表格/时间线。
+- **`run`** 只在 stdout 上输出最终 Assistant 文本，便于调用方使用管道；
+  诊断说明写入 stderr。
+- **错误**通过 `chalk.red("Error:")` 写入 stderr，并以 `exit 1` 退出。
+- **`wait` 超时**专门以 **124** 退出。

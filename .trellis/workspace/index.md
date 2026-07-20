@@ -1,125 +1,125 @@
-# Workspace Index
+# 工作区索引
 
-> Records of all AI Agent work records across all developers
+> 记录所有开发者与 AI Agent 协作的工作记录
 
 ---
 
-## Overview
+## 概览
 
-This directory tracks records for all developers working with AI Agents on this project.
+本目录跟踪项目中所有使用 AI Agent 的开发者记录。
 
-### File Structure
+### 文件结构
 
 ```
 workspace/
-|-- index.md              # This file - main index
-+-- {developer}/          # Per-developer directory
-    |-- index.md          # Personal index with session history
-    |-- tasks/         # Task files
-    |   |-- *.json        # Active tasks
-    |   +-- archive/      # Archived tasks by month
-    +-- journal-N.md     # Journal files (sequential: 1, 2, 3...)
+|-- index.md              # 本文件，主索引
++-- {developer}/          # 每位开发者的目录
+    |-- index.md          # 包含会话历史的个人索引
+    |-- tasks/            # 任务文件
+    |   |-- *.json        # 活动任务
+    |   +-- archive/      # 按月归档的任务
+    +-- journal-N.md      # 按 1、2、3... 排序的日志文件
 ```
 
 ---
 
-## Active Developers
+## 活跃开发者
 
-| Developer | Last Active | Sessions | Active File |
+| 开发者 | 最近活动 | 会话数 | 活动文件 |
 |-----------|-------------|----------|-------------|
-| (none yet) | - | - | - |
+| （暂无） | - | - | - |
 
 ---
 
-## Getting Started
+## 开始使用
 
-### For New Developers
+### 新开发者
 
-Run the initialization script:
+运行初始化脚本：
 
 ```bash
 python ./.trellis/scripts/init_developer.py <your-name>
 ```
 
-This will:
-1. Create your identity file (gitignored)
-2. Create your progress directory
-3. Create your personal index
-4. Create initial journal file
+该脚本会：
+1. 创建被 Git 忽略的身份文件
+2. 创建进度目录
+3. 创建个人索引
+4. 创建首个日志文件
 
-### For Returning Developers
+### 已有开发者
 
-1. Get your developer name:
+1. 获取开发者名称：
    ```bash
    python ./.trellis/scripts/get_developer.py
    ```
 
-2. Read your personal index:
+2. 读取个人索引：
    ```bash
    cat .trellis/workspace/$(python ./.trellis/scripts/get_developer.py)/index.md
    ```
 
 ---
 
-## Guidelines
+## 规则
 
-### Journal File Rules
+### 日志文件规则
 
-- **Max 2000 lines** per journal file
-- When limit is reached, create `journal-{N+1}.md`
-- Update your personal `index.md` when creating new files
+- 每个日志文件**最多 2000 行**
+- 达到上限时创建 `journal-{N+1}.md`
+- 创建新文件时更新个人 `index.md`
 
-### Session Record Format
+### 会话记录格式
 
-Each session should include:
-- Summary: One-line description
-- Branch: Which branch the work was done on
-- Main Changes: What was modified
-- Git Commits: Commit hashes and messages
-- Next Steps: What to do next
+每个会话应包含：
+- 摘要：单行说明
+- 分支：工作所在分支
+- 主要改动：修改了什么
+- Git 提交：提交哈希和消息
+- 下一步：后续要做什么
 
 ---
 
-## Session Template
+## 会话模板
 
-Use this template when recording sessions:
+记录会话时使用以下模板：
 
 ```markdown
-## Session {N}: {Title}
+## 会话 {N}：{标题}
 
-**Date**: YYYY-MM-DD
-**Task**: {task-name}
-**Branch**: `{branch-name}`
+**日期**：YYYY-MM-DD
+**任务**：{task-name}
+**分支**：`{branch-name}`
 
-### Summary
+### 摘要
 
-{One-line summary}
+{单行摘要}
 
-### Main Changes
+### 主要改动
 
-- {Change 1}
-- {Change 2}
+- {改动 1}
+- {改动 2}
 
-### Git Commits
+### Git 提交
 
-| Hash | Message |
+| 哈希 | 消息 |
 |------|---------|
-| `abc1234` | {commit message} |
+| `abc1234` | {提交消息} |
 
-### Testing
+### 测试
 
-- [OK] {Test result}
+- [OK] {测试结果}
 
-### Status
+### 状态
 
-[OK] **Completed** / # **In Progress** / [P] **Blocked**
+[OK] **已完成** / # **进行中** / [P] **受阻**
 
-### Next Steps
+### 下一步
 
-- {Next step 1}
-- {Next step 2}
+- {下一步 1}
+- {下一步 2}
 ```
 
 ---
 
-**Language**: All documentation must be written in **English**.
+**语言**：所有文档默认使用**简体中文**。

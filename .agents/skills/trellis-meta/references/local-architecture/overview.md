@@ -1,51 +1,51 @@
-# Local Trellis Architecture Overview
+# 本地 Trellis 架构概览
 
-`trellis-meta` is for user projects that have already run `trellis init`. The user's machine usually has only the npm-installed `trellis` command plus the Trellis files generated inside the project; it may not have the Trellis CLI source code.
+`trellis-meta` 面向已经运行 `trellis init` 的用户项目。用户机器通常只有通过 npm 安装的 `trellis` 命令和项目内生成的 Trellis 文件，不一定拥有 Trellis CLI 源码。
 
-Therefore, when an AI uses this skill, the default customization target is local files inside the user project:
+因此，AI 使用此 Skill 时，默认定制目标是用户项目中的本地文件：
 
-- `.trellis/`: workflow, tasks, specs, memory, scripts, and runtime state.
-- Platform directories: `.claude/`, `.codex/`, `.cursor/`, `.opencode/`, `.kiro/`, `.gemini/`, `.qoder/`, `.codebuddy/`, `.github/`, `.factory/`, `.pi/`, `.kilocode/`, `.agent/`, `.devin/`, `.reasonix/`, `.zcode/`, and similar directories.
-- Shared skill layer: `.agents/skills/`.
+- `.trellis/`：工作流、任务、规范、记忆、脚本和运行时状态。
+- 平台目录：`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.kiro/`、`.gemini/`、`.qoder/`、`.codebuddy/`、`.github/`、`.factory/`、`.pi/`、`.kilocode/`、`.agent/`、`.devin/`、`.reasonix/`、`.zcode/` 及类似目录。
+- 共享 Skill 层：`.agents/skills/`。
 
-Do not default to guiding the user to fork the Trellis CLI repository. Treat upstream source code as the operating target only when the user explicitly says they want to change Trellis upstream source, publish an npm package, or contribute a PR.
+不要默认引导用户 fork Trellis CLI 仓库。只有用户明确希望修改 Trellis 上游源码、发布 npm 包或贡献 PR 时，才把上游源码视为操作目标。
 
-## Local System Model
+## 本地系统模型
 
-Trellis provides three layers inside a user project:
+Trellis 在用户项目内提供三层结构：
 
-1. **Workflow layer**: `.trellis/workflow.md` defines phases, routing, next actions, and prompt blocks.
-2. **Persistence layer**: `.trellis/tasks/`, `.trellis/spec/`, and `.trellis/workspace/` store tasks, specs, and session memory.
-3. **Platform integration layer**: hooks, settings, agents, skills, commands, prompts, and workflows in platform directories connect the Trellis workflow to different AI tools.
+1. **工作流层**：`.trellis/workflow.md` 定义阶段、路由、下一步和提示块。
+2. **持久化层**：`.trellis/tasks/`、`.trellis/spec/` 和 `.trellis/workspace/` 存储任务、规范和会话记忆。
+3. **平台集成层**：平台目录中的钩子、设置、代理、Skill、命令、提示词和工作流把 Trellis 工作流连接到不同 AI 工具。
 
-All three layers live inside the user project, so an AI can read and modify them directly.
+三层都位于用户项目内，因此 AI 可以直接读取和修改。
 
-## Core Paths
+## 核心路径
 
-| Path | Purpose |
+| 路径 | 用途 |
 | --- | --- |
-| `.trellis/workflow.md` | Workflow phases, skill routing, and workflow-state prompt blocks. |
-| `.trellis/config.yaml` | Project configuration, task lifecycle hooks, monorepo package configuration, and journal configuration. |
-| `.trellis/spec/` | The user's project-specific coding conventions and thinking guides. |
-| `.trellis/tasks/` | Each task's PRD, technical notes, research files, and JSONL context. |
-| `.trellis/workspace/` | Per-developer journals and cross-session memory. |
-| `.trellis/scripts/` | Local Python runtime used by commands, hooks, and context injection. |
-| `.trellis/.runtime/` | Session-level runtime state, such as the current task pointer. |
-| `.trellis/.template-hashes.json` | Template hashes for Trellis-managed files, used by update to determine whether local files were modified by the user. |
+| `.trellis/workflow.md` | 工作流阶段、Skill 路由和 workflow-state 提示块。 |
+| `.trellis/config.yaml` | 项目配置、任务生命周期钩子、Monorepo 包配置和日志配置。 |
+| `.trellis/spec/` | 用户项目专属的编码约定和思考指南。 |
+| `.trellis/tasks/` | 每个任务的 PRD、技术注记、研究文件和 JSONL 上下文。 |
+| `.trellis/workspace/` | 按开发者划分的日志和跨会话记忆。 |
+| `.trellis/scripts/` | 命令、钩子和上下文注入使用的本地 Python 运行时。 |
+| `.trellis/.runtime/` | 会话级运行时状态，例如当前任务指针。 |
+| `.trellis/.template-hashes.json` | Trellis 管理文件的模板哈希，update 用它判断本地文件是否已被用户修改。 |
 
-## AI Customization Principles
+## AI 定制原则
 
-1. **Find the local source of truth first**: Do not edit from memory. Read `.trellis/workflow.md`, `.trellis/config.yaml`, the relevant platform directory, and related task files first.
-2. **Edit the user project, not the npm package cache**: Modify generated files inside the project, not `node_modules` or the global npm install directory.
-3. **Keep platform files aligned with `.trellis/`**: If workflow routing changes, also check whether platform skills or commands still describe the same flow.
-4. **Put project-specific rules in `.trellis/spec/` or a local skill**: Do not put team conventions into `trellis-meta`.
-5. **Preserve user changes**: If a file was already modified locally, work from the current content instead of overwriting it with a default template.
+1. **先找到本地事实来源**：不要凭记忆编辑。先读取 `.trellis/workflow.md`、`.trellis/config.yaml`、相关平台目录和任务文件。
+2. **编辑用户项目，而不是 npm 包缓存**：修改项目内生成的文件，不要修改 `node_modules` 或全局 npm 安装目录。
+3. **保持平台文件与 `.trellis/` 一致**：如果工作流路由变化，也要检查平台 Skill 或命令是否仍描述相同流程。
+4. **把项目专属规则放入 `.trellis/spec/` 或本地 Skill**：不要把团队约定放入 `trellis-meta`。
+5. **保留用户改动**：如果文件已在本地修改，应基于当前内容工作，不要用默认模板覆盖。
 
-## How To Use This Directory
+## 如何使用本目录
 
-- To understand which files exist after init, read `generated-files.md`.
-- To change phases, routing, or next actions, read `workflow.md`.
-- To change the task model, JSONL context, or active task behavior, read `task-system.md`.
-- To change coding convention injection, read `spec-system.md`.
-- To understand journals and cross-session memory, read `workspace-memory.md`.
-- To change hooks or sub-agent context loading, read `context-injection.md`.
+- 要了解 init 后存在哪些文件，读取 `generated-files.md`。
+- 要修改阶段、路由或下一步，读取 `workflow.md`。
+- 要修改任务模型、JSONL 上下文或活动任务行为，读取 `task-system.md`。
+- 要修改编码约定注入，读取 `spec-system.md`。
+- 要了解日志和跨会话记忆，读取 `workspace-memory.md`。
+- 要修改钩子或子代理上下文加载，读取 `context-injection.md`。

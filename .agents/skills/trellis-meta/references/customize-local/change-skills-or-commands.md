@@ -1,36 +1,36 @@
-# Change Local Skills, Commands, Prompts, And Workflows
+# 修改本地 Skill、命令、提示词和工作流
 
-When the user wants to change AI entry points, auto-trigger rules, or explicit command behavior, edit skills, commands, prompts, or workflows in local platform directories.
+当用户希望修改 AI 入口、自动触发规则或显式命令行为时，编辑本地平台目录中的 Skill、命令、提示词或工作流。
 
-Before editing, classify the skill you are about to touch:
+编辑前，先判断即将修改的 Skill 属于哪一类：
 
-- **Bundled upstream skill** — `trellis-meta`, `trellis-spec-bootstrap`, `trellis-session-insight`, `trellis-channel`. Source of truth lives in the Trellis CLI repo under `packages/cli/src/templates/common/bundled-skills/<name>/`; auto-dispatched to every platform's skill root by `getBundledSkillTemplates()` on `trellis init` / `trellis update`. Local edits here are tracked by `.trellis/.template-hashes.json` and will be flagged on the next update.
-- **Project-local skill** — anything else under `.{platform}/skills/`. Owned by the user; not refreshed by `trellis update`.
+- **上游 Bundled Skill**：`trellis-meta`、`trellis-spec-bootstrap`、`trellis-session-insight`、`trellis-channel`。事实来源位于 Trellis CLI 仓库的 `packages/cli/src/templates/common/bundled-skills/<name>/`；`trellis init` / `trellis update` 时，`getBundledSkillTemplates()` 会自动把它派发到每个平台的 Skill 根目录。本地编辑由 `.trellis/.template-hashes.json` 跟踪，并会在下次更新时标记出来。
+- **项目本地 Skill**：`.{platform}/skills/` 下除此之外的所有内容。它们归用户所有，不会由 `trellis update` 刷新。
 
-The remainder of this file uses "skill" for the local file; the override and conflict rules differ between the two cases.
+本文余下部分用“Skill”指本地文件；这两类文件的覆盖和冲突规则不同。
 
-## Read These Files First
+## 编辑前先读取这些文件
 
 1. `.trellis/workflow.md`
-2. Target platform skill/command/prompt/workflow directory
-3. Related agent or hook files
-4. Whether project rules already exist in `.trellis/spec/`
-5. `.trellis/.template-hashes.json` — confirms whether the skill you are about to edit is upstream-owned (entry present) or project-local (entry absent)
+2. 目标平台的 Skill/命令/提示词/工作流目录
+3. 相关 Agent 或 hook 文件
+4. `.trellis/spec/` 中是否已存在项目规则
+5. `.trellis/.template-hashes.json`：即将编辑的 Skill 有记录则归上游所有，无记录则属于项目本地
 
-## Which Entry Type To Choose
+## 如何选择入口类型
 
-| Goal | Recommendation |
+| 目标 | 建议 |
 | --- | --- |
-| AI should automatically know a capability | Add or modify a skill. |
-| User wants to trigger manually with a command | Add or modify a command/prompt/workflow. |
-| Team project conventions | Prefer `.trellis/spec/` or a project-local skill — never a bundled skill directory. |
-| Tweak a bundled skill (`trellis-meta` et al.) for the user's own project | Create a project-local sibling skill (different name) that overrides intent, or edit `.trellis/spec/`. Edits inside the bundled skill directory survive only until the next `trellis update` and will need a "keep" choice each time. |
-| Contribute the change back upstream | Edit `packages/cli/src/templates/common/bundled-skills/<name>/` in the Trellis CLI repo, not the deployed copy. |
-| Change Trellis flow semantics | Synchronize `.trellis/workflow.md`. |
+| 让 AI 自动知道某项能力 | 添加或修改 Skill。 |
+| 让用户通过命令手动触发 | 添加或修改命令/提示词/工作流。 |
+| 团队项目约定 | 优先使用 `.trellis/spec/` 或项目本地 Skill，绝不能放进 Bundled Skill 目录。 |
+| 为用户自己的项目调整 Bundled Skill（如 `trellis-meta`） | 创建名称不同、用于覆盖意图的项目本地同级 Skill，或编辑 `.trellis/spec/`。Bundled Skill 目录内的编辑只会保留到下次 `trellis update`，且每次都需要选择“keep”。 |
+| 将改动贡献回上游 | 编辑 Trellis CLI 仓库中的 `packages/cli/src/templates/common/bundled-skills/<name>/`，而不是已派发的副本。 |
+| 修改 Trellis 流程语义 | 同步 `.trellis/workflow.md`。 |
 
-## Modify A Skill
+## 修改 Skill
 
-A skill is usually:
+Skill 通常采用以下结构：
 
 ```text
 <skill-name>/
@@ -38,44 +38,44 @@ A skill is usually:
 └── references/
 ```
 
-`SKILL.md` should be short and responsible for triggering/routing. Put long content in `references/` so AI can read it on demand.
+`SKILL.md` 应保持简短，只负责触发和路由。长篇内容放在 `references/` 中，让 AI 按需读取。
 
-The frontmatter description should specify when to use the skill. Example:
+frontmatter 的 `description` 应明确说明何时使用该 Skill。例如：
 
 ```yaml
 description: "Use when customizing this project's deployment workflow and release checklist."
 ```
 
-Do not write vague descriptions such as "helpful project skill"; they can trigger incorrectly.
+不要编写“有帮助的项目 Skill”之类含糊描述，否则可能错误触发。
 
-### Bundled vs. Project-Local
+### Bundled Skill 与项目本地 Skill
 
-The same directory shape is used by two very different ownership models:
+两种截然不同的所有权模型使用相同的目录结构：
 
-| Aspect | Bundled (`trellis-meta`, `trellis-spec-bootstrap`, `trellis-session-insight`, `trellis-channel`) | Project-local |
+| 方面 | Bundled（`trellis-meta`、`trellis-spec-bootstrap`、`trellis-session-insight`、`trellis-channel`） | 项目本地 |
 | --- | --- | --- |
-| Source of truth | `packages/cli/src/templates/common/bundled-skills/<name>/` in Trellis CLI repo | Inside the user project itself |
-| Dispatch | Auto-dispatched to every platform skill root by `getBundledSkillTemplates()` (`packages/cli/src/templates/common/index.ts`) on `trellis init` / `trellis update` | Created by the user (or another skill) and never moved |
-| Hash tracking | Every file recorded in `.trellis/.template-hashes.json`; conflict prompt on update | Not tracked |
-| Editing locally | Allowed but will be marked "modified by user" on next update | Free editing |
-| The right way to customize | Add a *new* project-local skill with a *different* name that supplements (or supersedes) the bundled one | Edit the file directly |
+| 事实来源 | Trellis CLI 仓库中的 `packages/cli/src/templates/common/bundled-skills/<name>/` | 用户项目本身 |
+| 派发 | `trellis init` / `trellis update` 时，由 `getBundledSkillTemplates()`（`packages/cli/src/templates/common/index.ts`）自动派发到每个平台的 Skill 根目录 | 由用户（或另一个 Skill）创建，且永不移动 |
+| 哈希跟踪 | 每个文件都记录在 `.trellis/.template-hashes.json` 中；更新时提示冲突 | 不跟踪 |
+| 本地编辑 | 允许，但下次更新时会标记为“用户已修改” | 可自由编辑 |
+| 正确定制方式 | 添加一个名称不同、用于补充（或取代）Bundled Skill 的*新*项目本地 Skill | 直接编辑文件 |
 
-If the goal is "make my project's AI behave differently when discussing release notes," the answer is almost always a project-local skill, not surgery on `trellis-meta/`.
+如果目标是“让项目 AI 在讨论发布说明时采用不同做法”，几乎总应使用项目本地 Skill，而不是修改 `trellis-meta/`。
 
-## Modify A Command/Prompt/Workflow
+## 修改命令/提示词/工作流
 
-Explicit entry points should state:
+显式入口应说明：
 
-- How the user triggers it.
-- Which `.trellis/` files to read.
-- Which scripts to run.
-- How to report after completion.
+- 用户如何触发。
+- 需要读取哪些 `.trellis/` 文件。
+- 需要运行哪些脚本。
+- 完成后如何报告。
 
-If a command only repeats workflow rules, prefer making it reference/read `.trellis/workflow.md` instead of maintaining a second copy of the flow.
+如果命令只是重复工作流规则，优先让它引用/读取 `.trellis/workflow.md`，不要维护第二份流程副本。
 
-## Common Paths
+## 常见路径
 
-| Platform | Entry directories |
+| 平台 | 入口目录 |
 | --- | --- |
 | Claude Code | `.claude/skills/`, `.claude/commands/` |
 | Cursor | `.cursor/skills/`, `.cursor/commands/` |
@@ -88,36 +88,36 @@ If a command only repeats workflow rules, prefer making it reference/read `.trel
 | GitHub Copilot | `.github/skills/`, `.github/prompts/` |
 | Factory Droid | `.factory/skills/`, `.factory/commands/` |
 | Pi Agent | `.pi/skills/` |
-| Reasonix | `.reasonix/skills/` (no separate commands dir; slash commands built into the platform) |
+| Reasonix | `.reasonix/skills/`（没有单独的命令目录；斜杠命令内置于平台） |
 | ZCode | `.zcode/skills/`, `.zcode/commands/` |
 | Kilo / Antigravity / Devin | workflows + skills |
 
-Every directory above is a deploy target for the four bundled skills. Each platform receives a full copy on `trellis init` and refresh on `trellis update`; nothing has to be wired by hand.
+以上每个目录都是四个 Bundled Skill 的派发目标。每个平台都会在 `trellis init` 时收到完整副本，并在 `trellis update` 时刷新；无需手动连接。
 
-## Add A Project-Local Skill
+## 添加项目本地 Skill
 
-If the user wants to document team-private customizations, create a project-local skill — never put project-private content into a bundled skill directory, since `trellis update` will overwrite it.
+如果用户希望记录团队私有定制，请创建项目本地 Skill。绝不要把项目私有内容放入 Bundled Skill 目录，因为 `trellis update` 会覆盖它。
 
 ```text
 .claude/skills/project-trellis-local/
 └── SKILL.md
 ```
 
-For multi-platform projects, add equivalent versions in each platform skill directory, or use `.agents/skills/` on platforms that support the shared layer (Codex, Gemini CLI).
+对于多平台项目，在每个平台的 Skill 目录中添加等价版本；对于支持共享层的平台（Codex、Gemini CLI），也可以使用 `.agents/skills/`。
 
-Pick a name that does **not** collide with the bundled set:
+选择一个**不与** Bundled Skill 集合冲突的名称：
 
 - `trellis-meta`
 - `trellis-spec-bootstrap`
 - `trellis-session-insight`
 - `trellis-channel`
 
-A reused name causes `getBundledSkillTemplates()` to overwrite the project-local copy on the next update. A common convention is to prefix the project name: `acme-trellis-deploy`, `acme-trellis-onboarding`.
+复用名称会导致 `getBundledSkillTemplates()` 在下次更新时覆盖项目本地副本。常见约定是添加项目前缀：`acme-trellis-deploy`、`acme-trellis-onboarding`。
 
-## Notes
+## 注意事项
 
-- Do not mix every platform's syntax into one file.
-- Do not change only one platform entry point while claiming all platforms are supported.
-- Do not hide long-term engineering conventions inside a command; write them to `.trellis/spec/`.
-- Do not hand-edit files inside `trellis-meta/`, `trellis-spec-bootstrap/`, `trellis-session-insight/`, or `trellis-channel/` under any `.{platform}/skills/` directory expecting the change to persist — they are bundled and refreshed by `trellis update`. Either contribute upstream or add a project-local skill that complements them.
-- After `trellis update` reports a "modified by you" conflict on a bundled skill file, choose **keep** only if you accept maintaining the divergence by hand; otherwise accept the overwrite and re-apply the intent as a project-local skill.
+- 不要把所有平台的语法混在同一个文件中。
+- 不要只修改一个平台入口，却声称支持所有平台。
+- 不要把长期工程约定隐藏在命令中；应写入 `.trellis/spec/`。
+- 不要手动编辑任意 `.{platform}/skills/` 目录下 `trellis-meta/`、`trellis-spec-bootstrap/`、`trellis-session-insight/` 或 `trellis-channel/` 中的文件，并期待改动永久保留；它们是 Bundled Skill，会由 `trellis update` 刷新。应将改动贡献到上游，或添加用于补充它们的项目本地 Skill。
+- 当 `trellis update` 报告 Bundled Skill 文件存在“modified by you”冲突时，只有在接受手动维护差异的情况下才选择 **keep**；否则接受覆盖，并用项目本地 Skill 重新实现该意图。

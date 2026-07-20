@@ -1,28 +1,24 @@
-# Project-scoped Codex defaults for Trellis workflows.
-# Codex merges this layer after the user-level config when the project
-# is marked as a trusted project. To trust this project, add it under
-# `[projects]` in ~/.codex/config.toml, e.g.:
+# Trellis 工作流的项目级 Codex 默认配置。
+# 当项目被标记为可信项目时，Codex 会在用户级配置之后合并本层。
+# 要信任本项目，请将其添加到 ~/.codex/config.toml 的 `[projects]` 下，例如：
 #
 #   [projects."/abs/path/to/this/repo"]
 #   trust_level = "trusted"
 
-# Keep AGENTS.md as the primary project instruction file.
+# 保持 AGENTS.md 为主要项目指令文件。
 project_doc_fallback_filenames = ["AGENTS.md"]
 
-# Codex hooks (`hooks.json` in this directory) only fire when the user
-# has enabled them in their USER-level config: `[features].hooks = true`
-# in ~/.codex/config.toml (Codex 0.129+; legacy name: `codex_hooks = true`,
-# still works but emits a deprecation warning on 0.129+). Project-level
-# config.toml cannot set feature flags; they must be user-level.
-# Codex 0.129+ additionally gates each installed hook behind a one-time
-# `/hooks` TUI review; until the user approves it, the hook stays inactive.
+# 只有用户在用户级配置中启用 hook，本目录中的 Codex hook（`hooks.json`）才会
+# 触发：在 ~/.codex/config.toml 中设置 `[features].hooks = true`（Codex 0.129+；
+# 旧名称 `codex_hooks = true` 仍可用，但在 0.129+ 上会发出弃用警告）。项目级
+# config.toml 不能设置 feature flag；必须在用户级设置。
+# Codex 0.129+ 还要求每个已安装 hook 通过一次性的 `/hooks` TUI 审查；用户批准前，
+# hook 保持未激活。
 
-# NOTE: Trellis intentionally does NOT write a [features.multi_agent_v2]
-# block here. Codex CLI changed `features` deserialization between 0.130
-# and 0.131: the structured table form (with max_concurrent_threads_per_session
-# / *_wait_timeout_ms) is only accepted by 0.131+. On 0.130 and earlier —
-# including the codex CLI bundled inside the Codex desktop app — it fails
-# with `data did not match any variant of untagged enum FeatureToml`, which
-# aborts the entire config load and blocks Codex from starting. Codex's own
-# default for multi_agent_v2 is used instead; tune it in your user-level
-# config if needed.
+# 注意：Trellis 有意不在此写入 [features.multi_agent_v2] 块。Codex CLI 在
+# 0.130 与 0.131 之间修改了 `features` 反序列化：结构化表格形式（包含
+# max_concurrent_threads_per_session / *_wait_timeout_ms）仅在 0.131+ 中被接受。
+# 在 0.130 及更早版本中，包括 Codex 桌面应用内置的 codex CLI，该形式会以
+# `data did not match any variant of untagged enum FeatureToml` 失败，中止整个配置
+# 加载并阻止 Codex 启动。因此改用 Codex 自己的 multi_agent_v2 默认值；如有需要，
+# 在用户级配置中调整。

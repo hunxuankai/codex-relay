@@ -1,12 +1,12 @@
-# Workflows
+# 工作流模式
 
-Use these patterns by intent. Prefer durable channels for multi-round work and
-`channel run` for one-shot questions.
+根据意图选用以下模式。多轮工作优先使用持久 channel，一次性问题使用
+`channel run`。
 
-## Pattern A: Multi-round Brainstorm
+## 模式 A：多轮需求探索
 
-Use when the user says "和 codex/claude 讨论一下", "brainstorm", or "拉一个 agent
-进来一起看".
+当用户说“和 codex/claude 讨论一下”“brainstorm”或“拉一个 Agent
+进来一起看”时使用。
 
 ```bash
 trellis channel create brainstorm-storage-layer --by main \
@@ -25,30 +25,29 @@ trellis channel wait brainstorm-storage-layer \
   --as main --kind done --from cx-arch --timeout 10m
 ```
 
-Do not stop after one answer. Read the answer, identify vague areas, send a
-new probe, and repeat until the result is executable.
+不要收到一个回答就停止。阅读回答、找出模糊之处、发送新的追问并重复，
+直到结论可执行。
 
-Minimum round structure:
+最低轮次结构：
 
-1. Direction split: should this live in an existing mechanism or a new one?
-2. MVP boundary: v1, v2, and what would force v2 back into v1.
-3. Data contract: events, schema, metadata, state source of truth, compatibility.
-4. CLI / UX contract: command names, flags, errors, defaults, ambiguity.
-5. Cross-layer risk and tests: shared helpers, drift points, release-blocking tests.
+1. 方向选择：应使用现有机制还是新机制？
+2. MVP 边界：v1、v2，以及什么条件会迫使 v2 内容回到 v1。
+3. 数据契约：事件、Schema、元数据、状态事实来源和兼容性。
+4. CLI / UX 契约：命令名、参数、错误、默认值和歧义。
+5. 跨层风险与测试：共享辅助函数、偏移点和阻塞发布的测试。
 
-Optional rounds:
+可选轮次：
 
-- Operations: logs, debugging, stuck workers, kill/restart, recovery.
-- Migration/release: breaking status, manifest, changelog, docs-site.
-- Opposition review: ask the peer agent to argue against the current plan.
+- 运维：日志、调试、Worker 卡住、终止/重启和恢复。
+- 迁移/发布：破坏性状态、清单、变更日志和文档站点。
+- 反方审查：让协作 Agent 反驳当前方案。
 
-Every probe should request concrete file paths, commands, schema, rejected
-alternatives, and release-blocking issues. Reject hedging when a decision is
-needed.
+每次追问都应要求给出具体文件路径、命令、Schema、被否决的方案和阻塞发布的
+问题。需要作出决定时，不接受含糊其辞。
 
-## Pattern B: Implement / Check Agent
+## 模式 B：Implement / Check Agent
 
-Use when the user asks to dispatch implementation or review work.
+当用户要求派发实施或审查工作时使用。
 
 ```bash
 TASK=.trellis/tasks/05-12-foo
@@ -64,16 +63,15 @@ trellis channel spawn cr-foo \
 
 trellis channel send cr-foo --as main --to check --text-file /tmp/cr-brief.md
 trellis channel wait cr-foo --as main --kind done --from check --timeout 15m
-trellis channel messages cr-foo --kind message --from check --tag final_answer
+trellis channel messages cr-foo --kind message --from check --last 1 --raw
 ```
 
-For implement work, use `--agent implement` and send an implementation brief.
-For check work, include the exact diff scope, relevant specs, and validation
-already run.
+实施工作使用 `--agent implement`，并发送实施简报。检查工作应包含精确的
+diff 范围、相关规范和已经运行的验证。
 
-## Pattern C: Parallel Reviewers
+## 模式 C：并行审查者
 
-Use one channel and distinct worker names.
+使用一个 channel 和互不相同的 Worker 名称。
 
 ```bash
 trellis channel create cr-feature --by main --ephemeral
@@ -91,26 +89,26 @@ trellis channel send cr-feature --as main --to check-cx --text-file /tmp/cr-brie
 trellis channel wait cr-feature --as main --kind done --from check,check-cx --all --timeout 15m
 ```
 
-`--all` means every listed worker must emit a matching event.
+`--all` 表示列出的每个 Worker 都必须发出匹配事件。
 
-## Pattern D: One-shot Worker
+## 模式 D：一次性 Worker
 
 ```bash
 trellis channel run --provider codex --message "say hi in 3 words" --timeout 1m
 trellis channel run --agent plan --message-file /tmp/plan-question.md --timeout 10m
 ```
 
-On success, `run` removes the ephemeral channel. On error/timeout/killed, it
-keeps the channel and prints the path for inspection.
+成功时，`run` 会删除临时 channel；发生错误、超时或终止时，则保留 channel
+并打印路径以供检查。
 
-## Pattern E: Forum Channel
+## 模式 E：Forum Channel
 
-Use for issue forums, topic-style feedback, release todos, agent findings, and
-internal changelogs. Read `forum.md` for the full model.
+用于问题论坛、主题式反馈、发布待办、Agent 发现和内部变更日志。完整模型见
+`forum.md`。
 
-## Pattern F: Take Over Existing Thread
+## 模式 F：接手现有 Thread
 
-If the user gives a forum/thread name, restore context yourself:
+如果用户给出 forum/thread 名称，请自行恢复上下文：
 
 ```bash
 trellis channel forum <board> --scope global
@@ -119,10 +117,10 @@ trellis channel context list <board> --scope global --thread <thread>
 trellis channel messages <board> --scope global --raw --thread <thread>
 ```
 
-Output a constraint summary, not a transcript dump:
+输出约束摘要，而不是倾倒完整对话记录：
 
-- user-level problem
-- context files that affect this repo
-- current-version versus future-version requirements
-- whether current code/design satisfies it
-- next action or comment to append
+- 用户层面的问题
+- 影响当前仓库的上下文文件
+- 当前版本与未来版本需求
+- 当前代码/设计是否满足需求
+- 下一步操作或要追加的评论

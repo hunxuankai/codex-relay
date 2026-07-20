@@ -1,12 +1,12 @@
-# MCP Setup
+# MCP 设置
 
-GitNexus and ABCoder are recommended when bootstrapping Trellis specs because they expose architecture and AST context to the agent. They are tool choices, not platform requirements. Configure them through whatever MCP mechanism your agent host provides.
+引导 Trellis 规范时推荐使用 GitNexus 和 ABCoder，因为它们能向代理提供架构和 AST 上下文。它们是工具选择，而不是平台要求。通过代理宿主提供的 MCP 机制配置。
 
 ## GitNexus
 
-GitNexus builds a code knowledge graph from the repository. Use it for module boundaries, execution flows, dependency relationships, blast radius, and graph queries.
+GitNexus 从仓库构建代码知识图谱。用于分析模块边界、执行流、依赖关系、影响范围和图查询。
 
-### Install and Index
+### 安装与索引
 
 ```bash
 # Run from the repository root.
@@ -19,39 +19,39 @@ npx gitnexus status
 npx gitnexus analyze
 ```
 
-The index is written to `.gitnexus/`. Keep embeddings only if the project already uses them; otherwise a normal index is enough for spec bootstrapping.
+索引写入 `.gitnexus/`。只有项目已经使用 Embedding 时才保留；否则普通索引足以引导规范。
 
-### MCP Server Command
+### MCP 服务器命令
 
-Use this server command in the host's MCP configuration:
+在宿主的 MCP 配置中使用以下服务器命令：
 
 ```bash
 npx -y gitnexus mcp
 ```
 
-### Useful Tools
+### 常用工具
 
-| Tool | Purpose |
+| 工具 | 用途 |
 |------|---------|
-| `gitnexus_query` | Find execution flows and functional areas by concept |
-| `gitnexus_context` | Inspect callers, callees, references, and process participation for a symbol |
-| `gitnexus_impact` | Understand blast radius before changing a symbol |
-| `gitnexus_detect_changes` | Check changed symbols and affected flows before finishing |
-| `gitnexus_cypher` | Run direct graph queries |
-| `gitnexus_list_repos` | List indexed repositories |
+| `gitnexus_query` | 按概念查找执行流和功能区域 |
+| `gitnexus_context` | 检查符号的调用方、被调用方、引用和参与的流程 |
+| `gitnexus_impact` | 修改符号前了解影响范围 |
+| `gitnexus_detect_changes` | 完成前检查变更符号和受影响流程 |
+| `gitnexus_cypher` | 运行直接图查询 |
+| `gitnexus_list_repos` | 列出已索引仓库 |
 
 ## ABCoder
 
-ABCoder parses code into UniAST and gives precise package, file, and node-level structure. Use it for signatures, type shapes, implementations, dependencies, and reverse references.
+ABCoder 把代码解析为 UniAST，并提供精确的包、文件和节点级结构。用于分析签名、类型形态、实现、依赖和反向引用。
 
-### Install
+### 安装
 
 ```bash
 go install github.com/cloudwego/abcoder@latest
 abcoder --help
 ```
 
-### Parse Repositories
+### 解析仓库
 
 ```bash
 abcoder parse /absolute/path/to/package \
@@ -60,29 +60,29 @@ abcoder parse /absolute/path/to/package \
   --output ~/abcoder-asts
 ```
 
-For monorepos, parse each package with a stable `--name` so task notes can reference the same repository names.
+对于 Monorepo，使用稳定的 `--name` 解析每个包，使任务注记可以引用一致的仓库名称。
 
-### MCP Server Command
+### MCP 服务器命令
 
-Use this server command in the host's MCP configuration:
+在宿主的 MCP 配置中使用以下服务器命令：
 
 ```bash
 abcoder mcp ~/abcoder-asts
 ```
 
-### Useful Tools
+### 常用工具
 
-| Tool | Layer | Purpose |
+| 工具 | 层级 | 用途 |
 |------|-------|---------|
-| `list_repos` | 1 | List parsed repositories |
-| `get_repo_structure` | 2 | Inspect packages and files |
-| `get_package_structure` | 3 | Inspect nodes within a package |
-| `get_file_structure` | 3 | Inspect functions, classes, types, and signatures in a file |
-| `get_ast_node` | 4 | Retrieve code, dependencies, references, and implementations |
+| `list_repos` | 1 | 列出已解析仓库 |
+| `get_repo_structure` | 2 | 检查包和文件 |
+| `get_package_structure` | 3 | 检查包内节点 |
+| `get_file_structure` | 3 | 检查文件中的函数、类、类型和签名 |
+| `get_ast_node` | 4 | 获取代码、依赖、引用和实现 |
 
-## Verification
+## 验证
 
-After configuration, verify from the agent host that both MCP servers are visible. Then run one simple query against each server before starting the spec writing pass.
+配置后，从代理宿主验证两个 MCP 服务器都可见。开始规范编写前，分别对每个服务器运行一个简单查询。
 
 ```bash
 ls .gitnexus/meta.json

@@ -1,98 +1,98 @@
 ---
 name: trellis-check
-description: "Comprehensive quality verification: spec compliance, lint, type-check, tests, cross-layer data flow, code reuse, and consistency checks. Use when code is written and needs quality verification, before committing changes, or to catch context drift during long sessions."
+description: "综合质量验证：规范符合性、lint、类型检查、测试、跨层数据流、代码复用和一致性检查。代码写完需要质量验证、提交改动前或长会话中需要发现上下文漂移时使用。"
 ---
 
-# Code Quality Check
+# 代码质量检查
 
-Comprehensive quality verification for recently written code. Combines spec compliance, cross-layer safety, and pre-commit checks.
+对最近编写的代码进行综合质量验证，结合规范符合性、跨层安全和提交前检查。
 
 ---
 
-## Step 1: Identify What Changed
+## 步骤 1：识别改动
 
 ```bash
 git diff --name-only HEAD
 git status
 ```
 
-## Step 2: Read Task Artifacts and Applicable Specs
+## 步骤 2：读取任务材料和适用规范
 
-Read the current task artifacts in order:
+按顺序读取当前任务材料：
 
 - `prd.md`
-- `design.md` if present
-- `implement.md` if present
+- 如果存在 `design.md`
+- 如果存在 `implement.md`
 
 ```bash
 python ./.trellis/scripts/get_context.py --mode packages
 ```
 
-For each changed package/layer, read the spec index and follow its **Quality Check** section:
+对每个发生改动的包/层，读取规范索引并遵循其中的**质量检查**部分：
 
 ```bash
 cat .trellis/spec/<package>/<layer>/index.md
 ```
 
-Read the specific guideline files referenced — the index is a pointer, not the goal.
+读取索引引用的具体规范文件；索引只是指针，不是终点。
 
-## Step 3: Run Project Checks
+## 步骤 3：运行项目检查
 
-Run the project's lint, type-check, and test commands. Fix any failures before proceeding.
+运行项目的 lint、类型检查和测试命令。修复所有失败后再继续。
 
-## Step 4: Review Against Checklist
+## 步骤 4：按清单审查
 
-### Code Quality
+### 代码质量
 
-- [ ] Linter passes?
-- [ ] Type checker passes (if applicable)?
-- [ ] Tests pass?
-- [ ] No debug logging left in?
-- [ ] No suppressed warnings or type-safety bypasses?
+- [ ] Linter 是否通过？
+- [ ] 类型检查是否通过（如适用）？
+- [ ] 测试是否通过？
+- [ ] 是否没有遗留调试日志？
+- [ ] 是否没有压制警告或绕过类型安全？
 
-### Test Coverage
+### 测试覆盖
 
-- [ ] New function → unit test added?
-- [ ] Bug fix → regression test added?
-- [ ] Changed behavior → existing tests updated?
+- [ ] 新函数 → 是否添加单元测试？
+- [ ] 缺陷修复 → 是否添加回归测试？
+- [ ] 行为变更 → 是否更新现有测试？
 
-### Spec Sync
+### 规范同步
 
-- [ ] Does `.trellis/spec/` need updates? (new patterns, conventions, lessons learned)
+- [ ] `.trellis/spec/` 是否需要更新（新模式、约定、经验教训）？
 
-> "If I fixed a bug or discovered something non-obvious, should I document it so future me won't hit the same issue?" → If YES, update the relevant spec doc.
+> “如果我修复了缺陷或发现了不直观的事项，是否应该记录下来，避免以后再次遇到？”→ 如果是，更新相关规范文档。
 
-## Step 5: Cross-Layer Dimensions (if applicable)
+## 步骤 5：跨层维度（如适用）
 
-Skip this step if your change is confined to a single layer.
+如果改动仅限单层，跳过此步骤。
 
-### A. Data Flow (changes touch 3+ layers)
+### A. 数据流（改动涉及 3 层或更多）
 
-- [ ] Read flow traces correctly: Storage → Service → API → UI
-- [ ] Write flow traces correctly: UI → API → Service → Storage
-- [ ] Types/schemas correctly passed between layers?
-- [ ] Errors properly propagated to caller?
+- [ ] 读取流是否正确贯通：存储 → 服务 → API → UI
+- [ ] 写入流是否正确贯通：UI → API → 服务 → 存储
+- [ ] 类型/Schema 是否在各层间正确传递？
+- [ ] 错误是否正确传播给调用方？
 
-### B. Code Reuse (modifying constants, creating utilities)
+### B. 代码复用（修改常量、创建工具函数）
 
-- [ ] Searched for existing similar code before creating new?
+- [ ] 创建新代码前是否搜索过现有相似实现？
   ```bash
   grep -r "pattern" src/
   ```
-- [ ] If 2+ places define same value → extracted to shared constant?
-- [ ] After batch modification, all occurrences updated?
+- [ ] 如果两个或更多位置定义同一值 → 是否提取为共享常量？
+- [ ] 批量修改后是否更新了所有出现位置？
 
-### C. Import/Dependency (creating new files)
+### C. 导入/依赖（创建新文件）
 
-- [ ] Correct import paths (relative vs absolute)?
-- [ ] No circular dependencies?
+- [ ] 导入路径是否正确（相对路径与绝对路径）？
+- [ ] 是否没有循环依赖？
 
-### D. Same-Layer Consistency
+### D. 同层一致性
 
-- [ ] Other places using the same concept are consistent?
+- [ ] 使用同一概念的其他位置是否保持一致？
 
 ---
 
-## Step 6: Report and Fix
+## 步骤 6：报告并修复
 
-Report violations found and fix them directly. Re-run project checks after fixes.
+报告发现的违规项并直接修复。修复后重新运行项目检查。

@@ -1,55 +1,55 @@
 ---
 name: trellis-session-insight
-description: "Reach into past AI conversation history through the `trellis mem` CLI. Use whenever the user asks 'how did we solve X last time', 'have we discussed this before', 'what was the decision on X', 'remind me what we did in this task', '上次怎么解的', '之前讨论过吗', '想起一段对话', or when starting a brainstorm that overlaps prior work, debugging a familiar bug, continuing a task across sessions, or doing a finish-work review. Returns raw past dialogue; decide for the moment whether to update spec, append to task notes, quote inline in the answer, or just internalize."
+description: "通过 `trellis mem` CLI 检索过去的 AI 对话历史。用户询问“上次如何解决 X”“之前讨论过吗”“关于 X 的决定是什么”“提醒我这个任务做过什么”“上次怎么解的”“想起一段对话”，或开始与过往工作重叠的需求探索、调试熟悉缺陷、跨会话继续任务、进行收尾回顾时使用。返回原始历史对话；根据当前情境决定更新规范、追加任务注记、在回答中引用或仅内部吸收。"
 ---
 
-# Trellis Session Insight
+# Trellis 会话洞察
 
-This skill teaches an AI **how to call `trellis mem`** — the project's cross-session memory feedstock — and **when reaching for it is the right move**.
+此 Skill 说明 AI **如何调用 `trellis mem`**（项目的跨会话记忆原料），以及**何时适合使用它**。
 
-It is intentionally a **capability skill, not a workflow**. There is no fixed output file, no required write-back step, no "always run after finish-work" rule. What to do with what `mem` returns is a judgement call made in the moment of the conversation. The skill exists so the AI knows the capability is there and can decide.
+它刻意被设计为**能力型 Skill，而不是工作流**。没有固定输出文件、没有必需的写回步骤，也没有“完成工作后始终运行”的规则。如何处理 `mem` 返回的内容，应根据当前对话即时判断。此 Skill 的作用是让 AI 知道该能力存在并能作出选择。
 
-## What `trellis mem` is
+## `trellis mem` 是什么
 
-A local CLI that indexes the user's past Claude Code, Codex, and Pi Agent conversation logs and lets you list, search, slice by Trellis task boundaries, and dump cleaned dialogue from them. Claude and Codex use `~/.claude/projects/` and `~/.codex/sessions/`. Pi uses its default or environment-configured session root, global `~/.pi/agent/settings.json`, and the scoped project's `.pi/settings.json`; relative `sessionDir` values resolve from the settings file directory. Project-local Pi settings require project-scoped lookup through the current cwd or `--cwd`. OpenCode logs are not yet indexable (provider adapter pending) — when an OpenCode session is the obvious target, surface that limitation rather than guessing.
+这是一个本地 CLI，会索引用户过去的 Claude Code、Codex 和 Pi Agent 对话日志，并支持列出、搜索、按 Trellis 任务边界切片，以及导出清理后的对话。Claude 和 Codex 分别使用 `~/.claude/projects/` 与 `~/.codex/sessions/`。Pi 使用默认或环境配置的会话根目录、全局 `~/.pi/agent/settings.json` 和目标项目的 `.pi/settings.json`；相对 `sessionDir` 从设置文件所在目录解析。项目本地 Pi 设置需要通过当前工作目录或 `--cwd` 进行项目范围查找。OpenCode 日志目前还不能索引（Provider 适配器尚未完成）；当明显需要查找 OpenCode 会话时，应说明此限制，不要猜测。
 
-Nothing in `mem` is uploaded. All reads are local.
+`mem` 不会上传任何内容，所有读取都在本机完成。
 
-## When to reach for it
+## 何时使用
 
-The bar is "would a senior teammate ask 'didn't we already talk about this?'" — those are the moments. Some concrete patterns:
+判断标准是：“资深同事会不会问‘我们之前不是讨论过吗？’”——这正是应使用它的时刻。具体模式包括：
 
-- **Brainstorm rerun risk.** Starting a new task that touches an area the user has been in before, and you want to check whether a decision was already made — before re-asking the user.
-- **Familiar-bug debugging.** The current bug pattern feels like one the user reported / fixed before. Pulling the relevant past session can save a full debugging loop.
-- **Cross-session continuation.** The user resumes work after a gap and says "where were we" / "继续上次的" without being specific.
-- **Decision retrieval.** The user references "the decision we made about X" but the decision lives in an old brainstorm, not in any `prd.md` / `spec/`.
-- **Finish-work retrospective.** When the user explicitly asks for a wrap-up of what was decided / what hurt / what surprised them in this task — not as a forced step on every finish-work.
-- **Pattern-spotting across past work.** The user asks "do I keep making the same mistake on X" / "我每次都踩这个坑吗" — search across sessions answers that.
+- **重复需求探索的风险。** 新任务涉及用户以前处理过的领域，希望在再次询问用户前确认是否已有决定。
+- **熟悉缺陷的调试。** 当前缺陷模式像是用户以前报告或修复过的问题。拉取相关历史会话可省去完整调试循环。
+- **跨会话继续。** 用户间隔一段时间后恢复工作，只说“我们做到哪了”或“继续上次的”，没有给出细节。
+- **检索决定。** 用户提到“我们对 X 作出的决定”，但该决定存在于旧需求探索对话中，而不在任何 `prd.md` 或 `spec/` 中。
+- **完成工作回顾。** 用户明确要求总结本任务中作出的决定、困难或意外；不要把它强制成每次收尾都执行的步骤。
+- **识别过往工作模式。** 用户询问“我是不是总在 X 上犯同样错误”或“我每次都踩这个坑吗”；跨会话搜索可以回答。
 
-If none of these apply, don't call `mem`. It is a tool, not a ceremony.
+如果这些情况都不适用，不要调用 `mem`。它是工具，不是仪式。
 
-## When NOT to reach for it
+## 何时不要使用
 
-- The relevant context is already in the current turn, `prd.md`, `design.md`, recent `git log`, or the open files. `mem` is for stuff that has fallen out of immediate reach.
-- The user is asking about a fact in the code, not a fact from a past conversation. `git log -p` / `grep` / reading the file directly is faster and more authoritative.
-- You are in a sub-agent (`trellis-implement` / `trellis-check`) whose dispatch prompt already includes the curated `implement.jsonl` / `check.jsonl` context. Adding `mem` on top usually just clutters.
-- The user has explicitly said "don't dig through history, just answer what I asked".
+- 相关上下文已在当前轮次、`prd.md`、`design.md`、最近的 `git log` 或已打开文件中。`mem` 用于找回已经离开即时上下文的内容。
+- 用户询问的是代码事实，而非过去对话中的事实。使用 `git log -p`、`grep` 或直接读取文件更快且更权威。
+- 当前处于子代理（`trellis-implement` / `trellis-check`），其派发提示已包含整理后的 `implement.jsonl` / `check.jsonl` 上下文。额外调用 `mem` 通常只会增加噪声。
+- 用户已明确表示“不要翻历史，只回答我问的内容”。
 
-## What to do with what `mem` returns
+## 如何处理 `mem` 的返回内容
 
-Treat the output as **raw material**, not a deliverable. Once you have it, decide based on the live conversation:
+把输出视为**原始材料**，而不是交付物。获得结果后，根据当前对话决定：
 
-- **Quote inline in your reply** if a specific past exchange answers the user's current question — and cite the session-id / phase so the user can verify.
-- **Update `<task>/prd.md` or `<task>/design.md`** if `mem` surfaced a load-bearing decision that should have been written down but wasn't. Surface the proposed edit to the user first.
-- **Append to a task-local notes file** (e.g. `<task>/notes.md` or extending an existing one) if the finding belongs to the current task's record but doesn't fit the PRD.
-- **Update `.trellis/spec/`** if the finding is a project-wide convention or gotcha that would help future tasks. Run the `trellis-update-spec` skill for that — `session-insight` ends at the discovery.
-- **Just absorb it** for the next few turns and answer better, without writing anything. This is often the right move for one-off recall.
+- 如果某段过去交流能回答用户当前问题，**在回复中直接引用**，并注明会话 ID / 阶段供用户核验。
+- 如果 `mem` 找到了本应记录却遗漏的关键决定，**更新 `<task>/prd.md` 或 `<task>/design.md`**。先向用户说明拟议改动。
+- 如果发现属于当前任务记录但不适合放入 PRD，**追加到任务本地注记文件**（例如 `<task>/notes.md`，或扩展现有注记）。
+- 如果发现是有助于未来任务的项目级约定或易错点，**更新 `.trellis/spec/`**。为此运行 `trellis-update-spec` Skill；`session-insight` 在发现阶段结束。
+- **仅吸收内容**，在接下来几轮中改进回答，不写入任何文件。对于一次性回忆，这通常是正确做法。
 
-Trellis does not prescribe a single destination. Forcing every recall into a fixed file makes the file grow into noise. Let the situation decide.
+Trellis 不规定唯一去向。强迫每次回忆都写入固定文件只会让文件膨胀成噪声，应由具体情境决定。
 
-## How to call it
+## 如何调用
 
-Full CLI reference is in `references/cli-quick-reference.md`. The 80% case is one of:
+完整 CLI 参考见 `references/cli-quick-reference.md`。80% 的场景可使用以下命令之一：
 
 ```bash
 # Find sessions whose contents mention a keyword (project-scope is default;
@@ -68,14 +68,14 @@ trellis mem list --cwd <project-path>
 trellis mem projects   # → list active project cwds, then narrow
 ```
 
-Phase slicing (`--phase brainstorm|implement|all`) cuts the session at `task.py create` and `task.py start` boundaries. For a finish-work review of the current task, `--phase brainstorm` recovers the planning discussion and `--phase implement` recovers the execution loop. Default is `all`.
+阶段切片（`--phase brainstorm|implement|all`）会在 `task.py create` 和 `task.py start` 边界切分会话。回顾当前任务的完成工作时，`--phase brainstorm` 恢复规划讨论，`--phase implement` 恢复实施循环。默认值为 `all`。
 
-## Triggering patterns
+## 触发模式
 
-`references/triggering-patterns.md` lists more verbatim user phrasings (English + Chinese) that should make you think "reach for `mem`" — keep that handy when training instinct.
+`references/triggering-patterns.md` 列出更多应让你想到“使用 `mem`”的用户原话（英文和中文）；训练判断直觉时可随时查阅。
 
-## Out of scope
+## 范围外事项
 
-- `mem` does not edit code or update files. Any write-back is your decision in the moment.
-- `mem` is read-only on the platform JSONL stores. It does not push or sync to remote.
-- This skill does not replace `trellis-update-spec` (which is the right tool for promoting a finding into project-wide guidance) or the platform-native task / spec workflow.
+- `mem` 不编辑代码或更新文件。是否写回由你根据当前情境决定。
+- `mem` 对平台 JSONL 存储只读，不会推送或同步到远端。
+- 此 Skill 不替代 `trellis-update-spec`（把发现提升为项目级指南的正确工具），也不替代平台原生任务/规范工作流。

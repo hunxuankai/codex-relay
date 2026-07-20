@@ -1,34 +1,34 @@
-# Platform File Map
+# 平台文件映射
 
-This page lists common Trellis file locations in a user project by platform. Whether a platform directory exists in an actual project depends on which `trellis init --<platform>` commands the user ran.
+本页按平台列出用户项目中常见的 Trellis 文件位置。实际项目中是否存在某个平台目录，取决于用户运行了哪些 `trellis init --<platform>` 命令。
 
-## Matrix
+## 矩阵
 
-| Platform | CLI flag | Main directory | Skill directory | Agent directory | Hooks/extensions |
+| 平台 | CLI 参数 | 主目录 | Skill 目录 | Agent 目录 | Hook/扩展 |
 | --- | --- | --- | --- | --- | --- |
 | Claude Code | `--claude` | `.claude/` | `.claude/skills/` | `.claude/agents/` | `.claude/hooks/` + `.claude/settings.json` |
 | Cursor | `--cursor` | `.cursor/` | `.cursor/skills/` | `.cursor/agents/` | `.cursor/hooks.json` + `.cursor/hooks/` |
 | OpenCode | `--opencode` | `.opencode/` | `.opencode/skills/` | `.opencode/agents/` | `.opencode/plugins/` |
 | Codex | `--codex` | `.codex/` | `.agents/skills/` | `.codex/agents/` | `.codex/hooks/` + `.codex/hooks.json` |
-| Kilo | `--kilo` | `.kilocode/` | `.kilocode/skills/` | Usually none | `.kilocode/workflows/` |
+| Kilo | `--kilo` | `.kilocode/` | `.kilocode/skills/` | 通常没有 | `.kilocode/workflows/` |
 | Kiro | `--kiro` | `.kiro/` | `.kiro/skills/` | `.kiro/agents/` | `.kiro/hooks/` |
 | Gemini CLI | `--gemini` | `.gemini/` | `.agents/skills/` | `.gemini/agents/` | `.gemini/settings.json` + `.gemini/hooks/` |
-| Antigravity | `--antigravity` | `.agent/` | `.agent/skills/` | Usually none | `.agent/workflows/` |
-| Devin | `--devin` | `.devin/` | `.devin/skills/` | Usually none | `.devin/workflows/` |
+| Antigravity | `--antigravity` | `.agent/` | `.agent/skills/` | 通常没有 | `.agent/workflows/` |
+| Devin | `--devin` | `.devin/` | `.devin/skills/` | 通常没有 | `.devin/workflows/` |
 | Qoder | `--qoder` | `.qoder/` | `.qoder/skills/` | `.qoder/agents/` | `.qoder/hooks/` + `.qoder/settings.json` |
 | CodeBuddy | `--codebuddy` | `.codebuddy/` | `.codebuddy/skills/` | `.codebuddy/agents/` | `.codebuddy/hooks/` + `.codebuddy/settings.json` |
-| GitHub Copilot | `--copilot` | `.github/` | `.github/skills/` | `.github/agents/` | `.github/copilot/hooks/` + prompts |
+| GitHub Copilot | `--copilot` | `.github/` | `.github/skills/` | `.github/agents/` | `.github/copilot/hooks/` + 提示词 |
 | Factory Droid | `--droid` | `.factory/` | `.factory/skills/` | `.factory/droids/` | `.factory/hooks/` + settings |
-| Pi Agent | `--pi` | `.pi/` | `.pi/skills/` | `.pi/agents/` | `.pi/extensions/trellis/` (native `trellis_subagent` tool) + `.pi/settings.json` |
+| Pi Agent | `--pi` | `.pi/` | `.pi/skills/` | `.pi/agents/` | `.pi/extensions/trellis/`（原生 `trellis_subagent` 工具）+ `.pi/settings.json` |
 | Trae IDE | `--trae` | `.trae/` | `.trae/skills/` | `.trae/agents/` | `.trae/hooks/` + `.trae/hooks.json` |
-| Reasonix | `--reasonix` | `.reasonix/` | `.reasonix/skills/` | None — sub-agents are skills with `runAs: subagent` frontmatter | None |
-| ZCode | `--zcode` | `.zcode/` | `.zcode/skills/` | `.zcode/agents/` | pull-based prelude (no hooks) |
+| Reasonix | `--reasonix` | `.reasonix/` | `.reasonix/skills/` | 无——子 Agent 是带有 `runAs: subagent` frontmatter 的 Skill | 无 |
+| ZCode | `--zcode` | `.zcode/` | `.zcode/skills/` | `.zcode/agents/` | 拉取型前置指令（无 hook） |
 
-## Capability Groups
+## 能力分组
 
-### Trellis Sub-Agent Support
+### Trellis 子 Agent 支持
 
-These platforms usually have `trellis-research`, `trellis-implement`, and `trellis-check` files:
+这些平台通常具有 `trellis-research`、`trellis-implement` 和 `trellis-check` 文件：
 
 - Claude Code
 - Cursor
@@ -42,64 +42,64 @@ These platforms usually have `trellis-research`, `trellis-implement`, and `trell
 - Factory Droid
 - Pi Agent
 - Trae IDE
-- Reasonix (delivered as skills with `runAs: subagent` under `.reasonix/skills/`, not as a separate `agents/` directory)
+- Reasonix（以 `.reasonix/skills/` 下带有 `runAs: subagent` 的 Skill 提供，而不是单独的 `agents/` 目录）
 - ZCode
 
-When changing implementation/check/research behavior, look for the corresponding platform agent files first.
+修改 implementation/check/research 行为时，首先查找对应的平台 Agent 文件。
 
-### Native Trellis Sub-Agent Tool
+### 原生 Trellis 子 Agent 工具
 
-Some platforms expose a first-class tool that the host runtime understands. The model calls it like any other tool and the host renders progress cards, validates the agent name against `.<platform>/agents/`, and enforces dispatch modes.
+某些平台提供宿主运行时能够识别的一等工具。模型像调用其他工具一样调用它，宿主负责呈现进度卡片、根据 `.<platform>/agents/` 验证 Agent 名称，并强制执行派发模式。
 
-- Pi Agent — `trellis_subagent` tool, defined in `.pi/extensions/trellis/index.ts`. Supports `single` / `parallel` / `chain` dispatch modes and emits live `trellis-subagent-progress` events.
+- Pi Agent——`trellis_subagent` 工具定义在 `.pi/extensions/trellis/index.ts`。它支持 `single` / `parallel` / `chain` 派发模式，并发送实时 `trellis-subagent-progress` 事件。
 
-When changing sub-agent dispatch behavior on these platforms, edit the extension file, **not** the agent markdown — the agent markdown defines responsibilities, but the host extension owns dispatch, validation, and progress rendering.
+修改这些平台的子 Agent 派发行为时，应编辑扩展文件，**而不是** Agent Markdown——Agent Markdown 定义职责，但派发、验证和进度呈现由宿主扩展负责。
 
-### Main-Session Workflow Platforms
+### 主会话工作流平台
 
-These platforms rely more on workflows/skills to guide the main session:
+这些平台更多依赖工作流/Skill 引导主会话：
 
 - Kilo
 - Antigravity
 - Devin
 
-When changing behavior, inspect workflows and skills first. Do not assume Trellis sub-agents exist.
+修改行为时，首先检查工作流和 Skill。不要假设 Trellis 子 Agent 一定存在。
 
-### Shared `.agents/skills/`
+### 共享 `.agents/skills/`
 
-Codex and Gemini CLI write the shared `.agents/skills/` layer. Some tools that support agentskills.io can also read this directory. If the user wants multiple compatible tools to share one skill, consider `.agents/skills/` first, but do not assume every platform reads it. ZCode keeps Trellis-managed skills under `.zcode/skills/`.
+Codex 和 Gemini CLI 写入共享 `.agents/skills/` 层。某些支持 agentskills.io 的工具也能读取该目录。如果用户希望多个兼容工具共享同一个 Skill，优先考虑 `.agents/skills/`，但不要假设所有平台都会读取它。ZCode 将 Trellis 管理的 Skill 保存在 `.zcode/skills/` 下。
 
-## Decision Rules When Modifying Platform Files
+## 修改平台文件时的决策规则
 
-1. User specified a platform: modify only that platform directory unless shared workflow/spec files must also change.
-2. User says "all platforms should do this": synchronize equivalent entry points platform by platform; do not modify only one directory.
-3. User only says "my AI": inspect the configuration directories that actually exist in the project and infer the current AI platform.
-4. User wants project rules: prefer `.trellis/spec/` or a project-local skill.
-5. User wants Trellis behavior: edit `.trellis/workflow.md` plus platform hooks/agents/skills/commands.
+1. 用户指定了平台：只修改该平台目录，除非还必须修改共享 workflow/spec 文件。
+2. 用户说“所有平台都应这样做”：逐个平台同步等价入口，不要只修改一个目录。
+3. 用户只说“我的 AI”：检查项目中实际存在的配置目录，并据此判断当前 AI 平台。
+4. 用户需要项目规则：优先使用 `.trellis/spec/` 或项目本地 Skill。
+5. 用户需要修改 Trellis 行为：编辑 `.trellis/workflow.md` 以及平台 hook/Agent/Skill/命令。
 
-## When Paths Differ
+## 路径不一致时
 
-Platform ecosystems change, and user projects may already be customized. If this table disagrees with local files, use the actual settings/config in the user project as authoritative:
+平台生态会变化，用户项目也可能已经定制。如果本表与本地文件不一致，以用户项目中的实际 settings/config 为准：
 
-- Check the hook that settings registers.
-- Check the script that a command/prompt/workflow points to.
-- Judge behavior by the read rules currently written in the agent file.
+- 检查 settings 注册的 hook。
+- 检查 command/prompt/workflow 指向的脚本。
+- 根据 Agent 文件当前写明的读取规则判断行为。
 
-Do not delete a custom file just because it is not listed in this path table.
+不要仅仅因为自定义文件未列入本路径表就删除它。
 
-### `.omp/` — Oh My Pi (OMP)
+### `.omp/`——Oh My Pi（OMP）
 
-Extension-backed platform. OMP native provider auto-discovers all subdirectories.
+由扩展支持的平台。OMP 原生 Provider 会自动发现所有子目录。
 
 ```
 .omp/
-├── commands/          # Slash commands (flat .md)
-├── skills/            # Auto-triggered skills (SKILL.md per dir)
-├── agents/            # Agent definitions (.md)
+├── commands/          # Slash 命令（扁平 .md）
+├── skills/            # 自动触发的 Skill（每个目录一个 SKILL.md）
+├── agents/            # Agent 定义（.md）
 └── extensions/
     └── trellis/
-        └── index.ts   # Trellis extension (context injection)
+        └── index.ts   # Trellis 扩展（上下文注入）
 ```
 
-No `settings.json` — OMP scans `.omp/` subdirectories automatically.
-No Python hooks — hook-equivalent behavior lives in the TypeScript extension.
+没有 `settings.json`——OMP 自动扫描 `.omp/` 子目录。
+没有 Python hook——等价的 hook 行为位于 TypeScript 扩展中。

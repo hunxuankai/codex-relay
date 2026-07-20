@@ -1,28 +1,28 @@
-# Change Local Spec Structure
+# 修改本地规范结构
 
-When the user wants to change the engineering conventions AI follows, add new spec layers, or adjust monorepo package mapping, edit `.trellis/spec/` and `.trellis/config.yaml`.
+当用户希望修改 AI 遵循的工程约定、添加新的规范层或调整 monorepo 包映射时，编辑 `.trellis/spec/` 和 `.trellis/config.yaml`。
 
-## Read These Files First
+## 编辑前先读取这些文件
 
 1. `.trellis/config.yaml`
 2. `.trellis/spec/`
-3. `.trellis/workflow.md` planning artifact guidance and Phase 3.3
-4. Current task `implement.jsonl` / `check.jsonl`
+3. `.trellis/workflow.md` 中的规划产物指南和 Phase 3.3
+4. 当前任务的 `implement.jsonl` / `check.jsonl`
 
-## Common Needs
+## 常见需求
 
-| Need | Edit location |
+| 需求 | 编辑位置 |
 | --- | --- |
-| Add backend/frontend/docs/test spec layer | `.trellis/spec/<layer>/` or `.trellis/spec/<package>/<layer>/` |
-| Add shared thinking guides | `.trellis/spec/guides/` |
-| Adjust monorepo packages | `packages` in `.trellis/config.yaml` |
-| Change default package | `default_package` in `.trellis/config.yaml` |
-| Control spec scanning scope | `spec_scope` in `.trellis/config.yaml` |
-| Make a task read a new spec | Task `implement.jsonl` / `check.jsonl` |
+| 添加 backend/frontend/docs/test 规范层 | `.trellis/spec/<layer>/` 或 `.trellis/spec/<package>/<layer>/` |
+| 添加共享思考指南 | `.trellis/spec/guides/` |
+| 调整 monorepo 包 | `.trellis/config.yaml` 中的 `packages` |
+| 修改默认包 | `.trellis/config.yaml` 中的 `default_package` |
+| 控制规范扫描范围 | `.trellis/config.yaml` 中的 `spec_scope` |
+| 让任务读取新规范 | 任务的 `implement.jsonl` / `check.jsonl` |
 
-## Add A Spec Layer
+## 添加规范层
 
-Single-repository example:
+单仓库示例：
 
 ```text
 .trellis/spec/security/
@@ -30,7 +30,7 @@ Single-repository example:
 └── auth.md
 ```
 
-Monorepo example:
+Monorepo 示例：
 
 ```text
 .trellis/spec/webapp/security/
@@ -38,25 +38,25 @@ Monorepo example:
 └── auth.md
 ```
 
-`index.md` should include:
+`index.md` 应包含：
 
-- What code this layer applies to.
-- Pre-Development Checklist.
-- Quality Check.
-- Links to specific guideline files.
+- 该规范层适用于哪些代码。
+- 开发前检查。
+- 质量检查。
+- 指向具体规范文件的链接。
 
-## Update Context
+## 更新上下文
 
-Adding a spec does not mean every task automatically reads it. The current task must reference it in JSONL:
+添加规范并不意味着每个任务都会自动读取它。当前任务必须在 JSONL 中引用该规范：
 
 ```bash
 python ./.trellis/scripts/task.py add-context <task> implement ".trellis/spec/webapp/security/index.md" "Security conventions"
 python ./.trellis/scripts/task.py add-context <task> check ".trellis/spec/webapp/security/index.md" "Security review rules"
 ```
 
-## Change Monorepo Packages
+## 修改 Monorepo 包
 
-Example `.trellis/config.yaml`:
+`.trellis/config.yaml` 示例：
 
 ```yaml
 packages:
@@ -67,17 +67,17 @@ packages:
 default_package: webapp
 ```
 
-After editing, run:
+编辑后运行：
 
 ```bash
 python ./.trellis/scripts/get_context.py --mode packages
 ```
 
-Use this output to confirm AI can see the correct packages and spec layers.
+使用该输出来确认 AI 能看到正确的包和规范层。
 
-## Notes
+## 注意事项
 
-- Specs are user project conventions and can be changed according to project needs.
-- Do not put temporary task information into specs; put temporary information in the task.
-- Do not put long-term conventions only in agents or commands; preserve them in specs.
-- After changing spec structure, check whether existing task JSONL files still point to files that exist.
+- 规范是用户项目约定，可以根据项目需要修改。
+- 不要把临时任务信息放入规范；临时信息应放在任务中。
+- 不要只在 Agent 或命令中记录长期约定；应将其保存在规范中。
+- 修改规范结构后，检查现有任务 JSONL 是否仍指向实际存在的文件。

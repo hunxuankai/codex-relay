@@ -1,68 +1,68 @@
-# Local Context Injection System
+# 本地上下文注入系统
 
-Trellis context injection aims to make AI read the right files at the right time instead of relying on model memory. In a user project, injection is implemented by `.trellis/` scripts together with platform hooks, agents, and skills.
+Trellis 上下文注入旨在让 AI 在正确时间读取正确文件，而不是依赖模型记忆。在用户项目中，注入由 `.trellis/` 脚本与平台 hook、Agent 和 Skill 共同实现。
 
-## Injected Context Types
+## 注入的上下文类型
 
-| Type | Source | Purpose |
+| 类型 | 来源 | 用途 |
 | --- | --- | --- |
-| session context | `.trellis/scripts/get_context.py` | Current developer, git status, active task, active tasks, journal, packages. |
-| workflow context | `.trellis/workflow.md` | Current Trellis flow and next action. |
-| spec context | `.trellis/spec/` + task JSONL | Specs that must be followed during implementation/checking. |
-| task context | `.trellis/tasks/<task>/prd.md`, `design.md`, `implement.md`, `research/` | Current task requirements, design, execution plan, and research. |
-| platform context | Platform hooks/settings/agents | Lets different AI tools read the files above through their own mechanisms. |
+| 会话上下文 | `.trellis/scripts/get_context.py` | 当前开发者、Git 状态、活动任务、全部活动任务、日志和包。 |
+| 工作流上下文 | `.trellis/workflow.md` | 当前 Trellis 流程和下一步动作。 |
+| spec 上下文 | `.trellis/spec/` + 任务 JSONL | 实施/检查期间必须遵循的 spec。 |
+| 任务上下文 | `.trellis/tasks/<task>/prd.md`、`design.md`、`implement.md`、`research/` | 当前任务的需求、设计、实施计划和研究。 |
+| 平台上下文 | 平台 hook/settings/Agent | 让不同 AI 工具通过各自机制读取上述文件。 |
 
 ## session-start
 
-Platforms with session-start support inject a Trellis overview when a session starts, clears, compacts, or receives a similar event. Injected content usually includes:
+支持 session-start 的平台会在会话开始、清空、压缩或收到类似事件时注入 Trellis 概览。注入内容通常包括：
 
-- workflow summary.
-- current task status.
-- active tasks.
-- spec index paths.
-- developer identity and git status.
+- 工作流摘要。
+- 当前任务状态。
+- 活动任务。
+- spec 索引路径。
+- 开发者身份和 Git 状态。
 
-If the user feels the AI does not know the current task in a new session, first check whether the platform's session-start hook or equivalent mechanism is installed and running.
+如果用户发现 AI 在新会话中不知道当前任务，首先检查平台的 session-start hook 或等价机制是否已安装并运行。
 
 ## workflow-state
 
-workflow-state is a lightweight hint injected around each user turn. Based on current task status, it selects a block from `.trellis/workflow.md`, such as `no_task`, `planning`, `in_progress`, or `completed`.
+workflow-state 是在每个用户轮次附近注入的轻量提示。它根据当前任务状态，从 `.trellis/workflow.md` 选择 `no_task`、`planning`、`in_progress` 或 `completed` 等块。
 
-If the user wants to change "what the AI should do next in a given state," edit the corresponding state block in `.trellis/workflow.md` first.
+如果用户希望修改“AI 在某个状态下下一步应该做什么”，首先编辑 `.trellis/workflow.md` 中对应的状态块。
 
-## sub-agent context
+## 子 Agent 上下文
 
-Implement and check agents need task context. Trellis has two loading modes:
+Implement 和 check Agent 需要任务上下文。Trellis 有两种加载模式：
 
-1. **hook push**: a platform hook injects jsonl-referenced files plus `prd.md`, `design.md` if present, and `implement.md` if present before the agent starts.
-2. **agent pull**: the agent definition instructs the agent to read the active task, jsonl context, and task artifacts after startup.
+1. **hook 推送**：平台 hook 在 Agent 启动前注入 jsonl 引用的文件，以及 `prd.md`、存在时的 `design.md` 和存在时的 `implement.md`。
+2. **Agent 拉取**：Agent 定义指示 Agent 在启动后读取活动任务、jsonl 上下文和任务产物。
 
-In both modes, JSONL files in the task directory are the manifest for spec/research context. Task artifacts are read separately in this order: `prd.md` -> `design.md if present` -> `implement.md if present`.
+在两种模式中，任务目录里的 JSONL 文件都是 spec/research 上下文清单。任务产物按以下顺序单独读取：`prd.md` → `design.md if present` → `implement.md if present`。
 
-## JSONL Reading Rules
+## JSONL 读取规则
 
-`implement.jsonl` and `check.jsonl` contain one JSON object per line:
+`implement.jsonl` 和 `check.jsonl` 每行包含一个 JSON 对象：
 
 ```jsonl
 {"file": ".trellis/spec/backend/index.md", "reason": "Backend rules"}
 ```
 
-Readers should skip seed rows without a `file` field. When configuring JSONL, the AI should include only spec/research files, not pre-register code files that will be modified.
+读取器应跳过不含 `file` 字段的种子行。配置 JSONL 时，AI 只应包含 spec/research 文件，不要预先登记将要修改的代码文件。
 
-## Active Task And Context Key
+## 活动任务与上下文键
 
-Active task state lives in `.trellis/.runtime/sessions/` and is isolated per session. Hooks try to resolve the context key from platform events, environment variables, transcript paths, or `TRELLIS_CONTEXT_ID`.
+活动任务状态位于 `.trellis/.runtime/sessions/`，并按会话隔离。Hook 尝试从平台事件、环境变量、对话记录路径或 `TRELLIS_CONTEXT_ID` 解析上下文键。
 
-If shell commands cannot see the same context key, `task.py current --source` may report no active task. In that case, check whether the platform passes session identity into the shell instead of hand-writing a global current-task file.
+如果 Shell 命令看不到相同的上下文键，`task.py current --source` 可能报告没有活动任务。此时应检查平台是否把会话身份传入 Shell，而不是手工编写全局当前任务文件。
 
-## Local Customization Points
+## 本地定制点
 
-| Need | Edit location |
+| 需求 | 编辑位置 |
 | --- | --- |
-| Change session-start injected content | The platform's `session-start` hook or plugin file. |
-| Change per-turn workflow-state rules | `[workflow-state:STATUS]` block in `.trellis/workflow.md`. The platform workflow-state hook parses these blocks verbatim and embeds no fallback text. |
-| Change how sub-agents read context | Platform agent definitions, the `inject-subagent-context` hook, or agent preludes. |
-| Change JSONL validation/display | `.trellis/scripts/common/task_context.py`. |
-| Change active task resolution | `.trellis/scripts/common/active_task.py`. |
+| 修改 session-start 注入内容 | 平台的 `session-start` hook 或插件文件。 |
+| 修改逐轮 workflow-state 规则 | `.trellis/workflow.md` 中的 `[workflow-state:STATUS]` 块。平台 workflow-state hook 会逐字解析这些块，不内嵌回退文本。 |
+| 修改子 Agent 读取上下文的方式 | 平台 Agent 定义、`inject-subagent-context` hook 或 Agent 前置指令。 |
+| 修改 JSONL 验证/显示 | `.trellis/scripts/common/task_context.py`。 |
+| 修改活动任务解析 | `.trellis/scripts/common/active_task.py`。 |
 
-When modifying context injection, verify two things: new sessions can see the correct task, and sub-agents can see the correct task artifacts/spec/research.
+修改上下文注入时，应验证两点：新会话能够看到正确任务；子 Agent 能够看到正确的任务产物/spec/research。

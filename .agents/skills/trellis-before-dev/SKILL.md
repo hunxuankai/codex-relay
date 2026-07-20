@@ -1,40 +1,40 @@
 ---
 name: trellis-before-dev
-description: "Discovers and injects project-specific coding guidelines from .trellis/spec/ before implementation begins. Reads spec indexes, pre-development checklists, and shared thinking guides for the target package. Use when starting a new coding task, before writing any code, switching to a different package, or needing to refresh project conventions and standards."
+description: "在实施开始前发现并加载 .trellis/spec/ 中的项目专属编码规范。读取目标包的规范索引、开发前检查清单和共享思考指南。开始新编码任务、编写代码前、切换到其他包或需要刷新项目约定与标准时使用。"
 ---
 
-Read the relevant development guidelines before starting your task.
+开始任务前，读取相关开发规范。
 
-Execute these steps:
+执行以下步骤：
 
-1. **Read current task artifacts**:
-   - `prd.md` for requirements and acceptance criteria
-   - `design.md` if present for technical design
-   - `implement.md` if present for execution order and validation plan
+1. **读取当前任务材料**：
+   - 从 `prd.md` 读取需求和验收标准
+   - 如果存在 `design.md`，从中读取技术设计
+   - 如果存在 `implement.md`，从中读取实施顺序和验证计划
 
-2. **Discover packages and their spec layers**:
+2. **发现包及其规范层**：
    ```bash
    python ./.trellis/scripts/get_context.py --mode packages
    ```
 
-3. **Identify which specs apply** to your task based on:
-   - Which package you're modifying (e.g., `cli/`, `docs-site/`)
-   - What type of work (backend, frontend, unit-test, docs, etc.)
-   - Any spec/research paths referenced by the task artifacts
+3. **确定适用规范**，依据包括：
+   - 正在修改哪个包（例如 `cli/`、`docs-site/`）
+   - 工作类型（后端、前端、单元测试、文档等）
+   - 任务材料中引用的任何规范或研究路径
 
-4. **Read the spec index** for each relevant module:
+4. **读取每个相关模块的规范索引**：
    ```bash
    cat .trellis/spec/<package>/<layer>/index.md
    ```
-   Follow the **"Pre-Development Checklist"** section in the index.
+   遵循索引中的**“开发前检查”**部分。
 
-5. **Read the specific guideline files** listed in the Pre-Development Checklist that are relevant to your task. The index is NOT the goal — it points you to the actual guideline files (e.g., `error-handling.md`, `conventions.md`, `mock-strategies.md`). Read those files to understand the coding standards and patterns.
+5. **读取开发前检查中列出的具体规范文件**，只选择与当前任务相关的文件。索引本身不是终点，它会指向实际规范文件（例如 `error-handling.md`、`conventions.md`、`mock-strategies.md`）。阅读这些文件以理解编码标准和模式。
 
-6. **Always read shared guides**:
+6. **始终读取共享指南**：
    ```bash
    cat .trellis/spec/guides/index.md
    ```
 
-7. Understand the coding standards and patterns you need to follow, then proceed with your development plan.
+7. 理解需要遵循的编码标准和模式，然后继续实施计划。
 
-This step is **mandatory** before writing any code.
+编写任何代码前都**必须**完成此步骤。

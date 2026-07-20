@@ -1,8 +1,8 @@
-# Local Workspace Memory System
+# 本地工作区记忆系统
 
-`.trellis/workspace/` stores cross-session memory. Its purpose is to let AI and humans understand what happened before across different windows and different days.
+`.trellis/workspace/` 存储跨会话记忆，目的是让 AI 和人类理解不同窗口、不同日期中发生过什么。
 
-## Directory Structure
+## 目录结构
 
 ```text
 .trellis/workspace/
@@ -13,28 +13,28 @@
     └── journal-2.md
 ```
 
-| File | Purpose |
+| 文件 | 用途 |
 | --- | --- |
-| `.trellis/.developer` | Current developer identity. |
-| `.trellis/workspace/index.md` | Global workspace overview. |
-| `.trellis/workspace/<developer>/index.md` | Session index for a developer. |
-| `.trellis/workspace/<developer>/journal-N.md` | Session journal. |
+| `.trellis/.developer` | 当前开发者身份。 |
+| `.trellis/workspace/index.md` | 全局工作区概览。 |
+| `.trellis/workspace/<developer>/index.md` | 某开发者的会话索引。 |
+| `.trellis/workspace/<developer>/journal-N.md` | 会话日志。 |
 
-## Developer Identity
+## 开发者身份
 
-Run this the first time:
+首次运行：
 
 ```bash
 python ./.trellis/scripts/init_developer.py <name>
 ```
 
-This creates `.trellis/.developer` and the corresponding workspace directory. The AI should not change developer identity casually; if the identity is wrong, first confirm who is using the current project.
+该命令创建 `.trellis/.developer` 和对应工作区目录。AI 不应随意更改开发者身份；如果身份错误，先确认当前项目的使用者。
 
-## Journal
+## 日志
 
-`journal-N.md` records completed or partially completed work from each session. By default, each journal holds about 2000 lines; after that it rotates to the next file.
+`journal-N.md` 记录每次会话已完成或部分完成的工作。默认每个日志约容纳 2000 行，超过后轮换到下一个文件。
 
-Common command for recording a session:
+记录会话的常用命令：
 
 ```bash
 python ./.trellis/scripts/add_session.py \
@@ -43,29 +43,29 @@ python ./.trellis/scripts/add_session.py \
   --commit "abc1234"
 ```
 
-Planning or review work without a commit can also be recorded by using `--no-commit` or an empty commit value.
+没有提交的规划或审查工作也可以使用 `--no-commit` 或空提交值记录。
 
-## Relationship Between Workspace Memory And Tasks
+## 工作区记忆与任务的关系
 
-| System | What it stores |
+| 系统 | 存储内容 |
 | --- | --- |
-| `.trellis/tasks/` | Requirements, design, research, and state for a specific task. |
-| `.trellis/workspace/` | Work records across tasks and sessions. |
-| `.trellis/spec/` | Engineering knowledge preserved as long-term conventions. |
+| `.trellis/tasks/` | 特定任务的需求、设计、研究和状态。 |
+| `.trellis/workspace/` | 跨任务和会话的工作记录。 |
+| `.trellis/spec/` | 作为长期约定保存的工程知识。 |
 
-If information is only useful for the current task, put it in the task directory.  
-If information describes what happened in the current session, put it in the workspace journal.  
-If information should be followed every time code is written in the future, put it in spec.
+如果信息只对当前任务有用，放入任务目录。
+如果信息描述当前会话发生了什么，放入工作区日志。
+如果信息在未来每次编写代码时都应遵循，放入规范。
 
-## Local Customization Points
+## 本地定制点
 
-| Need | Edit location |
+| 需求 | 编辑位置 |
 | --- | --- |
-| Change maximum journal lines | `max_journal_lines` in `.trellis/config.yaml`. |
-| Change session auto-commit message | `session_commit_message` in `.trellis/config.yaml`. |
-| Change session content format | `.trellis/scripts/add_session.py`. |
-| Change how workspace is displayed in context | `.trellis/scripts/common/session_context.py`. |
+| 修改日志最大行数 | `.trellis/config.yaml` 中的 `max_journal_lines`。 |
+| 修改会话自动提交信息 | `.trellis/config.yaml` 中的 `session_commit_message`。 |
+| 修改会话内容格式 | `.trellis/scripts/add_session.py`。 |
+| 修改工作区在上下文中的显示方式 | `.trellis/scripts/common/session_context.py`。 |
 
-## AI Usage Rules
+## AI 使用规则
 
-The AI should not treat workspace as the only source of truth. When resuming a task, read the current task first, then use workspace for background. After a task is complete, record important process notes in workspace; if long-term rules emerged, update spec.
+AI 不应把工作区视为唯一事实来源。恢复任务时先读取当前任务，再用工作区补充背景。任务完成后，把重要过程注记记录到工作区；如果产生长期规则，更新规范。

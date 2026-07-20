@@ -1,47 +1,47 @@
-# Spec Writing
+# 规范编写
 
-Trellis specs are coding guidance for future agents. They should explain how to work in this repository, not how a generic project might be organized.
+Trellis 规范是面向未来代理的编码指南。它们应说明如何在本仓库中工作，而不是介绍通用项目可能如何组织。
 
-## Write From Evidence
+## 基于证据编写
 
-Each important rule should be backed by one of these:
+每条重要规则都应由以下至少一项支撑：
 
-- A source file that demonstrates the preferred pattern.
-- A test file that shows expected behavior.
-- A project document that defines the convention.
-- A repeated pattern across multiple files.
+- 展示首选模式的源码文件。
+- 展示预期行为的测试文件。
+- 定义约定的项目文档。
+- 多个文件中重复出现的模式。
 
-Use short snippets only when they make the rule clearer. Prefer linking to the file path and naming the symbol or behavior.
+只有在短片段能让规则更清晰时才使用。优先链接文件路径，并指出符号或行为名称。
 
-## File Structure
+## 文件结构
 
-Keep the spec tree aligned with the project:
+保持规范树与项目一致：
 
-- Keep `index.md` as the navigation file for the spec directory.
-- Split topics when developers would look for them independently.
-- Merge topics when separate files would repeat the same rule.
-- Delete template files that do not apply.
-- Add new files for important local patterns the template missed.
+- 保持 `index.md` 为规范目录的导航文件。
+- 如果开发者会独立查找某些主题，就拆分主题。
+- 如果独立文件会重复同一规则，就合并主题。
+- 删除不适用的模板文件。
+- 为模板遗漏的重要本地模式添加新文件。
 
-## Content Standards
+## 内容标准
 
-Good spec sections include:
+良好的规范章节包括：
 
-- When the rule applies.
-- The local pattern to follow.
-- The source or test files that prove the pattern.
-- Common mistakes or anti-patterns.
-- Verification commands or checks when they are specific and reliable.
+- 规则适用时机。
+- 应遵循的本地模式。
+- 证明该模式的源码或测试文件。
+- 常见错误或反模式。
+- 具体且可靠的验证命令或检查。
 
-Avoid:
+避免：
 
-- Placeholder prose.
-- Generic framework advice.
-- Tool instructions that only work in one agent host.
-- Long copied code blocks.
-- Rules based on a single accidental implementation detail.
+- 占位说明。
+- 通用框架建议。
+- 只在一种代理宿主中有效的工具指令。
+- 大段复制的代码块。
+- 只基于单个偶然实现细节的规则。
 
-## Example Shape
+## 示例结构
 
 ```markdown
 ## Command Handlers
@@ -59,12 +59,12 @@ Reference files:
 Avoid passing raw `process.argv` or unvalidated config objects into shared helpers.
 ```
 
-## Final Pass
+## 最终检查
 
-Before finishing:
+完成前：
 
 ```bash
 grep -R "To be filled\\|TODO: fill\\|placeholder" .trellis/spec
 ```
 
-Also check links, index files, and whether any spec still describes a template rather than this repository.
+同时检查链接、索引文件，以及是否仍有规范描述的是模板而不是本仓库。

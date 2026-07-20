@@ -1,55 +1,55 @@
-# Local Customization Overview
+# 本地定制概览
 
-This directory is for local AI working in a user project where Trellis was installed through npm and `trellis init` has already been run. The AI should modify generated `.trellis/` and platform directories inside the project, not Trellis CLI upstream source code.
+本目录供本地 AI 在用户项目中工作时使用；该项目已通过 npm 安装 Trellis，并已运行 `trellis init`。AI 应修改项目内生成的 `.trellis/` 和平台目录，而不是 Trellis CLI 上游源代码。
 
-## First Determine What The User Actually Wants To Change
+## 首先确认用户真正想修改什么
 
-| User wording | Read first |
+| 用户表述 | 首先读取 |
 | --- | --- |
-| "Change the Trellis flow / phases / next prompt" | `change-workflow.md` |
-| "Change task creation, status, archive, or hooks" | `change-task-lifecycle.md` |
-| "AI did not read context / change injected content" | `change-context-loading.md` |
-| "A platform hook is not behaving as expected" | `change-hooks.md` |
-| "Change implement/check/research agent behavior" | `change-agents.md` |
-| "Add a skill/command/workflow/prompt" | `change-skills-or-commands.md` |
-| "Adjust the project spec structure" | `change-spec-structure.md` |
-| "Add team conventions and local notes" | `add-project-local-conventions.md` |
+| “修改 Trellis 流程 / 阶段 / 下一条提示” | `change-workflow.md` |
+| “修改任务创建、状态、归档或 hook” | `change-task-lifecycle.md` |
+| “AI 没有读取上下文 / 修改注入内容” | `change-context-loading.md` |
+| “某个平台 hook 的行为不符合预期” | `change-hooks.md` |
+| “修改 implement/check/research Agent 的行为” | `change-agents.md` |
+| “添加 Skill/命令/工作流/提示词” | `change-skills-or-commands.md` |
+| “调整项目 spec 结构” | `change-spec-structure.md` |
+| “添加团队约定和本地注记” | `add-project-local-conventions.md` |
 
-## General Operation Order
+## 通用操作顺序
 
-1. **Confirm platform and directories**: inspect which directories exist, such as `.claude/`, `.codex/`, `.cursor/`, `.zcode/`.
-2. **Confirm the current active task**: run `python ./.trellis/scripts/task.py current --source`.
-3. **Read the local source of truth**: prefer `.trellis/workflow.md`, `.trellis/config.yaml`, and relevant platform files.
-4. **Modify narrowly**: edit only files related to the user's request.
-5. **Synchronize semantics**: if a shared flow changes, check whether platform entry points also need changes; if a platform entry changes, check whether `.trellis/workflow.md` still agrees.
+1. **确认平台和目录**：检查实际存在的目录，例如 `.claude/`、`.codex/`、`.cursor/`、`.zcode/`。
+2. **确认当前活动任务**：运行 `python ./.trellis/scripts/task.py current --source`。
+3. **读取本地权威来源**：优先读取 `.trellis/workflow.md`、`.trellis/config.yaml` 和相关平台文件。
+4. **保持改动聚焦**：只编辑与用户请求相关的文件。
+5. **同步语义**：共享流程变化时，检查平台入口是否也需要修改；平台入口变化时，检查 `.trellis/workflow.md` 是否仍然一致。
 
-## Local File Priority
+## 本地文件优先级
 
-| Layer | Files |
+| 层级 | 文件 |
 | --- | --- |
-| Workflow | `.trellis/workflow.md` |
-| Project configuration | `.trellis/config.yaml` |
-| Task material | `.trellis/tasks/<task>/` |
-| Project specs | `.trellis/spec/` |
-| Runtime scripts | `.trellis/scripts/` |
-| Platform integration | `.claude/`, `.codex/`, `.cursor/`, `.opencode/`, `.zcode/`, and similar directories |
-| Shared skill | `.agents/skills/` |
+| 工作流 | `.trellis/workflow.md` |
+| 项目配置 | `.trellis/config.yaml` |
+| 任务材料 | `.trellis/tasks/<task>/` |
+| 项目规范 | `.trellis/spec/` |
+| 运行时脚本 | `.trellis/scripts/` |
+| 平台集成 | `.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.zcode/` 等目录 |
+| 共享 Skill | `.agents/skills/` |
 
-## Things Not To Do By Default
+## 默认不要做的事
 
-- Do not edit the global npm install directory.
-- Do not edit `node_modules/@mindfoldhq/trellis`.
-- Do not assume the user has the Trellis GitHub repository.
-- Do not overwrite local files already modified by the user with default templates.
-- Do not put team project rules into public `trellis-meta`; project rules belong in `.trellis/spec/` or a local skill.
+- 不要编辑全局 npm 安装目录。
+- 不要编辑 `node_modules/@mindfoldhq/trellis`。
+- 不要假设用户拥有 Trellis GitHub 仓库。
+- 不要使用默认模板覆盖用户已经修改的本地文件。
+- 不要把团队项目规则放入公共 `trellis-meta`；项目规则应放在 `.trellis/spec/` 或本地 Skill 中。
 
-## When To Inspect Upstream Source
+## 何时检查上游源码
 
-Switch to an upstream source-code perspective only when the user explicitly expresses one of these goals:
+只有当用户明确表达以下目标之一时，才切换到上游源码视角：
 
-- "I want to open a PR to Trellis"
-- "I want to change npm package publish contents"
-- "I want to fork Trellis"
-- "I want to modify the generation logic for `trellis init/update`"
+- “我想向 Trellis 提交 PR”
+- “我想修改 npm 包的发布内容”
+- “我想 fork Trellis”
+- “我想修改 `trellis init/update` 的生成逻辑”
 
-Otherwise, default to modifying local Trellis files inside the user project.
+否则，默认修改用户项目内的本地 Trellis 文件。

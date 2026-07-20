@@ -1,76 +1,76 @@
 ---
 name: trellis-break-loop
-description: "Deep bug analysis to break the fix-forget-repeat cycle. Analyzes root cause category, why fixes failed, prevention mechanisms, and captures knowledge into specs. Use after fixing a bug to prevent the same class of bugs."
+description: "通过深度缺陷分析打破“修复—遗忘—重复”循环。分析根因类别、修复为何失败、预防机制，并把知识沉淀到规范中。修复缺陷后，为防止同类问题再次发生时使用。"
 ---
 
-# Break the Loop - Deep Bug Analysis
+# 打破循环——深度缺陷分析
 
-When debug is complete, use this for deep analysis to break the "fix bug -> forget -> repeat" cycle.
+调试完成后，使用此 Skill 进行深度分析，打破“修复缺陷 → 遗忘 → 重复发生”的循环。
 
 ---
 
-## Analysis Framework
+## 分析框架
 
-Analyze the bug you just fixed from these 5 dimensions:
+从以下 5 个维度分析刚修复的缺陷：
 
-### 1. Root Cause Category
+### 1. 根因类别
 
-Which category does this bug belong to?
+该缺陷属于哪个类别？
 
-| Category | Characteristics | Example |
+| 类别 | 特征 | 示例 |
 |----------|-----------------|---------|
-| **A. Missing Spec** | No documentation on how to do it | New feature without checklist |
-| **B. Cross-Layer Contract** | Interface between layers unclear | API returns different format than expected |
-| **C. Change Propagation Failure** | Changed one place, missed others | Changed function signature, missed call sites |
-| **D. Test Coverage Gap** | Unit test passes, integration fails | Works alone, breaks when combined |
-| **E. Implicit Assumption** | Code relies on undocumented assumption | Timestamp seconds vs milliseconds |
+| **A. 规范缺失** | 没有说明如何实施的文档 | 新功能没有检查清单 |
+| **B. 跨层契约** | 层间接口不清晰 | API 返回格式与预期不同 |
+| **C. 变更传播失败** | 改了一个位置，遗漏其他位置 | 修改函数签名但漏掉调用点 |
+| **D. 测试覆盖缺口** | 单元测试通过，集成测试失败 | 单独工作正常，组合后出错 |
+| **E. 隐式假设** | 代码依赖未记录的假设 | 时间戳使用秒还是毫秒 |
 
-### 2. Why Fixes Failed (if applicable)
+### 2. 修复为何失败（如适用）
 
-If you tried multiple fixes before succeeding, analyze each failure:
+如果成功前尝试过多次修复，分析每次失败：
 
-- **Surface Fix**: Fixed symptom, not root cause
-- **Incomplete Scope**: Found root cause, didn't cover all cases
-- **Tool Limitation**: grep missed it, type check wasn't strict
-- **Mental Model**: Kept looking in same layer, didn't think cross-layer
+- **表面修复**：修复了症状，而不是根因
+- **范围不完整**：找到了根因，但没有覆盖所有情况
+- **工具限制**：grep 遗漏，类型检查不够严格
+- **心智模型**：一直在同一层查找，没有考虑跨层问题
 
-### 3. Prevention Mechanisms
+### 3. 预防机制
 
-What mechanisms would prevent this from happening again?
+哪些机制可以防止问题再次发生？
 
-| Type | Description | Example |
+| 类型 | 说明 | 示例 |
 |------|-------------|---------|
-| **Documentation** | Write it down so people know | Update thinking guide |
-| **Architecture** | Make the error impossible structurally | Type-safe wrappers |
-| **Compile-time** | Strict type checking, no escape hatches | Signature change causes compile error |
-| **Runtime** | Monitoring, alerts, scans | Detect orphan entities |
-| **Test Coverage** | E2E tests, integration tests | Verify full flow |
-| **Code Review** | Checklist, PR template | "Did you check X?" |
+| **文档** | 记录下来让团队知晓 | 更新思考指南 |
+| **架构** | 从结构上让错误无法发生 | 类型安全包装器 |
+| **编译时** | 严格类型检查，不留逃生口 | 签名变更触发编译错误 |
+| **运行时** | 监控、告警、扫描 | 检测孤立实体 |
+| **测试覆盖** | E2E 测试、集成测试 | 验证完整流程 |
+| **代码审查** | 检查清单、PR 模板 | “检查过 X 吗？” |
 
-### 4. Systematic Expansion
+### 4. 系统性扩展
 
-What broader problems does this bug reveal?
+该缺陷揭示了哪些更广泛的问题？
 
-- **Similar Issues**: Where else might this problem exist?
-- **Design Flaw**: Is there a fundamental architecture issue?
-- **Process Flaw**: Is there a development process improvement?
-- **Knowledge Gap**: Is the team missing some understanding?
+- **相似问题**：其他哪些位置可能存在同类问题？
+- **设计缺陷**：是否存在根本性的架构问题？
+- **流程缺陷**：开发流程是否可以改进？
+- **知识缺口**：团队是否缺少某些理解？
 
-### 5. Knowledge Capture
+### 5. 知识沉淀
 
-Solidify insights into the system:
+把洞察固化到系统中：
 
-- [ ] Update `.trellis/spec/guides/` thinking guides
-- [ ] Update relevant `.trellis/spec/` docs
-- [ ] Create issue record (if applicable)
-- [ ] Create feature ticket for root fix
-- [ ] Update check guidelines if needed
+- [ ] 更新 `.trellis/spec/guides/` 思考指南
+- [ ] 更新相关 `.trellis/spec/` 文档
+- [ ] 创建 issue 记录（如适用）
+- [ ] 为根本修复创建功能工单
+- [ ] 如有需要，更新检查规范
 
 ---
 
-## Output Format
+## 输出格式
 
-Please output analysis in this format:
+请按以下格式输出分析：
 
 ```markdown
 ## Bug Analysis: [Short Description]
@@ -100,89 +100,89 @@ Please output analysis in this format:
 
 ---
 
-## Core Philosophy
+## 核心理念
 
-> **The value of debugging is not in fixing the bug, but in making this class of bugs never happen again.**
+> **调试的价值不只在于修复缺陷，更在于让这一类缺陷不再发生。**
 
-Three levels of insight:
-1. **Tactical**: How to fix THIS bug
-2. **Strategic**: How to prevent THIS CLASS of bugs
-3. **Philosophical**: How to expand thinking patterns
+三个层次的洞察：
+1. **战术层**：如何修复这个缺陷
+2. **战略层**：如何预防这一类缺陷
+3. **理念层**：如何扩展思考模式
 
-30 minutes of analysis saves 30 hours of future debugging.
+30 分钟分析可以节省未来 30 小时调试。
 
-## Thinking Framework: Bayesian Reasoning
+## 思考框架：贝叶斯推理
 
-When multiple root causes are plausible and evidence is incomplete, update your beliefs proportionally to new evidence rather than clinging to initial assumptions.
+当多个根因都合理且证据不完整时，应根据新证据按比例更新判断，而不是固守初始假设。
 
-### Step 1: Establish Priors
+### 步骤 1：建立先验概率
 
-Before investigating, state what you believe and why:
+调查前，说明当前判断及理由：
 
-| Hypothesis | Prior | Reasoning |
+| 假设 | 先验概率 | 理由 |
 |------------|-------|-----------|
-| H1: [cause A] | 40% | Most common for this pattern |
-| H2: [cause B] | 30% | Plausible given environment |
-| H3: [other] | 30% | Catch-all |
+| H1：[原因 A] | 40% | 此模式最常见的原因 |
+| H2：[原因 B] | 30% | 根据环境判断合理 |
+| H3：[其他] | 30% | 兜底项 |
 
-Priors must sum to 100%. If you can't assign probabilities, investigate first.
+先验概率总和必须为 100%。如果无法分配概率，先调查。
 
-### Step 2: Observe Evidence
+### 步骤 2：观察证据
 
-Document what you found — be specific about reliability:
+记录发现，并明确说明可靠性：
 
-- What exactly did you observe?
-- How reliable? (test output > log message > user report > hunch)
-- Could multiple hypotheses explain this?
+- 具体观察到了什么？
+- 可靠性如何？（测试输出 > 日志消息 > 用户报告 > 直觉）
+- 是否有多个假设都能解释该证据？
 
-### Step 3: Update Beliefs
+### 步骤 3：更新判断
 
-For each hypothesis, ask: **How likely is this evidence if this hypothesis were true?**
+对每个假设都询问：**如果该假设为真，出现此证据的可能性有多大？**
 
-Direction of update matters more than calculation:
-- Evidence strongly predicted by H1 → H1 probability increases
-- Evidence contradicts H2 → H2 probability decreases
-- Evidence equally likely under all → no update
+更新方向比精确计算更重要：
+- H1 强烈预测的证据 → 提高 H1 概率
+- 与 H2 矛盾的证据 → 降低 H2 概率
+- 在所有假设下同样可能的证据 → 不更新
 
-### Step 4: Seek Discriminating Evidence
+### 步骤 4：寻找有区分度的证据
 
-Don't gather more of the same. Find evidence that **differs strongly** between top hypotheses.
+不要继续收集同类证据。寻找在主要假设之间**差异显著**的证据。
 
-> If H1 and H3 are close: "What would I see if H1 is true but not if H3 is true?" Then check for that.
+> 如果 H1 和 H3 接近：“如果 H1 为真而 H3 不为真，我会看到什么？”然后检查该现象。
 
-### Step 5: State Confidence
+### 步骤 5：说明置信度
 
-| Confidence | Action |
+| 置信度 | 行动 |
 |------------|--------|
-| 90%+ | Proceed with fix, monitor |
-| 70-90% | Proceed, add fallback check |
-| 50-70% | Test hypothesis before committing |
-| <50% | Need more evidence, don't guess |
+| 90%+ | 继续修复并监控 |
+| 70-90% | 继续，并增加兜底检查 |
+| 50-70% | 提交前测试假设 |
+| <50% | 需要更多证据，不要猜测 |
 
-Never express binary certainty when evidence is incomplete. Use "most likely", "plausible but unlikely", "worth investigating".
+证据不完整时，不要表达二元确定性。使用“最有可能”“合理但可能性较低”“值得调查”等措辞。
 
-### Common Fallacies
+### 常见谬误
 
-| Fallacy | Example | Correction |
+| 谬误 | 示例 | 纠正方式 |
 |---------|---------|------------|
-| **Base rate neglect** | "Test failed → code is broken" | How often do tests fail for other reasons? |
-| **Confirmation bias** | "Must be a race condition, let me find race evidence" | Actively seek evidence AGAINST your top hypothesis |
-| **Anchoring** | "Last time it was caching, probably caching again" | Establish priors from current context, not yesterday's bug |
+| **忽略基准率** | “测试失败 → 代码坏了” | 测试因其他原因失败的频率是多少？ |
+| **确认偏误** | “肯定是竞态，让我找竞态证据” | 主动寻找反对首要假设的证据 |
+| **锚定效应** | “上次是缓存，这次大概也是缓存” | 根据当前上下文建立先验，而不是沿用昨天的缺陷 |
 
 ---
 
-## After Analysis: Immediate Actions
+## 分析后的立即行动
 
-**IMPORTANT**: After completing the analysis above, you MUST immediately:
+**重要**：完成上述分析后，必须立即：
 
-1. **Update spec/guides** - Don't just list TODOs, actually update the relevant files:
-   - If it's a cross-platform issue → update `cross-platform-thinking-guide.md`
-   - If it's a cross-layer issue → update `cross-layer-thinking-guide.md`
-   - If it's a code reuse issue → update `code-reuse-thinking-guide.md`
-   - If it's domain-specific → update `backend/*.md` or `frontend/*.md`
+1. **更新规范/指南**——不要只列 TODO，要实际更新相关文件：
+   - 如果是跨平台问题 → 更新 `cross-platform-thinking-guide.md`
+   - 如果是跨层问题 → 更新 `cross-layer-thinking-guide.md`
+   - 如果是代码复用问题 → 更新 `code-reuse-thinking-guide.md`
+   - 如果是领域专属问题 → 更新 `backend/*.md` 或 `frontend/*.md`
 
-2. **Sync templates** - After updating `.trellis/spec/`, sync to `src/templates/markdown/spec/`
+2. **同步模板**——更新 `.trellis/spec/` 后，同步到 `src/templates/markdown/spec/`
 
-3. **Commit the spec updates** - This is the primary output, not just the analysis text
+3. **提交规范更新**——这是主要输出，而不只是分析文本
 
-> **The analysis is worthless if it stays in chat. The value is in the updated specs.**
+> **如果分析只停留在聊天中就没有价值，价值在于更新后的规范。**

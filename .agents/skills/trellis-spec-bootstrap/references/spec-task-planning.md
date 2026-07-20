@@ -1,20 +1,20 @@
-# Spec Task Planning
+# 规范任务规划
 
-Use a single agent as the default execution model. The agent may create Trellis tasks for traceability, but the skill should not require a specific platform, CLI, or parallel worker model.
+默认使用单代理执行模型。代理可以创建 Trellis 任务以便追踪，但此 Skill 不应要求特定平台、CLI 或并行 Worker 模型。
 
-## Decomposition
+## 拆分
 
-Create spec work units around real ownership boundaries:
+围绕真实所有权边界创建规范工作单元：
 
-- One package when a package has its own conventions.
-- One layer when the same package has distinct frontend, backend, CLI, worker, or shared-library rules.
-- One cross-cutting guide when a pattern spans packages and is not owned by one layer.
+- 如果一个包有自己的约定，则按一个包拆分。
+- 如果同一包具有不同的前端、后端、CLI、Worker 或共享库规则，则按一层拆分。
+- 如果模式跨包且不归属于单一层，则编写一个横切指南。
 
-Avoid artificial decomposition. A small library usually needs one focused spec pass, not several tasks.
+避免人为拆分。小型库通常只需要一次聚焦的规范处理，不需要多个任务。
 
-## Task Shape
+## 任务结构
 
-When a Trellis task is useful, write a concise PRD with these sections:
+适合使用 Trellis 任务时，编写包含以下章节的简洁 PRD：
 
 ```markdown
 # Fill <package-or-layer> Trellis Specs
@@ -48,14 +48,14 @@ Summarize the concrete findings from repository analysis.
 - [ ] Claims are backed by source files, tests, or project docs.
 ```
 
-## Optional Helper Agents
+## 可选辅助代理
 
-If the host supports subagents, helpers can inspect independent packages or run verification. They are optional. The main agent still owns integration and final quality.
+如果宿主支持子代理，辅助代理可以检查独立包或运行验证。它们是可选项；主代理仍负责集成和最终质量。
 
-Helper tasks must have clear ownership:
+辅助任务必须有明确所有权：
 
-- Read-only research tasks may inspect any source needed for the assigned scope.
-- Write tasks should own disjoint spec directories.
-- Verification tasks should check placeholder removal, broken links, and consistency.
+- 只读研究任务可以检查分配范围所需的任何源码。
+- 写入任务应分别拥有互不重叠的规范目录。
+- 验证任务应检查占位符清理、失效链接和一致性。
 
-Do not encode helper-agent names, vendor-specific commands, or platform-specific routing in the skill. Put only the required work and acceptance criteria in the task.
+不要在 Skill 中编码辅助代理名称、供应商专属命令或平台专属路由。任务中只写必需工作和验收标准。

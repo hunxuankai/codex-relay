@@ -1,41 +1,41 @@
 ---
 name: trellis-spec-bootstrap
-description: "Bootstrap project-specific Trellis coding specs with a platform-neutral single-agent workflow. Use when creating or refreshing .trellis/spec guidelines, analyzing a codebase with GitNexus, ABCoder, or source inspection, decomposing package/layer spec work, and writing real codebase-backed spec docs without placeholder text."
+description: "使用平台无关的单代理工作流引导项目专属 Trellis 编码规范。创建或刷新 .trellis/spec 规范、使用 GitNexus、ABCoder 或源码检查分析代码库、拆分包/层规范工作，以及编写由真实代码库支撑且没有占位文本的规范文档时使用。"
 ---
 
-# Trellis Spec Bootstrap
+# Trellis 规范引导
 
-Use this skill to create or refresh `.trellis/spec/` guidelines from the real codebase. One capable agent owns the full loop: analyze the repository, choose the spec boundaries, write the docs, and verify the result. The workflow does not depend on a specific host, CLI, or agent brand.
+使用此 Skill 基于真实代码库创建或刷新 `.trellis/spec/` 规范。由一个有能力的代理负责完整闭环：分析仓库、选择规范边界、编写文档并验证结果。该工作流不依赖特定宿主、CLI 或代理品牌。
 
-## Workflow
+## 工作流
 
-1. Confirm Trellis is initialized and inspect the current `.trellis/spec/` tree.
-2. Analyze the repository architecture with the best available tools: GitNexus, ABCoder, language tooling, and direct source reads.
-3. Decompose the spec work by package and layer only when that reflects the actual codebase.
-4. Fill or reshape the spec files with concrete patterns, file paths, examples, and anti-patterns from the project.
-5. Verify that the final specs are internally consistent and contain no template placeholders.
+1. 确认 Trellis 已初始化，并检查当前 `.trellis/spec/` 树。
+2. 使用可用的最佳工具分析仓库架构：GitNexus、ABCoder、语言工具和直接读取源码。
+3. 只有在符合真实代码库时，才按包和层拆分规范工作。
+4. 使用项目中的具体模式、文件路径、示例和反模式填充或重塑规范文件。
+5. 验证最终规范内部一致，且不包含模板占位符。
 
-## Reference Routing
+## 参考资料路由
 
-| Need | Read |
+| 需求 | 读取 |
 |------|------|
-| Repository architecture analysis | [references/repository-analysis.md](references/repository-analysis.md) |
-| Spec work decomposition and task planning | [references/spec-task-planning.md](references/spec-task-planning.md) |
-| Writing high-signal Trellis spec files | [references/spec-writing.md](references/spec-writing.md) |
-| GitNexus and ABCoder MCP setup | [references/mcp-setup.md](references/mcp-setup.md) |
+| 仓库架构分析 | [references/repository-analysis.md](references/repository-analysis.md) |
+| 规范工作拆分和任务规划 | [references/spec-task-planning.md](references/spec-task-planning.md) |
+| 编写高信号 Trellis 规范文件 | [references/spec-writing.md](references/spec-writing.md) |
+| GitNexus 和 ABCoder MCP 设置 | [references/mcp-setup.md](references/mcp-setup.md) |
 
-## Operating Rules
+## 操作规则
 
-- Treat templates as starting points, not contracts. Delete, rename, split, or add spec files when the repository calls for it.
-- Prefer source-backed rules over generic advice. Every important recommendation should point at a real file or repeated local pattern.
-- Keep execution single-owner by default. Optional helper agents are an implementation detail, not a requirement or user-visible dependency.
-- Do not write platform-specific instructions unless the target project already standardizes on that platform.
-- Do not leave placeholder text, empty headings, or copied boilerplate in `.trellis/spec/`.
+- 把模板视为起点，而不是契约。仓库实际需要时，可以删除、重命名、拆分或添加规范文件。
+- 优先编写有源码依据的规则，而非通用建议。每条重要建议都应指向真实文件或重复出现的本地模式。
+- 默认由单一负责人执行。可选辅助代理只是实现细节，不是必需项或用户可见依赖。
+- 除非目标项目已将某个平台标准化，否则不要编写平台专属指令。
+- 不要在 `.trellis/spec/` 中遗留占位文本、空标题或复制的样板内容。
 
-## Done Criteria
+## 完成标准
 
-- `.trellis/spec/` describes the project as it exists now.
-- Each relevant package or layer has practical coding guidance with real examples.
-- Non-applicable template sections are removed.
-- `index.md` files match the final spec file set.
-- Any required setup or analysis assumptions are documented in the relevant spec or task notes.
+- `.trellis/spec/` 描述项目当前的真实状态。
+- 每个相关包或层都有包含真实示例的实用编码指南。
+- 已删除不适用的模板章节。
+- `index.md` 文件与最终规范文件集合一致。
+- 所有必要设置或分析假设都记录在相关规范或任务注记中。

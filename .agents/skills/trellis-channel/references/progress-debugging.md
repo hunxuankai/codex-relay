@@ -1,26 +1,23 @@
-# Progress And Debugging
+# 进度与调试
 
-Pretty output is for operators. Raw output is the audit log. Subcommands
-(`forum`, `thread`, `messages`, `context`) are the audit *interface* — reach
-for them before grepping `events.jsonl` by hand.
+美化输出面向操作者，原始输出才是审计日志。子命令（`forum`、`thread`、
+`messages`、`context`）是审计*接口*；手动搜索 `events.jsonl` 前应先使用它们。
 
-## Pretty vs `--raw`
+## 美化输出与 `--raw`
 
-`trellis channel messages <channel>` renders a compact, human-readable view:
-timestamps, identities, kind, and a short body. It is meant for operators
-scanning a channel, not for diagnostics.
+`trellis channel messages <channel>` 呈现紧凑、易读的视图，包括时间戳、
+身份、kind 和简短正文。它供操作者快速浏览 channel，不用于诊断。
 
-Pretty output can and will truncate:
+美化输出可能且确实会截断：
 
-- long progress deltas (`text_delta`, partial tool args)
-- tool names and command lines
-- multi-line status fields and structured `detail` blobs
-- forum thread titles past the column budget
+- 较长的 progress 增量（`text_delta`、部分工具参数）
+- 工具名称和命令行
+- 多行状态字段和结构化 `detail` 数据
+- 超出列宽预算的 forum thread 标题
 
-When something looks "off" — a worker appears stuck, a progress line ends
-mid-word, an action field shows `...` — switch to `--raw`. Raw mode emits
-one JSON event per line exactly as it lives in `events.jsonl`, so nothing
-is dropped.
+发现异常时，例如 Worker 看似卡住、progress 行在单词中间结束、action 字段显示
+`...`，请切换到 `--raw`。原始模式严格按照 `events.jsonl` 中的内容，每行输出
+一个 JSON 事件，不会丢弃信息。
 
 ```bash
 # Pretty (operator view)
@@ -32,34 +29,34 @@ trellis channel messages <channel> --raw --kind progress --last 20
 trellis channel messages <channel> --raw --last 50
 ```
 
-Rule of thumb: never diagnose a worker from a truncated progress line.
+经验法则：绝不要根据被截断的 progress 行诊断 Worker。
 
-### Rebuild Streaming Text
+### 重建流式文本
 
-To reconstruct what a model actually streamed during a turn, concatenate
-`detail.text_delta` from progress events:
+要重建模型在一个 turn 中实际流式输出的内容，请连接 progress 事件中的
+`detail.text_delta`：
 
 ```bash
 trellis channel messages <channel> --raw --kind progress --last 80 \
   | python -c 'import json,sys; [print((json.loads(l).get("detail") or {}).get("text_delta",""), end="") for l in sys.stdin if l.strip()]'
 ```
 
-## Stalled Worker Diagnosis
+## 诊断卡住的 Worker
 
-Symptom: `trellis channel list` shows the worker as running, but no new
-events appear in `messages` and `wait` keeps timing out.
+症状：`trellis channel list` 显示 Worker 正在运行，但 `messages` 中没有新事件，
+且 `wait` 持续超时。
 
-Triage order:
+排查顺序：
 
-1. **Locate the channel files.** Use `list --all --all-projects` if you are
-   not sure which bucket the channel lives in.
+1. **定位 channel 文件。** 如果不确定 channel 位于哪个存储桶，使用
+   `list --all --all-projects`。
 
    ```bash
    trellis channel list --all --all-projects
    CHAN=~/.trellis/channels/<bucket>/<channel>
    ```
 
-2. **Confirm the supervisor and worker PIDs are alive.**
+2. **确认 Supervisor 与 Worker PID 仍存活。**
 
    ```bash
    cat "$CHAN/<worker>.pid"            # supervisor PID
@@ -68,142 +65,132 @@ Triage order:
    ps -p "$(cat "$CHAN/<worker>.worker-pid")"
    ```
 
-   If the supervisor PID is gone but the channel still lists the worker,
-   you have a ghost entry — clean it with
-   `trellis channel kill <name> --as <worker> --force`.
+   如果 Supervisor PID 已消失，但 channel 仍列出 Worker，说明存在残留条目；
+   使用 `trellis channel kill <name> --as <worker> --force` 清理。
 
-3. **Tail the worker log.** This is the canonical place to see provider /
-   MCP / tool startup output that never makes it onto the channel.
+3. **持续查看 Worker 日志。** Provider / MCP / 工具启动输出如果未进入 channel，
+   应以此处为标准查看位置。
 
    ```bash
    tail -f "$CHAN/<worker>.log"
    ```
 
-4. **Check the last raw events.** A worker that emitted `progress` but no
-   `message`/`done` is usually mid-stream or blocked on a tool call:
+4. **检查最近的原始事件。** Worker 发出 `progress` 但没有 `message`/`done` 时，
+   通常仍在流式输出，或阻塞于工具调用：
 
    ```bash
    trellis channel messages <channel> --raw --last 50
    ```
 
-Common "alive but silent" causes:
+“存活但无输出”的常见原因：
 
-- Provider cold start before the first token (long, but eventually moves).
-- A blocking MCP server during startup — visible in the worker log.
-- Worker is waiting for a tool result whose subprocess hung.
-- Prompt is huge / model is rate-limited; check provider-side errors in the
-  worker log.
+- Provider 在首个 token 前冷启动，耗时较长但最终会继续。
+- MCP Server 在启动期间阻塞，可在 Worker 日志中看到。
+- Worker 正在等待已挂起子进程的工具结果。
+- Prompt 过大或模型受到速率限制；检查 Worker 日志中的 Provider 端错误。
 
-## Progress Event Interpretation
+## 解读 Progress 事件
 
-A `progress` event represents an in-flight piece of work. Its shape varies
-by `action` field, but the load-bearing fields are always under `detail`:
+`progress` 事件表示正在进行的一项工作。其形态随 `action` 字段变化，但关键字段
+始终位于 `detail` 下：
 
-- `detail.text_delta` — incremental model output (concatenate across events
-  to rebuild the streamed reply).
-- `detail.tool_name`, `detail.tool_input` — tool call about to run or
-  currently running.
-- `detail.status` — short string used by long-running actions
-  (`starting`, `running`, `flushing`, `done`).
-- `detail.action` — semantic label (e.g. `status` for thread heartbeats).
+- `detail.text_delta`：模型增量输出；跨事件连接可重建流式回复。
+- `detail.tool_name`、`detail.tool_input`：即将运行或正在运行的工具调用。
+- `detail.status`：长时间运行操作使用的短字符串（`starting`、`running`、
+  `flushing`、`done`）。
+- `detail.action`：语义标签，例如 thread 心跳使用的 `status`。
 
-Progress events are **noisy** by design. `wait` ignores them unless you
-pass `--include-progress`. When you do want to see them, prefer:
+Progress 事件按设计具有较多噪声。除非传入 `--include-progress`，否则 `wait`
+会忽略它们。确实需要查看时，优先使用：
 
 ```bash
 trellis channel messages <channel> --raw --kind progress --last 80
 ```
 
-A stream that emits progress at a steady cadence but never closes with
-`done`/`error`/`message` is the classic shape of a hung tool call —
-inspect the worker log for the subprocess.
+如果事件流稳定发出 progress，却始终没有以 `done`/`error`/`message` 收尾，
+通常表示工具调用已挂起；请在 Worker 日志中检查子进程。
 
-## Wait Semantics (Quick Reference)
+## Wait 语义速查
 
-`channel wait` watches `events.jsonl` from EOF and wakes on:
+`channel wait` 从 `events.jsonl` 末尾开始监视，默认由以下事件唤醒：
 
 - `message`
 - `done`
 - `error`
 - `killed`
-- `progress` only with `--include-progress`
+- `progress`（仅当传入 `--include-progress`）
 
-Useful filters:
+常用过滤方式：
 
 ```bash
 trellis channel wait T --as main --from check --kind done --timeout 15m
 trellis channel wait T --as main --from check,check-cx --kind done --all --timeout 15m
-trellis channel wait T --as worker --tag interrupt --timeout 1h
+trellis channel wait T --as worker --kind interrupt_requested --timeout 1h
 trellis channel wait T --as main --thread release-note --action status --timeout 10m
 ```
 
-Exit codes: `0` matched, `124` timeout, `1`/`2` errors. On `wait --all`
-timeout, stderr names the workers still missing.
+退出码：`0` 表示匹配，`124` 表示超时，`1`/`2` 表示错误。`wait --all` 超时时，
+stderr 会列出仍未响应的 Worker。
 
-## Auditing `events.jsonl` — Use Subcommands, Not `grep`
+## 审计 `events.jsonl`：使用子命令，不要使用 `grep`
 
-Every channel persists its full history at `$CHAN/events.jsonl`. It is
-tempting to `tail` / `grep` / `jq` this file directly during debugging.
-Don't make it a habit, and **never** do it for forum channels.
+每个 channel 都将完整历史持久化到 `$CHAN/events.jsonl`。调试时很容易直接对
+该文件使用 `tail` / `grep` / `jq`，但不要形成习惯，且对 forum channel
+**绝不能**这样做。
 
-Why subcommands first:
+优先使用子命令的原因：
 
-- `messages` already replays the file with filters (`--kind`, `--from`,
-  `--last`, `--tag`, `--thread`, `--action`) and gives you `--raw` for the
-  exact JSON. Anything you would write a one-liner for, `messages` already
-  does.
-- `wait` consumes the same file with EOF semantics — re-implementing that
-  with `tail -f | jq` will drop events under load and misorder them under
-  rotation.
-- `context` materializes a worker's inbox view, including cursor state.
-  Hand-rolled filters do not respect `<worker>.inbox-cursor`.
+- `messages` 已使用过滤条件（`--kind`、`--from`、`--last`、`--thread`、
+  `--action`）重放文件，并提供 `--raw` 获取精确 JSON。通常无需另写单行命令。
+- `wait` 以 EOF 语义读取同一文件；用 `tail -f | jq` 重新实现会在高负载下
+  丢失事件，并在轮转时打乱顺序。
+- `forum`、`thread` 和 `context list` 会使用内置 reducer 投影当前状态，
+  手写过滤无法可靠复现这些规则。
 
-### Forum channels: never parse `events.jsonl` directly
+### Forum Channel：绝不要直接解析 `events.jsonl`
 
-Forum channels multiplex many logical threads onto a single `events.jsonl`.
-Each event carries `thread`, `action`, and tag fields that the forum
-subcommands know how to fold together. Parsing the file by hand will:
+Forum channel 将多个逻辑 thread 复用到单个 `events.jsonl`。每个事件都带有
+`thread` 和 `action` 字段，forum 子命令知道如何归并它们。手动解析文件会：
 
-- Mix threads together and make a thread look incoherent.
-- Miss thread lifecycle events (open / status / close) that change how
-  later events should be interpreted.
-- Ignore worker inbox cursors, so you will "see" events a worker has
-  already consumed and assume they are pending.
+- 混合不同 thread，使单个 thread 看起来不连贯。
+- 遗漏会改变后续事件解释方式的 thread 生命周期事件（open / status / close）。
+- 忽略 Worker inbox cursor，从而“看到” Worker 已消费的事件并误判为待处理。
 
-Use the forum-aware views instead:
+改用理解 forum 语义的视图：
 
 ```bash
 # List logical threads inside the forum channel
-trellis channel forum list <channel>
+trellis channel forum <channel>
 
 # Inspect one thread end-to-end
-trellis channel thread show <channel> <thread>
+trellis channel thread <channel> <thread>
 
 # Replay messages for a thread (supports --raw, --kind, --last)
 trellis channel messages <channel> --thread <thread> --raw --last 100
 
-# What a specific worker still has pending
-trellis channel context <channel> --as <worker>
+# Channel/thread durable context (not a worker inbox projection)
+trellis channel context list <channel> --thread <thread> --raw
 ```
 
-Direct reads of `events.jsonl` are reserved for the case where the CLI
-itself is suspect — e.g. confirming an event was actually persisted, or
-diffing against `<worker>.inbox-cursor` while debugging the supervisor.
+CLI 当前不提供“Worker 尚有哪些事件待处理”的 inbox 投影命令。如果确实要诊断
+待处理状态，应先用 `messages --to <worker> --raw` 检查定向事件；只有怀疑 CLI
+本身有问题时，才直接读取 `events.jsonl`，例如确认事件是否真正持久化，或在
+调试 Supervisor 时与 `<worker>.inbox-cursor` 对照。
 
-## Common Failures
+## 常见故障
 
-| Symptom | Cause | Fix |
+| 症状 | 原因 | 处理方式 |
 |---|---|---|
-| `trellis: command not found` | CLI not installed globally | `npm install -g @mindfoldhq/trellis` |
-| `wait` exits immediately | wrong filter or identity collision | use distinct `--as`, inspect raw messages |
-| zsh errors on message text | shell interpreted punctuation | use `--stdin` or `--text-file` |
-| progress line is cut off | pretty output truncation | use `messages --raw --kind progress` |
-| worker never speaks | provider startup / prompt / MCP delay | inspect `<worker>.log`, `ps`, raw events |
-| channel not found in another cwd | project bucket mismatch | `cd` to project, use `--scope global`, or `list --all-projects` |
-| ghost worker in list | supervisor died without cleanup | `trellis channel kill <name> --as <worker> --force` |
-| forum thread looks scrambled | parsed `events.jsonl` directly | use `forum`, `thread`, `messages --thread` |
+| `trellis: command not found` | CLI 未全局安装 | `npm install -g @mindfoldhq/trellis` |
+| `wait` 立即退出 | 过滤条件错误或身份冲突 | 使用不同的 `--as`，检查原始消息 |
+| zsh 对消息文本报错 | Shell 解释了标点 | 使用 `--stdin` 或 `--text-file` |
+| progress 行被截断 | 美化输出截断 | 使用 `messages --raw --kind progress` |
+| Worker 始终不发言 | Provider 启动 / prompt / MCP 延迟 | 检查 `<worker>.log`、`ps` 和原始事件 |
+| 在另一个 cwd 中找不到 channel | 项目存储桶不匹配 | `cd` 到项目、使用 `--scope global` 或 `list --all-projects` |
+| 列表中有残留 Worker | Supervisor 退出但未清理 | `trellis channel kill <name> --as <worker> --force` |
+| forum thread 看起来混乱 | 直接解析了 `events.jsonl` | 使用 `forum`、`thread`、`messages --thread` |
 
-## Storage Layout
+## 存储布局
 
 ```text
 ~/.trellis/channels/
@@ -221,6 +208,5 @@ diffing against `<worker>.inbox-cursor` while debugging the supervisor.
         └── <worker>.spawnlock
 ```
 
-Agents normally use the CLI, not direct file reads. Direct file reads are
-for debugging when CLI views are insufficient — and even then, never on a
-forum channel's `events.jsonl`.
+Agent 通常应使用 CLI，而不是直接读取文件。只有 CLI 视图不足以调试时，才直接
+读取文件；即便如此，也绝不能直接读取 forum channel 的 `events.jsonl`。

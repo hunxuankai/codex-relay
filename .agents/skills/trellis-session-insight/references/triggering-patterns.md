@@ -1,93 +1,93 @@
-# Triggering Patterns
+# 触发模式
 
-Verbatim user phrasings that should make an AI reach for `trellis mem`. Calibrate instinct against these — if a user message hits one of these patterns and you do not reach for `mem`, you probably missed an obvious recall.
+以下是应让 AI 使用 `trellis mem` 的用户原话。用这些示例校准判断：如果用户消息符合其中一种模式而你没有使用 `mem`，很可能遗漏了明显的历史回忆需求。
 
-Patterns are grouped by the *intent* behind the phrasing, not the surface words. The same intent shows up in different languages and registers.
+这些模式按措辞背后的*意图*分组，而不是按表面文字分组。同一意图会以不同语言和语域出现。
 
-## Past-solution recall
+## 回忆过去的解决方案
 
-The user is asking "how did we (or I) solve this before". Past dialogue holds the answer; the codebase shows the result but not the reasoning.
+用户在问“我们（或我）以前如何解决这个问题”。过去对话保存答案；代码库只显示结果，不显示推理过程。
 
-- "How did we solve this last time?"
-- "What did we end up doing about X?"
-- "We dealt with this once already, didn't we?"
+- “上次我们是怎么解决的？”
+- “最后我们对 X 做了什么？”
+- “我们之前已经处理过一次，对吧？”
 - "上次怎么解的?"
 - "之前是怎么搞定 X 的?"
 - "我记得以前修过类似的"
 
-Reach: `trellis mem search "<symptom keyword>" --global --limit 10`, then `context` into the hit that looks closest.
+操作：运行 `trellis mem search "<symptom keyword>" --global --limit 10`，再对最接近的命中结果执行 `context`。
 
-## Decision retrieval
+## 检索决定
 
-The user is referencing a decision that lives in old dialogue, not in any committed file. Look in brainstorm windows.
+用户引用的决定存在于旧对话中，而不在任何已提交文件里。应在需求探索窗口中查找。
 
-- "What was the decision on X?"
-- "Did we decide to use Postgres or SQLite?"
-- "The rationale for choosing X over Y was…?"
+- “关于 X 的决定是什么？”
+- “我们决定使用 Postgres 还是 SQLite？”
+- “选择 X 而不是 Y 的理由是……？”
 - "我们当时为啥选了 X 而不是 Y?"
 - "关于 X 我们之前是怎么定的?"
 - "之前讨论过 X 的方案吗?"
 
-Reach: `trellis mem search "<decision keyword>"` to find the session, then `extract <id> --phase brainstorm` to recover the discussion.
+操作：运行 `trellis mem search "<decision keyword>"` 查找会话，再运行 `extract <id> --phase brainstorm` 恢复讨论。
 
-## Cross-session continuation
+## 跨会话继续
 
-The user resumed work after a gap and the context is implicit.
+用户间隔一段时间后恢复工作，而上下文是隐含的。
 
-- "Where were we?"
-- "Continue from last time."
-- "Pick up where we left off."
+- “我们做到哪了？”
+- “继续上次的。”
+- “从上次停下的地方继续。”
 - "继续上次的"
 - "我们上次做到哪了"
 - "接着昨天那个任务"
 
-Reach: `trellis mem list --task <current-task-dir>` to find the most recent sessions tied to the active task, then `extract` the last one.
+操作：运行 `trellis mem list --task <current-task-dir>` 查找与活动任务关联的最近会话，再对最后一个会话执行 `extract`。
 
-## Familiar-bug debugging
+## 调试熟悉的缺陷
 
-The current bug feels like one already seen. Past sessions probably hold the resolution path.
+当前缺陷像是以前见过的问题。过去会话可能保存了解决路径。
 
-- "I feel like I've hit this before."
-- "Doesn't this look like that bug from last month?"
-- "Same kind of timeout I had in X."
+- “我觉得以前遇到过这个问题。”
+- “这是不是很像上个月那个缺陷？”
+- “和我在 X 中遇到的超时类型一样。”
 - "这个错好像之前见过"
 - "这个 bug 是不是上次那个?"
 - "怎么又是这个 error?"
 
-Reach: `trellis mem search "<error message fragment>" --global`. Anchor on a short, distinctive token from the actual error string.
+操作：运行 `trellis mem search "<error message fragment>" --global`。使用真实错误字符串中简短且有区分度的 token 作为锚点。
 
-## Self-pattern spotting
+## 识别自身模式
 
-The user is asking whether they keep repeating the same kind of mistake or decision.
+用户在询问自己是否反复犯同类错误或作出同类决定。
 
-- "Do I always make this mistake?"
-- "How often have I run into X?"
-- "Is this a recurring thing for me?"
+- “我总是犯这个错误吗？”
+- “我遇到 X 多少次了？”
+- “这对我来说是反复出现的问题吗？”
 - "我每次都踩这个坑吗?"
 - "我老犯这个错?"
 - "这类问题之前出现过几次?"
 
-Reach: `trellis mem search "<topic>" --global --limit 50` and scan the dates / projects in the listing. Optionally `extract` two or three for comparison.
+操作：运行 `trellis mem search "<topic>" --global --limit 50`，查看列表中的日期/项目。可选择两个或三个会话执行 `extract` 进行比较。
 
-## Finish-work retrospective (on demand)
+## 完成工作回顾（按需）
 
-The user explicitly wants to look back at this task — not as a forced step, only when they ask.
+用户明确希望回顾本任务。只有用户提出时才执行，不应作为强制步骤。
 
-- "Summarize what we did in this task."
-- "What were the key decisions / surprises?"
-- "Write up the lessons from this round."
+- “总结一下这个任务做了什么。”
+- “关键决定或意外是什么？”
+- “整理一下这轮的经验。”
 - "总结一下这次的经验"
 - "记一下这次踩的坑"
 - "复盘下这个任务"
 
-Reach: identify the current task's session id (from `.trellis/.runtime/sessions/*.json` or `mem list --task <task-dir>`), then `extract <id> --phase brainstorm` and `--phase implement`. Present a summary — surface concrete file:line citations where possible. Whether to also write the summary somewhere (PRD, spec, notes file) is the user's call; offer, don't auto-write.
+操作：识别当前任务的会话 ID（来自 `.trellis/.runtime/sessions/*.json` 或 `mem list --task <task-dir>`），然后执行 `extract <id> --phase brainstorm` 和 `--phase implement`。给出摘要，并尽可能提供具体的 `file:line` 引用。是否把摘要写入 PRD、规范或注记文件由用户决定；可以提议，但不要自动写入。
 
-## Anti-patterns: do NOT reach for `mem` here
+## 反模式：以下场景不要使用 `mem`
 
-- "What does this function do?" → read the file.
-- "Why is this test failing?" → read the test output and the file.
-- "What's the right pattern for X in our codebase?" → grep / read spec files.
-- "What's the latest npm version of Y?" → call `npm view`.
-- "Fix this bug." → debug. Reach for `mem` only if you suspect prior context exists; otherwise it is noise.
+- “这个函数做什么？”→ 读取文件。
+- “这个测试为什么失败？”→ 读取测试输出和文件。
+- “我们代码库中 X 的正确模式是什么？”→ grep / 读取规范文件。
+- “Y 的最新 npm 版本是什么？”→ 调用 `npm view`。
+- “修复这个缺陷。”→ 调试。只有怀疑存在过往上下文时才使用 `mem`，否则它只是噪声。
 
-The bar stays: would a senior teammate ask "didn't we already talk about this?" before answering? If yes, reach for `mem`. If no, don't.
+判断标准不变：资深同事会不会在回答前问“我们之前不是讨论过吗？”如果会，就使用 `mem`；否则不要使用。
