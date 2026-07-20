@@ -15,7 +15,7 @@
 - 初始化后 AGENTS/README/package 哈希未变化，现有文件未被覆盖。
 - bootstrap 任务已写入中文 PRD、设计、实施检查点、研究映射和 implement/check JSONL。
 - 已用 `TRELLIS_CONTEXT_ID=codex-relay-trellis-migration` 建立当前任务指针，`current --source` 返回该任务。
-- `task.py validate 00-bootstrap-guidelines` 通过：implement 5 条、check 7 条。
+- `task.py validate 00-bootstrap-guidelines` 通过：implement 4 条、check 7 条；研究文件随任务归档保存，不作为移动后会失效的长期注入路径。
 - 已建立 project、security、backend、frontend、testing、release、workflow 七个领域和全部索引。
 - 已完整读取架构、事务、安全、主产品设计、NSIS 设计和验证报告，并将长期规则映射到新规范。
 - spec 索引链接检查通过；路径、密钥、事务、回滚、卸载、NSIS、签名、Vue 和新鲜证据关键词均有明确目标。
@@ -49,7 +49,7 @@ npm --version: 10.9.3
 npm run check: exit 0
 trellis init ... --skip-existing --yes: exit 0
 task.py current --source: session:codex-relay-trellis-migration
-task.py validate: implement 5 entries, check 7 entries, exit 0
+task.py validate: implement 4 entries, check 7 entries, exit 0
 spec index link audit: All spec index links exist
 local Markdown link audit: All local markdown links exist
 trellis update --dry-run: exit 0, no changes made
