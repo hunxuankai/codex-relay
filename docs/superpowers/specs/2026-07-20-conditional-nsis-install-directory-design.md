@@ -17,7 +17,7 @@ During `.onInit`, only when `$INSTDIR` still has Tauri's placeholder value:
 1. Call `GetDriveTypeW("D:\")`.
 2. If the result is `DRIVE_FIXED` (`3`), set `$INSTDIR` to `D:\Program Files\${PRODUCTNAME}`.
 3. Otherwise use Tauri's architecture-aware `$PROGRAMFILES64` / `$PROGRAMFILES` fallback.
-4. Call `RestorePreviousInstallLocation` after choosing the fresh-install default so an existing registered installation directory takes precedence.
+4. Call `RestorePreviousInstallLocation` after choosing the fresh-install default so an existing per-machine registered installation directory takes precedence.
 
 The standard `MUI_PAGE_DIRECTORY` remains present, so users can change the proposed path interactively. Command-line `/D=` and passive/update behavior continue to use the upstream template logic.
 
@@ -25,6 +25,7 @@ The standard `MUI_PAGE_DIRECTORY` remains present, so users can change the propo
 
 - A missing, removable, optical, or network `D:` drive falls back to the Windows Program Files directory.
 - Existing installs are not migrated between drives automatically.
+- The earlier current-user installer stored metadata under HKCU and is not automatically migrated to the new HKLM per-machine installation. Users must uninstall that older application first; its uninstaller leaves Codex configuration and application data intact.
 - The upstream Tauri install, WebView2, shortcut, registry, update, and uninstall sections remain unchanged.
 - The uninstaller continues to leave Codex configuration, application data, API keys, logs, and backups untouched.
 
@@ -34,4 +35,3 @@ The standard `MUI_PAGE_DIRECTORY` remains present, so users can change the propo
 - `npm run check` verifies frontend and Rust checks.
 - `npm run build` compiles the custom NSIS template and generates the final installer.
 - The generated installer path, size, timestamp, and SHA-256 are enumerated after the build.
-
