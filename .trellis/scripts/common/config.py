@@ -164,7 +164,7 @@ def _next_content_line(lines: list[str], start: int) -> tuple[int, str]:
 
 
 # Defaults
-DEFAULT_SESSION_COMMIT_MESSAGE = "chore: record journal"
+DEFAULT_SESSION_COMMIT_MESSAGE = "chore: 记录会话日志"
 DEFAULT_MAX_JOURNAL_LINES = 2000
 DEFAULT_SESSION_AUTO_COMMIT = True
 DEFAULT_CODEX_DISPATCH_MODE = "inline"

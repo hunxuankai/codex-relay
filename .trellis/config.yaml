@@ -1,44 +1,42 @@
-# Trellis Configuration
-# Project-level settings for the Trellis workflow system
+# Trellis 配置
+# Trellis 工作流系统的项目级设置
 #
-# All values have sensible defaults. Only override what you need.
+# 所有值都有合理默认值，只覆盖实际需要调整的内容。
 
 #-------------------------------------------------------------------------------
-# Session Recording
+# 会话记录
 #-------------------------------------------------------------------------------
 
-# Commit message used when auto-committing journal/index changes
-# after running add_session.py
-session_commit_message: "chore: record journal"
+# 运行 add_session.py 后自动提交日志/索引改动时使用的提交消息
+session_commit_message: "chore: 记录会话日志"
 
-# Maximum lines per journal file before rotating to a new one
+# 每个日志文件在轮换到新文件前允许的最大行数
 max_journal_lines: 2000
 
 #-------------------------------------------------------------------------------
-# Session Auto-Commit
+# 会话自动提交
 #-------------------------------------------------------------------------------
 
-# Auto-commit behavior for session journal + task archive operations.
-# - true (default): scripts auto-stage and auto-commit journal / task changes
-#   after add_session.py / task.py archive runs.
-# - false: scripts do not touch git. Files (journal-*.md, task archive moves)
-#   are still written to disk; you decide whether to git add / commit.
+# 会话日志和任务归档操作的自动提交行为。
+# - true（默认）：add_session.py / task.py archive 运行后，脚本自动暂存并提交
+#   日志/任务改动。
+# - false：脚本不操作 Git。文件（journal-*.md、任务归档移动）仍会写入磁盘；
+#   由你决定是否执行 git add / commit。
 #
-# Use `false` if your project's .gitignore intentionally excludes `.trellis/`
-# and you want session data kept local-only, or if you prefer to review
-# staged changes manually before each commit.
+# 如果项目的 .gitignore 有意排除 `.trellis/`，并且希望会话数据只保留在本地，
+# 或希望每次提交前手动审查暂存改动，请使用 `false`。
 #
-# Accepts: true / false / yes / no / 1 / 0 / on / off (case-insensitive).
+# 接受：true / false / yes / no / 1 / 0 / on / off（不区分大小写）。
 #
 # session_auto_commit: true
 
 #-------------------------------------------------------------------------------
-# Task Lifecycle Hooks
+# 任务生命周期 Hook
 #-------------------------------------------------------------------------------
 
-# Shell commands to run after task lifecycle events.
-# Each hook receives TASK_JSON_PATH environment variable pointing to task.json.
-# Hook failures print a warning but do not block the main operation.
+# 任务生命周期事件后运行的 Shell 命令。
+# 每个 hook 都会收到指向 task.json 的 TASK_JSON_PATH 环境变量。
+# Hook 失败会打印警告，但不阻塞主要操作。
 #
 # hooks:
 #   after_create:
@@ -51,12 +49,11 @@ max_journal_lines: 2000
 #     - "echo 'Task archived'"
 
 #-------------------------------------------------------------------------------
-# Monorepo / Packages
+# Monorepo / 包
 #-------------------------------------------------------------------------------
 
-# Declare packages for monorepo projects.
-# Trellis auto-detects workspaces during `trellis init`, but you can also
-# configure them manually here.
+# 为 monorepo 项目声明包。
+# Trellis 在 `trellis init` 期间自动检测 workspace，也可以在此手动配置。
 #
 # packages:
 #   frontend:
@@ -66,30 +63,28 @@ max_journal_lines: 2000
 #   docs:
 #     path: docs-site
 #     type: submodule
-#   # For polyrepo / meta-repo layouts (independent .git in each subdir),
-#   # mark the package with `git: true`. The runtime treats it as an
-#   # independent repository for things like git-context display.
+#   # 对于 polyrepo / meta-repo 布局（每个子目录有独立 .git），使用 `git: true`
+#   # 标记包。运行时会将其视为独立仓库，用于 Git 上下文显示等功能。
 #   webapp:
 #     path: ./webapp
 #     git: true
 
-# Default package used when --package is not specified.
+# 未指定 --package 时使用的默认包。
 # default_package: frontend
 
 #-------------------------------------------------------------------------------
-# Channel worker OOM guard
+# Channel Worker OOM 防护
 #-------------------------------------------------------------------------------
-# Default safeguards for `trellis channel spawn` workers. The guard runs
-# at spawn time (cleans expired idle workers, then enforces the live-worker
-# budget) and inside each supervisor (self-terminates a worker that stays
-# continuously idle past `idle_timeout`).
+# `trellis channel spawn` Worker 的默认防护。防护会在 spawn 时运行（清理过期的
+# 空闲 Worker，再执行存活 Worker 数量上限），也会在每个 Supervisor 内运行
+#（Worker 持续空闲超过 `idle_timeout` 时自行终止）。
 #
-# Precedence: CLI flag > env var (TRELLIS_CHANNEL_WORKER_IDLE_TIMEOUT /
-# TRELLIS_CHANNEL_MAX_LIVE_WORKERS) > this config > built-in default.
+# 优先级：CLI 参数 > 环境变量（TRELLIS_CHANNEL_WORKER_IDLE_TIMEOUT /
+# TRELLIS_CHANNEL_MAX_LIVE_WORKERS）> 本配置 > 内置默认值。
 #
-# `idle_timeout: 0` disables idle cleanup (workers can sit idle forever
-# unless explicitly killed or given `--timeout`).
-# `max_live_workers: 0` disables the spawn-time budget check.
+# `idle_timeout: 0` 禁用空闲清理（除非显式终止或设置 `--timeout`，Worker 可以
+# 永久保持空闲）。
+# `max_live_workers: 0` 禁用 spawn 时的数量上限检查。
 #
 channel:
   worker_guard:
@@ -97,14 +92,12 @@ channel:
     max_live_workers: 6
 
 #-------------------------------------------------------------------------------
-# Codex (dispatch behavior)
+# Codex（派发行为）
 #-------------------------------------------------------------------------------
-# Codex-only knob; other platforms ignore it. Default ("inline") makes the
-# main Codex agent edit code directly because Codex sub-agents run with
-# `fork_turns="none"` isolation and can't inherit the parent session's
-# task context. Set to "sub-agent" to opt into the legacy dispatch model
-# (main agent spawns trellis-implement / trellis-check / trellis-research
-# sub-agents).
+# Codex 专属开关，其他平台忽略。默认值（"inline"）让 Codex 主 Agent 直接编辑
+# 代码，因为 Codex 子 Agent 使用 `fork_turns="none"` 隔离运行，无法继承父会话
+# 的任务上下文。设置为 "sub-agent" 可选择旧版派发模型（主 Agent 启动
+# trellis-implement / trellis-check / trellis-research 子 Agent）。
 #
 codex:
   dispatch_mode: inline

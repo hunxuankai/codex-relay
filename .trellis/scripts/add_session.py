@@ -57,9 +57,9 @@ from common.config import (
 
 
 DEFAULT_MAIN_CHANGES = (
-    "- Detailed change bullets were not supplied; see the summary above."
+    "- 未提供详细改动清单；请参见上方摘要。"
 )
-DEFAULT_TESTING = "- Validation was not recorded for this session."
+DEFAULT_TESTING = "- 本次会话未记录验证结果。"
 
 
 # =============================================================================
@@ -100,8 +100,8 @@ def get_current_session(index_file: Path) -> int:
 
     content = index_file.read_text(encoding="utf-8")
     for line in content.splitlines():
-        if "Total Sessions" in line:
-            match = re.search(r":\s*(\d+)", line)
+        if "Total Sessions" in line or "会话总数" in line:
+            match = re.search(r"[:：]\s*(\d+)", line)
             if match:
                 return int(match.group(1))
     return 0
@@ -127,7 +127,7 @@ def count_journal_files(dev_dir: Path, active_num: int) -> str:
     for f in files:
         filename = f.name
         lines = len(f.read_text(encoding="utf-8").splitlines())
-        status = "Active" if filename == active_file else "Archived"
+        status = "活动" if filename == active_file else "已归档"
         result_lines.append(f"| `{filename}` | ~{lines} | {status} |")
 
     return "\n".join(result_lines)
@@ -190,10 +190,10 @@ def create_new_journal_file(
     prev_num = num - 1
     new_file = dev_dir / f"{FILE_JOURNAL_PREFIX}{num}.md"
 
-    content = f"""# Journal - {developer} (Part {num})
+    content = f"""# 日志 - {developer}（第 {num} 部分）
 
-> Continuation from `{FILE_JOURNAL_PREFIX}{prev_num}.md` (archived at ~{max_lines} lines)
-> Started: {today}
+> 续接 `{FILE_JOURNAL_PREFIX}{prev_num}.md`（约 {max_lines} 行时归档）
+> 开始日期：{today}
 
 ---
 
@@ -215,47 +215,47 @@ def generate_session_content(
 ) -> str:
     """Generate session content."""
     if commit and commit != "-":
-        commit_table = """| Hash | Message |
+        commit_table = """| 哈希 | 消息 |
 |------|---------|"""
         for c in commit.split(","):
             c = c.strip()
-            commit_table += f"\n| `{c}` | (see git log) |"
+            commit_table += f"\n| `{c}` | （见 Git 日志） |"
     else:
-        commit_table = "(No commits - planning session)"
+        commit_table = "（无提交，规划会话）"
 
-    package_line = f"\n**Package**: {package}" if package else ""
-    branch_line = f"\n**Branch**: `{branch}`" if branch else ""
+    package_line = f"\n**包**：{package}" if package else ""
+    branch_line = f"\n**分支**：`{branch}`" if branch else ""
 
     return f"""
 
-## Session {session_num}: {title}
+## 会话 {session_num}：{title}
 
-**Date**: {today}
-**Task**: {title}{package_line}{branch_line}
+**日期**：{today}
+**任务**：{title}{package_line}{branch_line}
 
-### Summary
+### 摘要
 
 {summary}
 
-### Main Changes
+### 主要改动
 
 {extra_content}
 
-### Git Commits
+### Git 提交
 
 {commit_table}
 
-### Testing
+### 测试
 
 {testing_content}
 
-### Status
+### 状态
 
-[OK] **Completed**
+[OK] **已完成**
 
-### Next Steps
+### 下一步
 
-- None - task complete
+- 无，任务已完成
 """
 
 
@@ -305,9 +305,9 @@ def update_index(
         if "@@@auto:current-status" in line:
             new_lines.append(line)
             in_current_status = True
-            new_lines.append(f"- **Active File**: `{active_file}`")
-            new_lines.append(f"- **Total Sessions**: {new_session}")
-            new_lines.append(f"- **Last Active**: {today}")
+            new_lines.append(f"- **活动文件**：`{active_file}`")
+            new_lines.append(f"- **会话总数**：{new_session}")
+            new_lines.append(f"- **最近活动**：{today}")
             continue
 
         if "@@@/auto:current-status" in line:
@@ -318,7 +318,7 @@ def update_index(
         if "@@@auto:active-documents" in line:
             new_lines.append(line)
             in_active_documents = True
-            new_lines.append("| File | Lines | Status |")
+            new_lines.append("| 文件 | 行数 | 状态 |")
             new_lines.append("|------|-------|--------|")
             new_lines.append(files_table)
             continue
@@ -351,13 +351,13 @@ def update_index(
                 r"^\|\s*#\s*\|\s*Date\s*\|\s*Title\s*\|\s*Commits\s*\|\s*Branch\s*\|\s*Base Branch\s*\|\s*$",
                 line,
             ):
-                new_lines.append("| # | Date | Title | Commits | Branch |")
+                new_lines.append("| # | 日期 | 标题 | 提交 | 分支 |")
                 continue
             if re.match(r"^\|\s*#\s*\|\s*Date\s*\|\s*Title\s*\|\s*Commits\s*\|\s*Branch\s*\|\s*$", line):
-                new_lines.append("| # | Date | Title | Commits | Branch |")
+                new_lines.append("| # | 日期 | 标题 | 提交 | 分支 |")
                 continue
             if re.match(r"^\|\s*#\s*\|\s*Date\s*\|\s*Title\s*\|\s*Commits\s*\|\s*$", line):
-                new_lines.append("| # | Date | Title | Commits | Branch |")
+                new_lines.append("| # | 日期 | 标题 | 提交 | 分支 |")
                 continue
             if re.match(r"^\|[-| ]+\|\s*$", line) and not header_written:
                 new_lines.append("|---|------|-------|---------|--------|")
@@ -453,7 +453,7 @@ def _auto_commit_workspace(repo_root: Path) -> None:
 def add_session(
     title: str,
     commit: str = "-",
-    summary: str = "Session summary was not supplied.",
+    summary: str = "未提供会话摘要。",
     extra_content: str = DEFAULT_MAIN_CHANGES,
     auto_commit: bool = True,
     package: str | None = None,
@@ -561,7 +561,7 @@ def main() -> int:
     )
     parser.add_argument("--title", required=True, help="Session title")
     parser.add_argument("--commit", default="-", help="Comma-separated commit hashes")
-    parser.add_argument("--summary", default="Session summary was not supplied.", help="Brief summary")
+    parser.add_argument("--summary", default="未提供会话摘要。", help="Brief summary")
     parser.add_argument("--content-file", help="Path to file with detailed content")
     parser.add_argument("--package", help="Package name tag (e.g., cli, docs-site)")
     parser.add_argument("--branch", help="Branch name (auto-detected if omitted)")
