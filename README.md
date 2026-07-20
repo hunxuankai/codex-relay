@@ -34,8 +34,10 @@ src-tauri/installer/         自定义 NSIS 安装模板
 fixtures/                    仅含假密钥的测试样例
 scripts/prepare-dev-data.ps1 安全开发数据与环境覆盖脚本
 dev-data/                    被 Git 忽略的本地开发配置
-docs/                        架构、事务、安全与验证说明
-AGENTS.md                    仓库级安全、测试与文档规则
+.trellis/                    任务生命周期、上下文检查点与分层项目规范
+.agents/skills/              Trellis 提供的项目工作流技能
+.codex/                      仓库级 Codex hooks 与 inline agent 配置
+AGENTS.md                    每轮必须加载的最高优先级规则
 ```
 
 ## 环境要求
@@ -46,6 +48,7 @@ AGENTS.md                    仓库级安全、测试与文档规则
 4. Microsoft C++ Build Tools（Desktop development with C++）。
 5. Microsoft Edge WebView2 Runtime。Windows 10/11 通常已安装。
 6. 构建 NSIS 安装包时需要 Tauri CLI 能下载或找到所需打包工具。
+7. 进行非平凡项目开发时使用 Trellis CLI 0.6.7；应用使用和普通构建不依赖 Trellis。
 
 ## 安装与首次使用
 
@@ -90,6 +93,25 @@ powershell -ExecutionPolicy Bypass -File scripts/prepare-dev-data.ps1 -PrepareOn
 ```
 
 `-PrepareOnly` 只创建或刷新安全数据，不启动应用。该命令会启动子 PowerShell，因此脚本内设置的环境变量不会回传到当前终端；若随后需要手动运行 `npm run dev`，必须按上面的示例在当前终端重新设置两个 Relay 覆盖变量。
+
+## Trellis 开发工作流
+
+非平凡开发由仓库内的 Trellis `tdd` 工作流管理，Codex 使用 inline 模式，不启用 channel 或 sub-agent dispatch。任务的 PRD、设计、实施计划、进度和验证证据位于 `.trellis/tasks/`，长期项目规则位于 `.trellis/spec/`。
+
+恢复当前任务时先运行：
+
+```powershell
+python .trellis/scripts/task.py current --source
+```
+
+随后读取当前任务的 `task.json`、`prd.md`、`design.md` 和 `implement.md`，再按任务只加载相关规范。若检查点仍缺少某段历史细节，可使用：
+
+```powershell
+trellis mem search "<关键词>"
+trellis mem context <session-id>
+```
+
+`trellis mem` 只用于补救，不能替代持续更新 `implement.md`。完整生命周期、上下文恢复和文档归档规则见 `.trellis/spec/workflow/`。
 
 ## 测试与检查
 
@@ -186,7 +208,7 @@ Codex Provider 配置的主要数据源。Codex Relay 只局部修改目标 Prov
 - 不要在多人共用或不可信的 Windows 账户上保存高权限密钥。
 - 怀疑泄漏时，应在 Provider 平台吊销并重新生成密钥。
 
-详见 [docs/security-notes.md](docs/security-notes.md)。
+详见 [路径与密钥安全](.trellis/spec/security/path-and-secret-safety.md) 和 [数据保留](.trellis/spec/security/data-retention.md)。
 
 ## Provider 操作与切换事务
 
@@ -194,7 +216,7 @@ Codex Provider 配置的主要数据源。Codex Relay 只局部修改目标 Prov
 
 切换步骤包括：重新读取三个文件、验证目标与密钥、检查外部修改指纹、创建统一备份、生成内存结果、写入临时文件、解析验证、替换正式文件、再次验证、刷新托盘与界面。成功提示包含“请重启 Codex 后生效”。
 
-当前 Provider 不能直接删除，必须先切换到其他 Provider。详见 [docs/config-transaction.md](docs/config-transaction.md)。
+当前 Provider 不能直接删除，必须先切换到其他 Provider。详见 [配置事务安全](.trellis/spec/security/transaction-safety.md)。
 
 ## 自检
 
@@ -254,7 +276,10 @@ NSIS 卸载器移除应用程序和快捷方式，但没有自定义卸载钩子
 
 ## 进一步阅读
 
-- [架构说明](docs/architecture.md)
-- [配置事务与回滚](docs/config-transaction.md)
-- [安全说明](docs/security-notes.md)
-- [实施设计](docs/superpowers/specs/2026-07-20-codex-relay-design.md)
+- [项目与产品规范](.trellis/spec/project/index.md)
+- [安全规范](.trellis/spec/security/index.md)
+- [后端规范](.trellis/spec/backend/index.md)
+- [前端规范](.trellis/spec/frontend/index.md)
+- [测试与验证规范](.trellis/spec/testing/index.md)
+- [发布与 NSIS 规范](.trellis/spec/release/index.md)
+- [Trellis 工作流与上下文恢复](.trellis/spec/workflow/index.md)
