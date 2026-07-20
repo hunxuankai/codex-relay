@@ -2,10 +2,10 @@
 
 ## 当前状态
 
-- 阶段：实施中。
+- 阶段：Phase 3.5 收尾中。
 - 已完成：创建并激活任务；盘点受管文件；完成 PRD/设计/实施计划自检；加载工作流、文档、测试、安全、数据保留、Trellis 本地架构、Codex 平台文件和任务生命周期规范；确认 `.agents` 中的 Bundled Skill 会被 `trellis update` 识别为本地定制，且不得修改模板哈希；完成 `.agents` 全部 46 个受管 Markdown 的人工翻译与分批结构验证。
-- 当前工作：Phase 2.2 与 Phase 3.3 已完成；Phase 3.4 中文提交计划已就绪，等待用户一次性确认。
-- 下一步：用户确认后按计划提交工作改动，再使用 `trellis-finish-work` 归档任务并记录会话。
+- 当前工作：Phase 2.2、Phase 3.3 和 Phase 3.4 已完成；恢复会话后已取得新鲜全量验证与专项审计证据，正在执行 `trellis-finish-work`。
+- 下一步：归档当前任务，再以 Phase 3.4 的三笔工作提交记录本次会话。
 
 ## 已完成
 
@@ -88,3 +88,13 @@
 
 - `e96edf3` `docs(trellis): 统一内部文档与提示词为简体中文`：提交 61 个文档、Skill、Agent、提示词、规范和 workspace 路径。
 - `da1be7a` `feat(trellis): 中文化工作区生成与自动提交主题`：提交 workspace 生成器、配置默认值和归档提交主题实现。
+- `7b391ea` `docs(task): 记录内部文档中文化验证证据`：提交最终验证证据、验收勾选和收尾状态。
+
+## 续接收尾验证证据
+
+- 恢复检查：`get_context.py` 确认当前任务仍为 `in_progress`，`git status` 初始为干净；Phase 3.4 细则规定干净工作树直接进入 Phase 3.5。
+- 新鲜全量门禁：`npm run check` 退出 0；Vue 类型检查通过，Vitest 15 个文件、65 个测试全部通过；Rust fmt 与 Clippy（`-D warnings`）通过，107 个单元测试、2 个路径安全集成测试和 1 个 Provider 工作流集成测试全部通过。
+- 专项目首次组合命令因 PowerShell 不按 Bash 规则处理 `\"`，使一行 Python 在解析 f-string 时触发 `SyntaxError`；检查真实模块接口还发现命令误用了不存在的 `get_config`。该失败属于临时审计命令错误，不是项目失败；改用单引号参数和公开 `get_session_commit_message` / `get_codex_dispatch_mode` 后重跑退出 0。
+- Trellis 与配置：`task.py validate 07-20-chinese-docs-and-commits` 退出 0，inline 模式按设计跳过不存在的 JSONL；标准库 `tomllib` 成功解析 4 个 Codex TOML，配置 getter 返回 `chore: 记录会话日志` 和 `inline`。
+- 文档与提交主题：结构审计覆盖 87 个受管 Markdown 和 12 个 Skill frontmatter，围栏与 frontmatter 错误均为 0；高置信度英文扫描的 13 个候选全部是 `Vitest/Vue Test Utils` 名称或工作流平台 tag。Codex TOML 的高置信度英文候选为 0；运行路径中旧英文提交主题为 0，新中文默认值、配置值和归档实现均被搜索命中。
+- 安全与差异：受管敏感路径和高置信度密钥文件命中均为 0；`git diff --check`、`git diff --cached --check` 退出 0。`git status --short --ignored` 仅列出项目既有忽略目录和生成缓存，没有新增未跟踪任务文件。
