@@ -1,0 +1,32 @@
+{
+  "id": "audit-chinese-docs-and-commits",
+  "name": "audit-chinese-docs-and-commits",
+  "title": "复核内部文档中文化任务完成度",
+  "description": "独立复核已归档 chinese-docs-and-commits 的需求覆盖、生成器一致性、自动提交行为和验证证据。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "kai",
+  "assignee": "kai",
+  "createdAt": "2026-07-20",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".trellis/tasks/archive/2026-07/07-20-chinese-docs-and-commits/",
+    ".agents/",
+    ".codex/",
+    ".trellis/",
+    "AGENTS.md"
+  ],
+  "notes": "",
+  "meta": {}
+}
