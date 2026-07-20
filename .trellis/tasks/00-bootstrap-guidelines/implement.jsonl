@@ -1,0 +1,6 @@
+
+{"file": ".trellis/spec/workflow/documentation.md", "reason": "规定旧文档迁移、删除门禁和中文文档归属"}
+{"file": ".trellis/spec/workflow/context-recovery.md", "reason": "规定六段式检查点和压缩后恢复顺序"}
+{"file": ".trellis/spec/security/index.md", "reason": "确保安全红线完整迁移"}
+{"file": ".trellis/spec/testing/verification.md", "reason": "约束验证证据与完成声明"}
+{"file": ".trellis/tasks/00-bootstrap-guidelines/research/migration-source-map.md", "reason": "记录旧文档到新规范的来源映射"}

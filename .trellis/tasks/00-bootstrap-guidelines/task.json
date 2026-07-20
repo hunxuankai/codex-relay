@@ -1,0 +1,32 @@
+{
+  "id": "00-bootstrap-guidelines",
+  "name": "00-bootstrap-guidelines",
+  "title": "全量迁移到 Trellis",
+  "description": "建立 Trellis TDD 生命周期、分层项目规范和可恢复的任务检查点，并删除旧 docs 文档树",
+  "status": "in_progress",
+  "dev_type": "docs",
+  "scope": "workflow, project documentation and project-wide development rules",
+  "package": null,
+  "priority": "P1",
+  "creator": "kai",
+  "assignee": "kai",
+  "createdAt": "2026-07-20",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": null,
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".trellis/config.yaml",
+    ".trellis/workflow.md",
+    ".trellis/spec/",
+    "AGENTS.md",
+    "README.md"
+  ],
+  "notes": "复用 trellis init 创建的 bootstrap 任务，承载 Codex Relay 首次完整 Trellis 迁移",
+  "meta": {}
+}

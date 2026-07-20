@@ -1,0 +1,8 @@
+
+{"file": ".trellis/spec/project/index.md", "reason": "检查产品与架构规则完整性"}
+{"file": ".trellis/spec/security/index.md", "reason": "逐条检查路径、密钥、事务与保留红线"}
+{"file": ".trellis/spec/backend/index.md", "reason": "检查 Rust 分层、错误与日志规则"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "检查 Vue、状态和可访问性规则"}
+{"file": ".trellis/spec/testing/index.md", "reason": "检查 TDD、隔离与验证证据"}
+{"file": ".trellis/spec/release/index.md", "reason": "检查 NSIS、卸载与签名规则"}
+{"file": ".trellis/spec/workflow/index.md", "reason": "检查 Trellis 所有权和上下文恢复规则"}
