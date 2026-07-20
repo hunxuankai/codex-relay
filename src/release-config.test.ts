@@ -41,6 +41,11 @@ describe('Windows release configuration', () => {
     expect(generatedApiKeys.every((apiKey) => /^test-key-[a-z0-9-]+-not-real$/.test(apiKey))).toBe(true)
   })
 
+  it('uses the Windows npm command shim when safe development launches Tauri', () => {
+    expect(prepareDevData).toContain('& npm.cmd run dev')
+    expect(prepareDevData).not.toMatch(/&\s+npm\s+run\s+dev/)
+  })
+
   it('uses the Windows GUI subsystem for release builds', () => {
     expect(rustEntryPoint).toContain(
       '#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]',

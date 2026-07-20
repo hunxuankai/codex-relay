@@ -69,6 +69,6 @@ Write-Host "Safe Codex directory: $codexHome"
 Write-Host "Safe application data: $appData"
 
 if (-not $PrepareOnly) {
-  & npm run dev
+  & npm.cmd run dev
   exit $LASTEXITCODE
 }
