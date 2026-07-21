@@ -33,6 +33,6 @@
     ".trellis/spec/security/",
     ".trellis/spec/testing/"
   ],
-  "notes": "规划已批准并进入实施；用户已配置 GitHub Actions Secrets，公开 updater 公钥和固定 endpoint 已写入基础配置，下一步运行完整检查与普通构建后推进远端 Draft Release。",
+  "notes": "v0.1.0 已公开发布并在 Windows Sandbox 安装；基线启动暴露的 health 初始化竞态已按 RED→GREEN 修复，v0.1.1 本地候选重新通过完整检查和无私钥普通构建。仍需提交推送、生成并核对 v0.1.1 Draft、公开发布，再执行真实应用内升级与 after.json 核验。",
   "meta": {}
 }

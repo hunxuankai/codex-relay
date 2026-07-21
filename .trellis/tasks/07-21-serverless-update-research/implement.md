@@ -17,7 +17,7 @@
 
 ## 当前进度
 
-Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_progress`。切片 1 至切片 6 的本地实现已完成并推送到公开仓库 `main`：updater 依赖/插件/权限/版本来源/发布覆盖、固定 endpoint/公开公钥、typed 服务边界、手动检查与安装状态机、设置页 UI、Draft 发布工作流和 README 已落地。旧占位 Draft 已删除，GitHub Actions 第二次真实运行成功，并从最新提交生成含正式说明、NSIS、`.sig` 与 `latest.json` 的新 Draft；新清单内容核对、公开发布和 Windows 升级尚未完成。
+Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_progress`。切片 1 至切片 7 已完成：updater 客户端、Draft 发布工作流、`v0.1.0` 公开发布、资产/签名/API 下载兼容性均已核对。切片 8 已完成 Sandbox 功能确认、安全 staging/guest 脚本、dry-run、真实 guest bootstrap/升级前快照及 `v0.1.0` 基线安装；基线应用启动后暴露的 health 初始化竞态已按 RED→GREEN 修复，`v0.1.1` 本地候选已重新通过完整检查和无私钥普通构建。远端 `v0.1.1` Draft/公开发布及真实应用内升级仍未完成。
 
 ## 已完成
 
@@ -32,6 +32,9 @@ Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_p
 - `.github/workflows/release.yml` 使用手动触发、完整检查、固定 SHA Actions、Draft Release 和 NSIS updater JSON 优先；尚未在 GitHub 执行。
 - 用户已在 GitHub Actions Secrets 配置更新私钥与密码，并仅提供可公开提交的公钥；基础配置已锁定固定 HTTPS endpoint 与该公钥。
 - 已更新产品、架构和发布规范，并新增 `.trellis/spec/release/updater.md`，沉淀 endpoint、公钥、Secrets、Draft、构建分离和系统验收契约。
+- 新增 `scripts/windows-sandbox/` 主机准备、guest bootstrap、安全重启和升级后核验脚本；只读输入/可写结果映射、成对 Relay 覆盖、报告脱敏、白名单唯一性和 reparse point 防护均有自动化测试。
+- Windows 10 Enterprise 22H2 上确认 Sandbox 功能已启用；开始菜单注册名为英文 `Windows Sandbox`，直接启动后实际窗口标题为“Windows 沙盒”。配置化 Sandbox 已完成 guest bootstrap 并写回升级前报告。
+- `package.json`、package lock、Cargo 元数据和发布说明已统一为 `0.1.1` 本地候选，用于从 `v0.1.0` 执行首条真实应用内更新链路。
 
 ## 关键决策
 
@@ -74,13 +77,32 @@ Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_p
 - GitHub Actions `发布 Windows 更新 #2`（`https://github.com/hunxuankai/codex-relay/actions/runs/29803671969`）以最新提交 `194a9b54fc691e212a3ed437723866e71bcde992` 运行完成，结论为 `success`；完整检查和 Draft 构建步骤均成功。
 - 新 Draft `Codex Relay v0.1.0` 已生成且未发布，页面显示正式“更新内容 / 首次安装 / 注意事项”中文说明。资产：NSIS 3.79 MB，SHA-256 `e9dcb19419a198ac00244a579d5b81874cc847200fc216d1797fd837a693dad9`；`.sig` 424 字节，SHA-256 `6dfb4765df2d507e48f507603f1c84bdc396c8458c57c5bf28c1e13da0ac3500`；`latest.json` 1.85 KB，SHA-256 `c96bb5862372d881b81edd069d579eda80f1852c0a4ec554b1e78d91cd77c50f`。
 - 用户提供的新 `latest.json` 可解析：版本 `0.1.0`，`notes` 与 Draft 页面正式中文说明一致；`windows-x86_64` 和 `windows-x86_64-nsis` 使用同一签名并指向新 NSIS asset ID `484291952`。签名 envelope 的 key ID 与客户端公开公钥均为 `7DC2AE5ACEA0D00A`，可信注释文件名为 `Codex Relay_0.1.0_x64-setup.exe`。
-- 未执行 Tauri updater 签名、GitHub Actions、Draft Release、安装、升级、UAC 或 Sandbox/VM 验收；上述构建证据不得用于声明这些项目成功。
+- `v0.1.0` 已公开发布：Release ID `357130493`，`draft=false`、`prerelease=false`，Tag 目标为 `194a9b54fc691e212a3ed437723866e71bcde992`，发布时间为 `2026-07-21T05:45:48Z`。
+- GitHub API 公布的公开资产为：NSIS asset ID `484291952`，3,977,417 字节，SHA-256 `e9dcb19419a198ac00244a579d5b81874cc847200fc216d1797fd837a693dad9`；`.sig` asset ID `484291955`，424 字节，SHA-256 `6dfb4765df2d507e48f507603f1c84bdc396c8458c57c5bf28c1e13da0ac3500`；`latest.json` asset ID `484291961`，1,899 字节，SHA-256 `c96bb5862372d881b81edd069d579eda80f1852c0a4ec554b1e78d91cd77c50f`。
+- 公开 `releases/latest/download/latest.json` 可解析且无占位说明；两个 Windows 平台键均指向 asset ID `484291952`，签名相同，公开 `.sig` 文本与清单内联签名完全一致。
+- 当前依赖树确认使用 `tauri-plugin-updater v2.10.1`。该版本 `Update::download` 在请求头缺少 `Accept` 时自动插入 `application/octet-stream`；对清单中的 GitHub API asset URL 实测，默认请求得到 1,871 字节元数据，加入该 Header 后下载 3,977,417 字节安装器，SHA-256 为 `e9dcb19419a198ac00244a579d5b81874cc847200fc216d1797fd837a693dad9`，与公开资产一致，因此该 URL 形态与当前 updater 版本兼容。
+- 记录公开发布与 API asset 兼容性证据后运行 `npm run check`：退出码 0；8 项 Trellis 测试、17 个前端测试文件共 78 项、107 项 Rust 单元测试、2 项路径安全测试和 1 项 Provider 工作流测试通过。
+- 尚未执行 Windows Sandbox/VM 中的首次安装、应用内升级、UAC、安装器启动后的真实签名校验和数据保留验收；上述发布与源码证据不得用于声明这些系统场景成功。
+- Sandbox 只读诊断：Windows 10 Enterprise 22H2 build `19045.6456`；`Containers-DisposableClientVM` 的 `Win32_OptionalFeature.InstallState=1`，`WindowsSandbox.exe`/`WindowsSandboxClient.exe` 存在，`Get-StartApps` 注册名为 `Windows Sandbox`，`vmcompute`/`hns` 正在运行。当前非提升 shell 调用 `Get-WindowsOptionalFeature` 仍按预期返回“请求的操作需要提升”。
+- 直接启动 Sandbox 后观察到 `WindowsSandboxClient` 响应正常、窗口标题为“Windows 沙盒”并出现独立 `vmwp`/`vmmem`；随后关闭该空白探测实例并用配置化 `.wsb` 重新启动。
+- `src/sandbox-update.test.ts` 按 RED→GREEN 增加 7 项：临时 staging/映射、guest fixture/脱敏报告、升级后版本与哈希、成对覆盖安全重启、重复报告项拒绝、junction 拒绝和真实 Relay 路径源文件拒绝。专项负例曾分别真实观察到脚本错误接受重复报告项、reparse staging 和伪 `.codex` 下的安装器，修复后对应测试通过。
+- 配置化 Sandbox staging：公开 `v0.1.0` 安装器复制后 SHA-256 为 `E9DCB19419A198AC00244A579D5B81874CC847200FC216D1797FD837A693DAD9`，与 Release 一致；guest 写回的 `before.json` 仅含三项相对路径、长度和 SHA-256，覆盖指向 `C:\CodexRelaySandbox\dev-data\codex` 与 `C:\CodexRelaySandbox\dev-data\app-data`，未包含 fixture 密钥文本。
+- 首次 `npm run check` 在 Trellis 8 项通过后因 `src/sandbox-update.test.ts` 数组索引未显式收窄而在 typecheck 失败，Rust 未运行；修复测试类型后 `npm run typecheck` 退出 0。随后从头运行 `npm run check` 退出 0：Trellis 8 项、18 个前端测试文件共 84 项、107 项 Rust 单元测试、2 项路径安全和 1 项 Provider 工作流通过。
+- 显式移除 `TAURI_SIGNING_PRIVATE_KEY` 与密码后运行 `npm run build`：退出码 0。`src-tauri/target/release/CodexRelay.exe` 为 16,633,344 字节，SHA-256 `28ED9C6268AAF9D297E50D87AB697CD9EAC12AFAAE503B0894075AD484923F4C`；`Codex Relay_0.1.1_x64-setup.exe` 为 3,976,911 字节，SHA-256 `F4294EF64AC6EC2100C02DF4512DFB424E43452BFC588BAFCDEA35598DBDBAFF`。该普通构建不包含 updater `.sig`/`latest.json`，不能作为签名或升级成功证据。
+- Sandbox 诊断确认 HKLM 安装项版本为 `0.1.0`、安装目录为 `C:\Program Files\Codex Relay`，`CodexRelay.exe` 已从该目录启动；进程级和用户级两项 Relay 覆盖均指向 `C:\CodexRelaySandbox\dev-data` 下的隔离目录，日志文件存在但为空。应用界面持续停留在“正在加载本机配置…”，因此不能把进程存在描述为界面初始化成功。
+- health 竞态 RED：新增测试模拟初始 critical 自检未完成时 extended 自检先完成，`npx vitest run src/composables/resourceComposables.test.ts` 的 9 项中仅新增用例失败，实际 `loading=true`、预期为 `false`。
+- health 竞态 GREEN：`runExtended()` 仅在自身仍为当前请求时结束初始 loading；同一专项 9 项通过，迟到的 critical 结果不覆盖 extended 报告。App/health 组合专项 12 项、Sandbox 专项 7 项和 `npm run typecheck` 均退出 0。
+- 修复及最后两项 Sandbox 路径安全补丁后的完整复验：`npm run check` 退出 0；8 项 Trellis 测试、18 个前端测试文件共 87 项、107 项 Rust 单元测试、2 项路径安全和 1 项 Provider 工作流测试通过。
+- Windows 自动化控制通道本轮不可用，未对 Sandbox 发送不可靠的全局按键。临时诊断版 `guest-start-app.ps1` 已从 staging 内备份恢复，源/目标 SHA-256 均为 `D0BB33A7722F43C417A78C71DC031C1B9328ADD4555A37834689F6467EF0CA64`；`WindowsSandboxClient`、`vmwp` 和 `vmmem` 仍在运行。
+- 提交前差异审查发现诊断报告中的 NSIS `InstallLocation` 为带外层双引号的 `"C:\Program Files\Codex Relay"`，而 start/verify 直接路径规范化。将两个 dry-run 改为同形输入后，Sandbox 专项 7 项中对应 2 项因非法路径字符失败，证明真实 guest 入口会找错安装目录。
+- 增加共享 `Get-CanonicalInstallLocation`，剥离一对完整外层双引号并拒绝空值/残留引号；start/verify 共同使用后 Sandbox 专项恢复 7/7。当前 Sandbox staging 的 `common.ps1`、start（含备份）和 verify 已从仓库同步，四个目标与各自源文件 SHA-256 一致。
+- health 修复后再次显式移除两个签名环境变量并运行 `npm run build`：退出码 0。`src-tauri/target/release/CodexRelay.exe` 为 16,633,344 字节，SHA-256 `44D43468620F995C57B892A8017B58D6774AFA80B198544C04E8EE2B3C1E6CD9`；`Codex Relay_0.1.1_x64-setup.exe` 为 3,976,359 字节，SHA-256 `B378799603EBF3DD83ED39DC08ADA2BAF78044D61A4E5BFC84B96D5162D32BFB`。该普通构建仍不能作为 updater 签名或真实升级成功证据。
 
 ## 尚未解决的问题
 
-- Windows Sandbox 功能是否启用尚未用管理员权限确认；必要时需准备快照虚拟机。
+- Windows Sandbox 内 `v0.1.0` 已安装并启动，但旧二进制受 health 初始化竞态影响持续停留在启动页；修复仅存在于待发布的 `v0.1.1` 候选中。Windows 自动化控制通道当前不可用，无法在本轮自动双击 guest 桌面入口。
 - GitHub Secrets 的存在由用户确认；本机未安装 GitHub CLI，尚未通过 CLI 独立枚举，但不会读取或输出 Secret 值。
-- 新 Draft 尚未公开发布，首个带 updater 的版本也尚未手动安装；完整端到端签名校验与升级仍需后续更高 SemVer 版本触发客户端 updater。
+- `v0.1.1` 尚未推送、签名或发布；完整端到端签名校验、应用内升级、重启和 `after.json` 数据保留证据仍未完成。基线安装未出现 UAC，UAC 成功与取消路径均未验证。
 
 ## 行为切片与 TDD 顺序
 
@@ -224,6 +246,7 @@ git ls-files
 
 ## 下一步
 
-1. 经用户明确确认后公开首个 `v0.1.0` Release。
-2. 下载公开资产并复核公开 URL、文件大小和 SHA-256，然后在隔离环境手动安装首个带 updater 的版本。
-3. 发布更高 SemVer 版本，在 Sandbox/VM 中完成真实应用内升级与失败场景验收。
+1. 提交并推送含 health 竞态修复的 `v0.1.1` 候选，运行 GitHub Actions，核对新 Draft 的正式说明、NSIS、`.sig` 与 `latest.json` 后再公开发布。
+2. 保持当前配置化 Sandbox 开启，通过已恢复的桌面安全启动入口重新打开 `v0.1.0`；若仍停留在启动页，不把偶发启动结果替代代码修复证据。
+3. 在 Sandbox 中从 `v0.1.0` 手动检查并应用 `v0.1.1`，运行桌面核验入口并读取 `after.json`。
+4. 继续核对 UAC、安装目录沿用、重启、签名失败/断网/取消路径；未执行项如实保留，再完成全范围检查与任务收尾。
