@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   useHealth: vi.fn(),
   useSettings: vi.fn(),
   exitApplication: vi.fn(),
+  getCurrentVersion: vi.fn().mockResolvedValue('0.1.2'),
   onAppNotification: vi.fn().mockResolvedValue(() => {}),
 }))
 
@@ -20,6 +21,7 @@ vi.mock('./composables/useSettings', () => ({ useSettings: mocks.useSettings }))
 vi.mock('./services/tauri', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./services/tauri')>()),
   exitApplication: mocks.exitApplication,
+  getCurrentVersion: mocks.getCurrentVersion,
   onAppNotification: mocks.onAppNotification,
 }))
 
@@ -113,11 +115,17 @@ const stubs = {
     template: '<div data-view="backups">Backups<button aria-label="模拟恢复完成" @click="$emit(\'restored\')">restore</button></div>',
   },
   SettingsView: { template: '<div data-view="settings">Settings</div>' },
+  AboutView: {
+    props: ['appVersion', 'configDirectory'],
+    emits: ['openDirectory'],
+    template: '<div data-view="about">About {{ appVersion }} {{ configDirectory }}<button aria-label="模拟打开配置目录" @click="$emit(\'openDirectory\')">open</button></div>',
+  },
 }
 
 describe('App', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.getCurrentVersion.mockResolvedValue('0.1.2')
     mocks.onAppNotification.mockResolvedValue(() => {})
   })
 
@@ -167,8 +175,9 @@ describe('App', () => {
     expect(wrapper.get('[aria-label="主导航"]').text()).toContain('自检')
     expect(wrapper.get('[aria-label="主导航"]').text()).toContain('备份')
     expect(wrapper.get('[aria-label="主导航"]').text()).toContain('设置')
+    expect(wrapper.get('[aria-label="主导航"]').text()).toContain('关于')
     expect(wrapper.get('[aria-label="打开 Providers"]').attributes('aria-current')).toBe('page')
-    expect(wrapper.get('[aria-label="主导航"]').findAll('img[alt=""]')).toHaveLength(4)
+    expect(wrapper.get('[aria-label="主导航"]').findAll('img[alt=""]')).toHaveLength(5)
     expect(wrapper.get('[aria-label="应用状态"]').attributes('role')).toBe('status')
     expect(wrapper.get('[aria-label="应用状态"]').text()).toContain('C:\\safe-test\\codex')
     expect(wrapper.get('[aria-label="应用状态"]').text()).toContain('Provider A')
@@ -184,6 +193,12 @@ describe('App', () => {
 
     await wrapper.get('[aria-label="打开设置"]').trigger('click')
     expect(wrapper.find('[data-view="settings"]').exists()).toBe(true)
+
+    await wrapper.get('[aria-label="打开关于"]').trigger('click')
+    expect(wrapper.get('[data-view="about"]').text()).toContain('0.1.2')
+    expect(wrapper.get('[data-view="about"]').text()).toContain('C:\\safe-test\\codex')
+    await wrapper.get('[aria-label="模拟打开配置目录"]').trigger('click')
+    expect(state.settingsState.openDirectory).toHaveBeenCalledOnce()
   })
 
   it('shows self-check errors below the header and opens their details', async () => {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, shallowRef } from 'vue'
+import aboutIcon from './assets/icons/about.svg'
 import backupsIcon from './assets/icons/backups.svg'
 import healthIcon from './assets/icons/health.svg'
 import providersIcon from './assets/icons/providers.svg'
@@ -11,12 +12,13 @@ import { useHealth } from './composables/useHealth'
 import { useProviders } from './composables/useProviders'
 import { useSettings } from './composables/useSettings'
 import * as relay from './services/tauri'
+import AboutView from './views/AboutView.vue'
 import BackupsView from './views/BackupsView.vue'
 import OnboardingView from './views/OnboardingView.vue'
 import ProvidersView from './views/ProvidersView.vue'
 import SettingsView from './views/SettingsView.vue'
 
-type AppView = 'providers' | 'health' | 'backups' | 'settings'
+type AppView = 'providers' | 'health' | 'backups' | 'settings' | 'about'
 
 const providerState = useProviders()
 const healthState = useHealth()
@@ -27,6 +29,7 @@ const startCreatingProvider = shallowRef(false)
 const pendingFirstProvider = shallowRef(false)
 const lastOperation = shallowRef<string | null>(null)
 const appMessage = shallowRef<{ level: 'success' | 'error'; message: string } | null>(null)
+const appVersion = shallowRef<string | null>(null)
 
 const configMissing = computed(() => {
   const check = healthState.report.value?.checks.find((item) => item.id === 'config-file')
@@ -132,7 +135,10 @@ function selectView(view: AppView) {
 let stopNotification: (() => void) | undefined
 onMounted(async () => {
   await nextTick()
-  await healthState.runExtended()
+  const versionPromise = relay.getCurrentVersion().then((version) => {
+    appVersion.value = version
+  }).catch(() => undefined)
+  await Promise.all([healthState.runExtended(), versionPromise])
   try {
     stopNotification = await relay.onAppNotification((notification) => {
       appMessage.value = notification
@@ -197,6 +203,12 @@ onUnmounted(() => stopNotification?.())
           :aria-current="activeView === 'settings' ? 'page' : undefined"
           @click="selectView('settings')"
         ><img :src="settingsIcon" alt="" />设置</button>
+        <button
+          type="button"
+          aria-label="打开关于"
+          :aria-current="activeView === 'about' ? 'page' : undefined"
+          @click="selectView('about')"
+        ><img :src="aboutIcon" alt="" />关于</button>
       </nav>
     </header>
 
@@ -231,7 +243,13 @@ onUnmounted(() => stopNotification?.())
         @rerun="healthState.runExtended"
       />
       <BackupsView v-else-if="activeView === 'backups'" @restored="handleBackupRestored" />
-      <SettingsView v-else />
+      <SettingsView v-else-if="activeView === 'settings'" />
+      <AboutView
+        v-else
+        :app-version="appVersion"
+        :config-directory="healthState.report.value?.configDirectory ?? null"
+        @open-directory="settingsState.openDirectory"
+      />
     </section>
 
     <footer class="status-bar" aria-label="应用状态" aria-live="polite" role="status">
