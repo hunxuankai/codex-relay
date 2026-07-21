@@ -1,8 +1,9 @@
 use crate::error::AppError;
-use crate::infrastructure::atomic_file::atomic_write;
 use crate::infrastructure::path_service::AppPaths;
-use crate::models::settings::Settings;
+use crate::models::settings::{Settings, normalize_network_proxy_url};
+use crate::services::backup_service::BackupService;
 use crate::services::provider_secret_service::ProviderSecretService;
+use crate::services::transaction_service::TransactionService;
 use chrono::Utc;
 use std::fs;
 use std::io::ErrorKind;
@@ -15,15 +16,20 @@ const MIN_WINDOW_HEIGHT: u32 = 520;
 const MAX_WINDOW_WIDTH: u32 = 7680;
 const MAX_WINDOW_HEIGHT: u32 = 4320;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SettingsService {
     paths: AppPaths,
     update_lock: Arc<Mutex<()>>,
+    transaction_service: TransactionService,
 }
 
 impl SettingsService {
     pub fn new(paths: AppPaths) -> Self {
         Self {
+            transaction_service: TransactionService::new(
+                paths.clone(),
+                BackupService::new(paths.backups_dir.clone(), "settings"),
+            ),
             paths,
             update_lock: Arc::new(Mutex::new(())),
         }
@@ -91,19 +97,18 @@ impl SettingsService {
             .window
             .height
             .clamp(MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT);
+        let proxy_url = normalized.network_proxy.url.trim();
+        if proxy_url.is_empty() {
+            if normalized.network_proxy.enabled {
+                return Err(normalize_network_proxy_url(proxy_url).unwrap_err());
+            }
+            normalized.network_proxy.url.clear();
+        } else {
+            normalized.network_proxy.url = normalize_network_proxy_url(proxy_url)?;
+        }
         let mut json = serde_json::to_string_pretty(&normalized).map_err(AppError::from)?;
         json.push('\n');
-        atomic_write(&self.paths.settings_file, json.as_bytes(), |candidate| {
-            serde_json::from_slice::<Settings>(candidate)
-                .map(|_| ())
-                .map_err(|error| {
-                    AppError::new(
-                        "INVALID_TEMP_SETTINGS",
-                        "临时 settings.json 验证失败。",
-                        error.to_string(),
-                    )
-                })
-        })
+        self.transaction_service.save_settings(json.as_bytes())
     }
 
     fn lock_updates(&self) -> Result<std::sync::MutexGuard<'_, ()>, AppError> {
@@ -244,5 +249,36 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(backups.len(), 1);
         assert_eq!(fs::read_to_string(backups[0].path()).unwrap(), invalid);
+    }
+
+    #[test]
+    fn proxy_settings_are_normalized_and_invalid_values_do_not_replace_disk_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        let service = SettingsService::new(paths.clone());
+        service.bootstrap().unwrap();
+
+        let mut valid = Settings::default();
+        valid.network_proxy.enabled = true;
+        valid.network_proxy.url = " http://127.0.0.1:7897/ ".into();
+        service.save(&valid).unwrap();
+        assert_eq!(
+            service.load_or_create().unwrap().network_proxy.url,
+            "http://127.0.0.1:7897"
+        );
+        let saved = fs::read(&paths.settings_file).unwrap();
+        assert!(
+            fs::read_dir(&paths.backups_dir)
+                .unwrap()
+                .filter_map(Result::ok)
+                .any(|entry| entry.file_name().to_string_lossy().starts_with("settings-"))
+        );
+
+        let mut invalid = valid;
+        invalid.network_proxy.url = "socks5://127.0.0.1:1080".into();
+        let error = service.save(&invalid).unwrap_err();
+
+        assert_eq!(error.code(), "INVALID_PROXY_URL");
+        assert_eq!(fs::read(&paths.settings_file).unwrap(), saved);
     }
 }

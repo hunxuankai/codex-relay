@@ -20,6 +20,7 @@ export type UpdateStatus =
 
 export interface UseUpdaterOptions {
   client?: UpdateClient
+  getProxy?: () => string | undefined
 }
 
 const defaultClient: UpdateClient = {
@@ -75,7 +76,7 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
       if (sequence !== requestSequence) return
       if (version) currentVersion.value = version
 
-      const nextSession = await client.checkForUpdate()
+      const nextSession = await client.checkForUpdate(options.getProxy?.())
       if (sequence !== requestSequence) {
         await closeSession(nextSession)
         return

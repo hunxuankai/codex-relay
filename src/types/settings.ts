@@ -5,6 +5,11 @@ export interface WindowBounds {
   y: number | null
 }
 
+export interface NetworkProxySettings {
+  enabled: boolean
+  url: string
+}
+
 export interface Settings {
   autostartEnabled: boolean
   trayOnlyOnAutostart: boolean
@@ -12,6 +17,7 @@ export interface Settings {
   showWindowOnManualStart: boolean
   window: WindowBounds
   firstRunCompleted: boolean
+  networkProxy: NetworkProxySettings
 }
 
 export interface AutostartState {

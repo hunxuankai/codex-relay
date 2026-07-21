@@ -3,6 +3,7 @@ use crate::infrastructure::atomic_file::atomic_write;
 use crate::infrastructure::file_fingerprint::FileSetFingerprint;
 use crate::infrastructure::path_service::AppPaths;
 use crate::models::backup::BackupSummary;
+use crate::models::settings::Settings;
 use crate::models::transaction::{ConfigTransaction, TransactionOperation};
 use crate::services::backup_service::{BackupService, FileSnapshot};
 use crate::services::provider_secret_service::ProviderSecretStore;
@@ -11,7 +12,7 @@ use std::fmt;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as AsyncMutex;
 use toml_edit::DocumentMut;
 use uuid::Uuid;
@@ -24,6 +25,7 @@ pub enum ManagedFileKind {
     Auth,
     Providers,
     TransactionMarker,
+    Settings,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -154,6 +156,7 @@ pub struct TransactionService {
     backup_service: BackupService,
     file_ops: Arc<dyn FileOps>,
     write_lock: Arc<AsyncMutex<()>>,
+    settings_write_lock: Arc<Mutex<()>>,
 }
 
 impl TransactionService {
@@ -171,11 +174,96 @@ impl TransactionService {
             backup_service,
             file_ops,
             write_lock: Arc::new(AsyncMutex::new(())),
+            settings_write_lock: Arc::new(Mutex::new(())),
         }
     }
 
     pub fn paths(&self) -> &AppPaths {
         &self.paths
+    }
+
+    pub fn save_settings(&self, bytes: &[u8]) -> Result<(), AppError> {
+        let _guard = self.settings_write_lock.lock().map_err(|_| {
+            AppError::new(
+                "SETTINGS_LOCK_FAILED",
+                "无法更新软件设置。",
+                "settings transaction lock poisoned",
+            )
+        })?;
+        validate_managed_file(ManagedFileKind::Settings, bytes)?;
+        let initial = self.file_ops.read_optional(&self.paths.settings_file)?;
+        let initial_fingerprint = settings_fingerprint(initial.as_deref());
+
+        if let Some(snapshot) = initial.as_deref() {
+            fs::create_dir_all(&self.paths.backups_dir).map_err(AppError::from)?;
+            let backup_path = self.paths.backups_dir.join(format!(
+                "settings-{}-{}.json",
+                Utc::now().format("%Y%m%d-%H%M%S"),
+                Uuid::new_v4()
+            ));
+            atomic_write(&backup_path, snapshot, |candidate| {
+                validate_managed_file(ManagedFileKind::Settings, candidate)
+            })?;
+        }
+
+        let current = self.file_ops.read_optional(&self.paths.settings_file)?;
+        if settings_fingerprint(current.as_deref()) != initial_fingerprint {
+            return Err(external_modification_conflict());
+        }
+
+        let forward_result = self
+            .file_ops
+            .write(
+                &self.paths.settings_file,
+                bytes,
+                ManagedFileKind::Settings,
+                WritePhase::Forward,
+            )
+            .and_then(|()| {
+                let written = self.file_ops.read_optional(&self.paths.settings_file)?;
+                if written.as_deref() == Some(bytes) {
+                    Ok(())
+                } else {
+                    Err(AppError::new(
+                        "SETTINGS_WRITE_VERIFICATION_FAILED",
+                        "软件设置写入后验证失败。",
+                        "settings bytes differ after write",
+                    ))
+                }
+            });
+
+        if let Err(operation_error) = forward_result {
+            let rollback = match initial.as_deref() {
+                Some(snapshot) => self.file_ops.write(
+                    &self.paths.settings_file,
+                    snapshot,
+                    ManagedFileKind::Settings,
+                    WritePhase::Rollback,
+                ),
+                None => self.file_ops.remove_if_exists(
+                    &self.paths.settings_file,
+                    ManagedFileKind::Settings,
+                    WritePhase::Rollback,
+                ),
+            }
+            .and_then(|()| {
+                let restored = self.file_ops.read_optional(&self.paths.settings_file)?;
+                if restored == initial {
+                    Ok(())
+                } else {
+                    Err(AppError::new(
+                        "SETTINGS_ROLLBACK_VERIFICATION_FAILED",
+                        "软件设置回滚后验证失败。",
+                        "settings bytes differ after rollback",
+                    ))
+                }
+            });
+            return match rollback {
+                Ok(()) => Err(operation_error),
+                Err(rollback_error) => Err(rollback_incomplete(&operation_error, &rollback_error)),
+            };
+        }
+        Ok(())
     }
 
     pub async fn execute<F>(
@@ -477,7 +565,26 @@ fn validate_managed_file(kind: ManagedFileKind, bytes: &[u8]) -> Result<(), AppE
                     error.to_string(),
                 )
             }),
+        ManagedFileKind::Settings => serde_json::from_slice::<Settings>(bytes)
+            .map(|_| ())
+            .map_err(|error| {
+                AppError::new(
+                    "INVALID_TEMP_SETTINGS",
+                    "临时 settings.json 验证失败。",
+                    error.to_string(),
+                )
+            }),
     }
+}
+
+fn settings_fingerprint(bytes: Option<&[u8]>) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    bytes.map(|bytes| {
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    })
 }
 
 fn change_from_snapshot(bytes: Option<&[u8]>) -> FileChange {

@@ -124,6 +124,7 @@ impl AppState {
             current.close_to_tray = settings.close_to_tray;
             current.show_window_on_manual_start = settings.show_window_on_manual_start;
             current.first_run_completed = settings.first_run_completed;
+            current.network_proxy = settings.network_proxy.clone();
         })?;
         self.settings_state()
     }

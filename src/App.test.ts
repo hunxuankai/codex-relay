@@ -42,6 +42,7 @@ const baseSettings: Settings = {
   showWindowOnManualStart: true,
   window: { width: 900, height: 620, x: null, y: null },
   firstRunCompleted: true,
+  networkProxy: { enabled: false, url: '' },
 }
 
 function healthReport(configExists = true): HealthReport {
@@ -149,6 +150,7 @@ describe('App', () => {
     expect(state.settingsState.save).toHaveBeenCalledWith({
       ...state.settingsState.settings.value,
       firstRunCompleted: true,
+      networkProxy: { enabled: false, url: '' },
     })
   })
 

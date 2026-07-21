@@ -8,6 +8,8 @@ vi.mock('../components/UpdatePanel.vue', () => ({ default: { template: '<section
 
 const mockUseSettings = vi.hoisted(() => vi.fn())
 vi.mock('../composables/useSettings', () => ({ useSettings: mockUseSettings }))
+const mockUseProxyDiscovery = vi.hoisted(() => vi.fn())
+vi.mock('../composables/useProxyDiscovery', () => ({ useProxyDiscovery: mockUseProxyDiscovery }))
 
 const baseSettings: Settings = {
   autostartEnabled: true,
@@ -16,6 +18,7 @@ const baseSettings: Settings = {
   showWindowOnManualStart: true,
   window: { width: 900, height: 620, x: null, y: null },
   firstRunCompleted: true,
+  networkProxy: { enabled: false, url: '' },
 }
 
 function controller(overrides: Partial<SettingsState> = {}) {
@@ -39,8 +42,31 @@ function controller(overrides: Partial<SettingsState> = {}) {
   }
 }
 
+function proxyController() {
+  return {
+    confirmationOpen: shallowRef(false),
+    resultsOpen: shallowRef(false),
+    testing: shallowRef(false),
+    discovering: shallowRef(false),
+    availableProxies: shallowRef<string[]>([]),
+    selectedProxy: shallowRef<string | null>(null),
+    message: shallowRef<string | null>(null),
+    error: shallowRef<{ code: string; message: string } | null>(null),
+    requestDiscovery: vi.fn(),
+    cancelDiscovery: vi.fn(),
+    confirmDiscovery: vi.fn(),
+    testCurrentProxy: vi.fn(),
+    selectProxy: vi.fn(),
+    closeResults: vi.fn(),
+  }
+}
+
 describe('SettingsView', () => {
-  beforeEach(() => mockUseSettings.mockReset())
+  beforeEach(() => {
+    mockUseSettings.mockReset()
+    mockUseProxyDiscovery.mockReset()
+    mockUseProxyDiscovery.mockReturnValue(proxyController())
+  })
 
   it('shows the actual Windows autostart state and inconsistency', async () => {
     const settings = controller()
@@ -89,5 +115,28 @@ describe('SettingsView', () => {
 
     expect(wrapper.find('[data-update-panel]').exists()).toBe(true)
     expect(wrapper.get('form').find('[data-update-panel]').exists()).toBe(false)
+  })
+
+  it('tests, discovers, and immediately saves the selected local proxy', async () => {
+    const settings = controller()
+    const proxy = proxyController()
+    proxy.resultsOpen.value = true
+    proxy.availableProxies.value = ['http://127.0.0.1:7890', 'http://127.0.0.1:7897']
+    proxy.selectedProxy.value = 'http://127.0.0.1:7897'
+    mockUseSettings.mockReturnValue(settings)
+    mockUseProxyDiscovery.mockReturnValue(proxy)
+    const wrapper = mount(SettingsView)
+
+    await wrapper.get('[name="proxy-url"]').setValue('http://127.0.0.1:7890')
+    await wrapper.get('[data-action="test-proxy"]').trigger('click')
+    expect(proxy.testCurrentProxy).toHaveBeenCalledWith('http://127.0.0.1:7890')
+
+    await wrapper.get('[data-action="apply-proxy"]').trigger('click')
+    await flushPromises()
+    expect(settings.save).toHaveBeenCalledWith({
+      ...baseSettings,
+      networkProxy: { enabled: true, url: 'http://127.0.0.1:7897' },
+    })
+    expect(proxy.closeResults).toHaveBeenCalledOnce()
   })
 })

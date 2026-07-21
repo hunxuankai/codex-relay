@@ -43,7 +43,8 @@ const settings: Settings = {
   closeToTray: true,
   showWindowOnManualStart: true,
   window: { width: 900, height: 620, x: null, y: null },
-  firstRunCompleted: false,
+      firstRunCompleted: false,
+      networkProxy: { enabled: false, url: '' },
 }
 
 const settingsState: SettingsState = {

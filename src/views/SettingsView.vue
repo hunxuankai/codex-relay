@@ -1,14 +1,25 @@
 <script setup lang="ts">
-import { reactive, watch } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import AppNotification from '../components/AppNotification.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
+import ProxyDiscoveryDialog from '../components/ProxyDiscoveryDialog.vue'
+import ProxySettingsPanel from '../components/ProxySettingsPanel.vue'
 import UpdatePanel from '../components/UpdatePanel.vue'
+import { useProxyDiscovery } from '../composables/useProxyDiscovery'
 import { useSettings } from '../composables/useSettings'
 
 const settingsState = useSettings()
+const proxyDiscovery = useProxyDiscovery()
 const draft = reactive({
   trayOnlyOnAutostart: true,
   closeToTray: true,
   showWindowOnManualStart: true,
+  networkProxy: { enabled: false, url: '' },
+})
+
+const effectiveProxy = computed(() => {
+  const proxy = settingsState.settings.value?.networkProxy
+  return proxy?.enabled && proxy.url ? proxy.url : undefined
 })
 
 watch(
@@ -18,6 +29,7 @@ watch(
     draft.trayOnlyOnAutostart = settings.trayOnlyOnAutostart
     draft.closeToTray = settings.closeToTray
     draft.showWindowOnManualStart = settings.showWindowOnManualStart
+    draft.networkProxy = { ...settings.networkProxy }
   },
   { immediate: true },
 )
@@ -34,7 +46,27 @@ function save() {
     trayOnlyOnAutostart: draft.trayOnlyOnAutostart,
     closeToTray: draft.closeToTray,
     showWindowOnManualStart: draft.showWindowOnManualStart,
+    networkProxy: { ...draft.networkProxy },
   })
+}
+
+function testProxy() {
+  const proxy = draft.networkProxy.url.trim()
+  if (proxy) void proxyDiscovery.testCurrentProxy(proxy)
+}
+
+async function applyDetectedProxy() {
+  const current = settingsState.settings.value
+  const proxy = proxyDiscovery.selectedProxy.value
+  if (!current || !proxy) return
+  await settingsState.save({
+    ...current,
+    networkProxy: { enabled: true, url: proxy },
+  })
+  if (!settingsState.error.value) {
+    draft.networkProxy = { enabled: true, url: proxy }
+    proxyDiscovery.closeResults()
+  }
 }
 </script>
 
@@ -52,6 +84,8 @@ function save() {
 
     <AppNotification :message="settingsState.successMessage.value" level="success" />
     <AppNotification :message="settingsState.error.value?.message ?? null" level="error" />
+    <AppNotification :message="proxyDiscovery.message.value" level="success" />
+    <AppNotification :message="proxyDiscovery.error.value?.message ?? null" level="error" />
 
     <p v-if="settingsState.loading.value && !settingsState.settings.value">正在加载设置…</p>
     <form v-else-if="settingsState.settings.value" class="settings-form" @submit.prevent="save">
@@ -76,6 +110,15 @@ function save() {
           设置与 Windows 实际状态不一致，请重新切换或刷新后重试。
         </p>
       </section>
+
+      <ProxySettingsPanel
+        v-model="draft.networkProxy"
+        :busy="settingsState.busy.value"
+        :testing="proxyDiscovery.testing.value"
+        :discovering="proxyDiscovery.discovering.value"
+        @test="testProxy"
+        @discover="proxyDiscovery.requestDiscovery"
+      />
 
       <section class="settings-section">
         <h2>窗口与托盘</h2>
@@ -109,7 +152,25 @@ function save() {
       </div>
     </form>
 
-    <UpdatePanel />
+    <UpdatePanel :proxy="effectiveProxy" />
+
+    <ConfirmDialog
+      :open="proxyDiscovery.confirmationOpen.value"
+      title="检测本机代理"
+      message="将并行检测 127.0.0.1 上的六个常用 HTTP 代理端口，并通过每个候选访问 GitHub 更新源。检测会产生少量网络请求，确认前不会修改设置。"
+      confirm-label="开始检测"
+      tone="neutral"
+      @confirm="proxyDiscovery.confirmDiscovery"
+      @cancel="proxyDiscovery.cancelDiscovery"
+    />
+    <ProxyDiscoveryDialog
+      :open="proxyDiscovery.resultsOpen.value"
+      :candidates="proxyDiscovery.availableProxies.value"
+      :selected="proxyDiscovery.selectedProxy.value"
+      @select="proxyDiscovery.selectProxy"
+      @confirm="applyDetectedProxy"
+      @cancel="proxyDiscovery.closeResults"
+    />
   </main>
 </template>
 

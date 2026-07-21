@@ -124,10 +124,10 @@ export function getCurrentVersion(): Promise<string> {
   return getVersion()
 }
 
-export async function checkForUpdate(): Promise<UpdateSession | null> {
+export async function checkForUpdate(proxy?: string): Promise<UpdateSession | null> {
   let update
   try {
-    update = await check()
+    update = await check(proxy ? { proxy } : undefined)
   } catch {
     throw new RelayCommandError('UPDATE_CHECK_FAILED', '检查更新失败，请稍后重试。')
   }
@@ -180,6 +180,19 @@ export async function checkForUpdate(): Promise<UpdateSession | null> {
     },
     close: () => update.close(),
   }
+}
+
+export async function testUpdateProxy(proxy: string): Promise<void> {
+  let update
+  try {
+    update = await check({ proxy, timeout: 5000 })
+  } catch {
+    throw new RelayCommandError(
+      'PROXY_TEST_FAILED',
+      '代理无法访问更新源，请检查代理是否正在运行。',
+    )
+  }
+  await update?.close().catch(() => undefined)
 }
 
 export function onProvidersChanged(

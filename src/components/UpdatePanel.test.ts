@@ -30,7 +30,10 @@ describe('UpdatePanel', () => {
   it('checks only after a click and renders release notes as plain text', async () => {
     const updater = controller()
     mockUseUpdater.mockReturnValue(updater)
-    const wrapper = mount(UpdatePanel)
+    const wrapper = mount(UpdatePanel, { props: { proxy: 'http://127.0.0.1:7897' } })
+
+    expect(mockUseUpdater).toHaveBeenCalledWith(expect.objectContaining({ getProxy: expect.any(Function) }))
+    expect(mockUseUpdater.mock.calls[0]?.[0].getProxy()).toBe('http://127.0.0.1:7897')
 
     expect(updater.check).not.toHaveBeenCalled()
     await wrapper.get('button').trigger('click')

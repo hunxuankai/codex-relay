@@ -33,6 +33,7 @@ import {
   saveSettings,
   setAutostart,
   switchProvider,
+  testUpdateProxy,
   updateProvider,
 } from './tauri'
 
@@ -77,6 +78,7 @@ const settings: Settings = {
   showWindowOnManualStart: true,
   window: { width: 900, height: 620, x: null, y: null },
   firstRunCompleted: false,
+  networkProxy: { enabled: false, url: '' },
 }
 
 const settingsState: SettingsState = {
@@ -261,6 +263,23 @@ describe('Tauri service boundary', () => {
     checkMock.mockResolvedValue(null)
 
     await expect(checkForUpdate()).resolves.toBeNull()
+  })
+
+  it('passes an explicit proxy to checks and uses a five second timeout for proxy tests', async () => {
+    const close = vi.fn().mockResolvedValue(undefined)
+    checkMock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ close } as never)
+
+    await checkForUpdate('http://127.0.0.1:7897')
+    await expect(testUpdateProxy('http://127.0.0.1:7890')).resolves.toBeUndefined()
+
+    expect(checkMock).toHaveBeenNthCalledWith(1, { proxy: 'http://127.0.0.1:7897' })
+    expect(checkMock).toHaveBeenNthCalledWith(2, {
+      proxy: 'http://127.0.0.1:7890',
+      timeout: 5000,
+    })
+    expect(close).toHaveBeenCalledOnce()
   })
 
   it('maps updater check and install failures to safe stable errors', async () => {

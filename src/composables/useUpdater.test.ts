@@ -17,6 +17,23 @@ function createSession(version: string): UpdateSession {
 }
 
 describe('useUpdater', () => {
+  it('reads the current proxy when each explicit check starts', async () => {
+    const client: UpdateClient = {
+      getCurrentVersion: vi.fn().mockResolvedValue('0.1.0'),
+      checkForUpdate: vi.fn().mockResolvedValue(null),
+    }
+    let proxy: string | undefined = 'http://127.0.0.1:7890'
+    const updater = useUpdater({ client, getProxy: () => proxy })
+
+    await updater.check()
+    proxy = undefined
+    updater.reset()
+    await updater.check()
+
+    expect(client.checkForUpdate).toHaveBeenNthCalledWith(1, 'http://127.0.0.1:7890')
+    expect(client.checkForUpdate).toHaveBeenNthCalledWith(2, undefined)
+  })
+
   it('loads only the local version until the user explicitly checks', async () => {
     const client: UpdateClient = {
       getCurrentVersion: vi.fn().mockResolvedValue('0.1.0'),

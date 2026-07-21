@@ -19,5 +19,5 @@ export interface UpdateSession {
 
 export interface UpdateClient {
   getCurrentVersion(): Promise<string>
-  checkForUpdate(): Promise<UpdateSession | null>
+  checkForUpdate(proxy?: string): Promise<UpdateSession | null>
 }
