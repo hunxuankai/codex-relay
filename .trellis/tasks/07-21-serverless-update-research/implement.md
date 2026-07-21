@@ -62,6 +62,7 @@ Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_p
 - 本轮公钥配置完成后再次显式移除两个签名环境变量并运行普通 `npm run build`：退出码 0；Release 主程序 16,633,344 字节，SHA-256 `2EE4172FBBB7C1D609AA745C4DFD3502E75E72156A8C4F4A6CD5A1F9D8FDE374`；NSIS 安装器 3,979,177 字节，SHA-256 `CF89DD3A37C0AC53B64FF8F1EDDD911CF6370F6B15D894E50993FC10C5E4E6A5`。
 - `git diff --check` 未报告空白错误；仓库内未发现私钥扩展名文件或 minisign/PEM 私钥标记。扫描命令因 `rg` 无匹配返回 1，此退出码表示未发现命中，不是扫描执行失败。
 - 规范更新后的提交前复验：`npm run check` 再次退出 0，17 个前端测试文件共 78 项、107 项 Rust 单元测试、2 项路径安全、1 项 Provider 工作流和 8 项 Trellis 测试通过；`task.py validate` 通过，跟踪敏感文件名与私钥标记命中数均为 0。
+- 本地功能提交：`a98ab51 feat(updater): 增加手动检查与应用内更新`，包含 updater 运行时、发布工作流、公开公钥、测试、README、规范和任务材料；尚未推送时不宣称远端已有该提交。
 - 未执行 Tauri updater 签名、GitHub Actions、Draft Release、安装、升级、UAC 或 Sandbox/VM 验收；上述构建证据不得用于声明这些项目成功。
 
 ## 尚未解决的问题
