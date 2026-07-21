@@ -17,7 +17,7 @@
 
 ## 当前进度
 
-Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_progress`。切片 1 至切片 6 的本地实现已完成并推送到公开仓库 `main`：updater 依赖/插件/权限/版本来源/发布覆盖、固定 endpoint/公开公钥、typed 服务边界、手动检查与安装状态机、设置页 UI、Draft 发布工作流和 README 已落地。GitHub Actions 首次真实运行成功并生成含 NSIS、`.sig` 与 `latest.json` 的 Draft Release；清单内容核对、公开发布和 Windows 升级尚未完成。
+Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_progress`。切片 1 至切片 6 的本地实现已完成并推送到公开仓库 `main`：updater 依赖/插件/权限/版本来源/发布覆盖、固定 endpoint/公开公钥、typed 服务边界、手动检查与安装状态机、设置页 UI、Draft 发布工作流和 README 已落地。旧占位 Draft 已删除，GitHub Actions 第二次真实运行成功，并从最新提交生成含正式说明、NSIS、`.sig` 与 `latest.json` 的新 Draft；新清单内容核对、公开发布和 Windows 升级尚未完成。
 
 ## 已完成
 
@@ -69,14 +69,17 @@ Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_p
 - 用户提供的 Draft `latest.json` 可解析：版本 `0.1.0`，`windows-x86_64` 与 `windows-x86_64-nsis` 均指向实际 NSIS asset ID `484266111`，两个键使用同一签名。签名 envelope 与公开公钥的 minisign key ID 均为 `7DC2AE5ACEA0D00A`；本机 Tauri CLI 没有 `signer verify` 子命令，因此完整二进制签名验证仍等待可读取的实际资产。
 - 清单核对发现 `notes` 仍为发布工作流占位文案。新增结构测试后，10 项中仅“最终发布说明”契约失败；将 `releaseBody` 改为正式多行简体中文说明后，同一专项 10 项全部通过。当前 Draft 资产仍是旧清单，不得发布，必须重新生成。
 - 正式说明修复后的完整复验：`npm run check` 退出 0，17 个前端测试文件共 78 项、107 项 Rust 单元测试、2 项路径安全、1 项 Provider 工作流和 8 项 Trellis 测试通过；任务材料验证通过，私钥标记命中数为 0。
-- 发布说明修复提交 `e3809f0 fix(release): 避免占位说明进入更新清单` 已推送到远端 `main`；旧 Draft 仍引用提交 `8883da7` 和旧清单，等待用户确认删除后重建。
+- 发布说明修复提交 `e3809f0 fix(release): 避免占位说明进入更新清单` 已推送到远端 `main`；修复推送后曾确认旧 Draft 仍引用提交 `8883da7` 和旧清单，随后按用户确认删除并重建。
+- 用户明确确认后，旧占位 Draft 及其 3 个资产已删除；GitHub 页面显示 “Your release was removed” 且没有剩余 Release。
+- GitHub Actions `发布 Windows 更新 #2`（`https://github.com/hunxuankai/codex-relay/actions/runs/29803671969`）以最新提交 `194a9b54fc691e212a3ed437723866e71bcde992` 运行完成，结论为 `success`；完整检查和 Draft 构建步骤均成功。
+- 新 Draft `Codex Relay v0.1.0` 已生成且未发布，页面显示正式“更新内容 / 首次安装 / 注意事项”中文说明。资产：NSIS 3.79 MB，SHA-256 `e9dcb19419a198ac00244a579d5b81874cc847200fc216d1797fd837a693dad9`；`.sig` 424 字节，SHA-256 `6dfb4765df2d507e48f507603f1c84bdc396c8458c57c5bf28c1e13da0ac3500`；`latest.json` 1.85 KB，SHA-256 `c96bb5862372d881b81edd069d579eda80f1852c0a4ec554b1e78d91cd77c50f`。
 - 未执行 Tauri updater 签名、GitHub Actions、Draft Release、安装、升级、UAC 或 Sandbox/VM 验收；上述构建证据不得用于声明这些项目成功。
 
 ## 尚未解决的问题
 
 - Windows Sandbox 功能是否启用尚未用管理员权限确认；必要时需准备快照虚拟机。
 - GitHub Secrets 的存在由用户确认；本机未安装 GitHub CLI，尚未通过 CLI 独立枚举，但不会读取或输出 Secret 值。
-- 当前 Draft 的 Release 描述和 `latest.json.notes` 仍是旧占位文案，尚未公开发布；需要删除或替换旧 Draft 并用修正后的工作流重新生成资产。
+- 新 Draft 的 Release 描述已核对为正式文案，但新 `latest.json` 文件内容尚未由用户提供，仍需确认 `notes`、版本、平台 URL 和内联签名后才能发布。
 
 ## 行为切片与 TDD 顺序
 
@@ -220,7 +223,7 @@ git ls-files
 
 ## 下一步
 
-1. 完整检查、提交并推送正式 Release 说明修复。
-2. 经用户确认后删除旧占位 Draft，重新触发 GitHub Actions，并再次核对新 `latest.json`。
-3. 在用户确认发布文案和发布动作后公开首个 Release，并手动安装首个带 updater 的版本。
+1. 用户从新 Draft 下载 `latest.json` 并提供完整公开 JSON 内容。
+2. 核对新清单的正式说明、版本、平台 URL 和内联签名与实际资产一致。
+3. 在用户确认发布动作后公开首个 Release，并手动安装首个带 updater 的版本。
 4. 发布更高 SemVer 版本，在 Sandbox/VM 中完成真实应用内升级与失败场景验收。
