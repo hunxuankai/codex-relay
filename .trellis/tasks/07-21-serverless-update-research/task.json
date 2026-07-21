@@ -33,6 +33,6 @@
     ".trellis/spec/security/",
     ".trellis/spec/testing/"
   ],
-  "notes": "v0.1.0 已公开发布并在 Windows Sandbox 安装；基线启动暴露的 health 初始化竞态已按 RED→GREEN 修复，v0.1.1 本地候选重新通过完整检查和无私钥普通构建。仍需提交推送、生成并核对 v0.1.1 Draft、公开发布，再执行真实应用内升级与 after.json 核验。",
+  "notes": "v0.1.1 候选主体已推送；GitHub Actions Run #3 因 Windows 8.3 短路径与 PowerShell 长路径的测试字符串差异在完整检查阶段失败，未生成 Draft。路径身份断言修复已通过本地完整检查并提交为 ad62084，仍需推送并运行新 Actions，再核对 Draft、公开发布和执行 Sandbox 真实升级。",
   "meta": {}
 }
