@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 const tauri = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'))
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'))
+const packageLock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
 const cargoToml = readFileSync('src-tauri/Cargo.toml', 'utf8')
 const rustLibrary = readFileSync('src-tauri/src/lib.rs', 'utf8')
 const defaultCapability = JSON.parse(
@@ -95,6 +96,19 @@ describe('Windows release configuration', () => {
     expect(releaseWorkflow).toContain(
       'tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f',
     )
+  })
+
+  it('builds the 0.1.1 end-to-end updater verification release', () => {
+    const cargoPackageVersion = cargoToml.match(
+      /\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
+    )?.[1]
+
+    expect(packageJson.version).toBe('0.1.1')
+    expect(packageLock.version).toBe(packageJson.version)
+    expect(packageLock.packages[''].version).toBe(packageJson.version)
+    expect(cargoPackageVersion).toBe(packageJson.version)
+    expect(releaseWorkflow).toContain('从 `v0.1.0` 应用内升级到 `v0.1.1`')
+    expect(releaseWorkflow).toContain('Windows Sandbox')
   })
 
   it('marks every generated development API key as explicitly non-real', () => {
