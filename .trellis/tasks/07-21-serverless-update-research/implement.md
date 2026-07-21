@@ -69,6 +69,7 @@ Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_p
 - 用户提供的 Draft `latest.json` 可解析：版本 `0.1.0`，`windows-x86_64` 与 `windows-x86_64-nsis` 均指向实际 NSIS asset ID `484266111`，两个键使用同一签名。签名 envelope 与公开公钥的 minisign key ID 均为 `7DC2AE5ACEA0D00A`；本机 Tauri CLI 没有 `signer verify` 子命令，因此完整二进制签名验证仍等待可读取的实际资产。
 - 清单核对发现 `notes` 仍为发布工作流占位文案。新增结构测试后，10 项中仅“最终发布说明”契约失败；将 `releaseBody` 改为正式多行简体中文说明后，同一专项 10 项全部通过。当前 Draft 资产仍是旧清单，不得发布，必须重新生成。
 - 正式说明修复后的完整复验：`npm run check` 退出 0，17 个前端测试文件共 78 项、107 项 Rust 单元测试、2 项路径安全、1 项 Provider 工作流和 8 项 Trellis 测试通过；任务材料验证通过，私钥标记命中数为 0。
+- 发布说明修复提交 `e3809f0 fix(release): 避免占位说明进入更新清单` 已推送到远端 `main`；旧 Draft 仍引用提交 `8883da7` 和旧清单，等待用户确认删除后重建。
 - 未执行 Tauri updater 签名、GitHub Actions、Draft Release、安装、升级、UAC 或 Sandbox/VM 验收；上述构建证据不得用于声明这些项目成功。
 
 ## 尚未解决的问题
