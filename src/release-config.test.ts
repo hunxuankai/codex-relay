@@ -89,6 +89,9 @@ describe('Windows release configuration', () => {
     expect(releaseWorkflow).toContain('TAURI_SIGNING_PRIVATE_KEY:')
     expect(releaseWorkflow).toContain('TAURI_SIGNING_PRIVATE_KEY_PASSWORD:')
     expect(releaseWorkflow.match(/TAURI_SIGNING_PRIVATE_KEY:/g)).toHaveLength(1)
+    expect(releaseWorkflow).toContain('releaseBody: |')
+    expect(releaseWorkflow).toContain('首次带 updater 的版本需要手动安装')
+    expect(releaseWorkflow).not.toContain('请在发布前补充本版本的变更说明')
     expect(releaseWorkflow).toContain(
       'tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f',
     )

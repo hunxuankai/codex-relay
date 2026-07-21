@@ -38,7 +38,20 @@ jobs:
           args: --config src-tauri/tauri.updater.conf.json
           tagName: v__VERSION__
           releaseName: Codex Relay v__VERSION__
-          releaseBody: 请在发布前补充本版本的变更说明，并核对 NSIS、签名和 latest.json 资产。
+          releaseBody: |
+            ## 更新内容
+
+            - 新增设置页手动检查更新与应用内安装入口；应用启动和后台不会自动联网检查。
+            - 更新包使用 Tauri updater 签名校验，并沿用现有 per-machine NSIS 安装器。
+            - 发布资产包含 Windows x64 NSIS 安装器、签名文件和 `latest.json` 更新清单。
+
+            ## 首次安装
+
+            首次带 updater 的版本需要手动安装；只有后续更高 SemVer 版本才能验证应用内升级。
+
+            ## 注意事项
+
+            本版本未使用 Windows Authenticode，Windows 可能显示“未知发布者”。安装和升级不会删除 Codex 配置、Codex Relay 应用数据、日志或备份。
           releaseDraft: true
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
