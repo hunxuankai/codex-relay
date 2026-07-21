@@ -17,7 +17,7 @@
 
 ## 当前进度
 
-Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_progress`。切片 1 至切片 6 的本地实现已完成：updater 依赖/插件/权限/版本来源/发布覆盖、固定 endpoint/公开公钥、typed 服务边界、手动检查与安装状态机、设置页 UI、Draft 发布工作流和 README 已落地。用户已确认 GitHub Actions 两项签名 Secrets 配置完成；真实 GitHub Actions、签名资产和 Windows 升级尚未执行。
+Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_progress`。切片 1 至切片 6 的本地实现已完成并推送到公开仓库 `main`：updater 依赖/插件/权限/版本来源/发布覆盖、固定 endpoint/公开公钥、typed 服务边界、手动检查与安装状态机、设置页 UI、Draft 发布工作流和 README 已落地。GitHub Actions 首次真实运行成功并生成含 NSIS、`.sig` 与 `latest.json` 的 Draft Release；清单内容核对、公开发布和 Windows 升级尚未完成。
 
 ## 已完成
 
@@ -63,13 +63,16 @@ Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_p
 - `git diff --check` 未报告空白错误；仓库内未发现私钥扩展名文件或 minisign/PEM 私钥标记。扫描命令因 `rg` 无匹配返回 1，此退出码表示未发现命中，不是扫描执行失败。
 - 规范更新后的提交前复验：`npm run check` 再次退出 0，17 个前端测试文件共 78 项、107 项 Rust 单元测试、2 项路径安全、1 项 Provider 工作流和 8 项 Trellis 测试通过；`task.py validate` 通过，跟踪敏感文件名与私钥标记命中数均为 0。
 - 本地功能提交：`a98ab51 feat(updater): 增加手动检查与应用内更新`，包含 updater 运行时、发布工作流、公开公钥、测试、README、规范和任务材料；尚未推送时不宣称远端已有该提交。
+- HTTPS remote 已配置为 `https://github.com/hunxuankai/codex-relay.git`；`master` 已成功推送到远端 `main`，远端运行目标提交为 `8883da75b794bbc7898cb8143afba2ee9c4532bd`。
+- GitHub Actions `发布 Windows 更新 #1`（`https://github.com/hunxuankai/codex-relay/actions/runs/29802000663`）完成且结论为 `success`；检出、Node、Rust、依赖安装、完整检查和 Draft 构建步骤均成功。
+- Draft Release `Codex Relay v0.1.0` 已生成且未发布，目标提交为 `8883da7`。资产：NSIS 3.79 MB，SHA-256 `227a650b205442c0cfff2dee201df71c49a80759eb56f025581a0c6cd85d1c75`；`.sig` 424 字节，SHA-256 `9d67394d4b92ded5bb2ab80e1a7f2eb85e286737978e21b99eab2177268d0be7`；`latest.json` 1.31 KB，SHA-256 `5d8f2eded14e7f9919b8d79e93cc054ccab6b99d801a8a3ac9cf587c66dbb328`。
 - 未执行 Tauri updater 签名、GitHub Actions、Draft Release、安装、升级、UAC 或 Sandbox/VM 验收；上述构建证据不得用于声明这些项目成功。
 
 ## 尚未解决的问题
 
-- 尚未把本地 `master` 推送到远端 `main`，也未创建首个 Release。
 - Windows Sandbox 功能是否启用尚未用管理员权限确认；必要时需准备快照虚拟机。
 - GitHub Secrets 的存在由用户确认；本机未安装 GitHub CLI，尚未通过 CLI 独立枚举，但不会读取或输出 Secret 值。
+- Draft Release 说明仍是占位文案，尚未公开发布。自动化能够验证 Draft 资产元数据，但浏览器安全隔离阻止读取下载到隔离区的 `latest.json` 文件内容；需要用户手动打开该公开清单并提供内容后核对版本、平台 URL 和内联签名。
 
 ## 行为切片与 TDD 顺序
 
@@ -213,7 +216,7 @@ git ls-files
 
 ## 下一步
 
-1. 运行完整检查和无私钥普通构建，记录新的测试、构建和产物证据。
-2. 配置本地 Git remote，将本地 `master` 推送到公开仓库 `main`，执行一次真实 GitHub Actions。
-3. 核对 Draft Release、NSIS updater 资产、`.sig` 与 `latest.json`，确认无误后再发布。
-4. 准备首个带 updater 的手动安装版本和更高 SemVer 版本，在 Sandbox/VM 中完成真实升级与失败场景验收。
+1. 用户从 Draft Release 下载或打开 `latest.json`，把其公开 JSON 内容提供给 AI；不要发布 Draft，也不要提供任何 Secret。
+2. 核对清单版本、`windows-x86_64` URL 和内联签名与实际 Draft 资产一致，补充正式简体中文 Release 说明。
+3. 在用户确认发布文案和发布动作后公开首个 Release，并手动安装首个带 updater 的版本。
+4. 发布更高 SemVer 版本，在 Sandbox/VM 中完成真实应用内升级与失败场景验收。
