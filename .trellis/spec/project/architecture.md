@@ -21,7 +21,7 @@ Windows 当前用户文件与系统集成
 | `config.toml` | Provider 名称、URL、Wire API、模型、未知字段与当前 Provider | 不能整文件反序列化后重建 |
 | `providers.json` | Provider ID → API Key | 不能当作 Provider 定义唯一来源；损坏时不能覆盖 |
 | `auth.json` | 当前生效 API Key | 不能通过普通列表、日志或事件返回 |
-| `settings.json` | 窗口、托盘、引导和自启偏好 | 自启显示必须同时查询 Windows 实际状态 |
+| `settings.json` | 窗口、托盘、引导、自启和应用内网络代理偏好 | 自启显示必须同时查询 Windows 实际状态；代理只允许无认证 HTTP(S) URL |
 
 ## 启动顺序
 
@@ -42,6 +42,8 @@ SettingsView → UpdatePanel → useUpdater → typed updater service
 → tauri-plugin-updater → 固定 GitHub Releases latest.json
 → Tauri 公钥校验 → per-machine NSIS 被动更新
 ```
+
+启用代理时，SettingsView 从已保存设置计算有效代理并在每次显式检查开始时传入；Update 会话沿用该代理下载。代理测试与固定本机候选检测复用同一 updater 检查边界，不新增可绕过 endpoint、公钥或签名校验的 HTTP 客户端。
 
 `src/services/tauri.ts` 负责把官方 updater 句柄规范化为应用 DTO；组件不得解析远端下载地址或持有插件对象。基础 Tauri 配置拥有固定 endpoint 与公开公钥，发布覆盖只负责开启 updater artifacts，任何签名私钥都不进入应用配置或前端状态。
 

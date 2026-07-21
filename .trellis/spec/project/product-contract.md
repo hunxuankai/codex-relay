@@ -12,6 +12,7 @@ Codex Relay 是面向 Windows 10/11、当前登录用户和个人可信计算机
 - 使用统一事务提供备份、冲突检测、原子替换、写后验证和失败回滚。
 - 支持关键/扩展自检、文件监控、系统托盘、单实例、当前用户开机启动和 Windows 通知。
 - 支持用户在设置页显式检查公开 GitHub Releases 更新，并在 Tauri 签名校验后启动 NSIS 更新。
+- 支持为 Codex Relay 自身网络请求配置无认证 HTTP/HTTPS 代理，并由用户显式测试或检测固定本机代理端口；不影响 Codex CLI 或 Provider 模型请求。
 - 首次没有 Provider 时显示引导，不自动写入虚假 Provider。
 
 ## 明确非目标

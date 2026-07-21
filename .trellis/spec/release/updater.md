@@ -12,12 +12,16 @@
 - 发布构建：`npm run build:release` 或 GitHub Actions 中等价的 `tauri build --config src-tauri/tauri.updater.conf.json`。
 - GitHub Secrets：`TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`；`GITHUB_TOKEN` 由 Actions 自动提供。
 - 客户端入口：用户在设置页显式调用 `UpdateClient.checkForUpdate()`；启动、挂载和后台定时器不得调用远端检查。
+- 代理签名：`checkForUpdate(proxy?: string)`；代理测试调用 `check({ proxy, timeout: 5000 })`，成功后必须关闭临时 Update 资源。
 - Sandbox 主机入口：`scripts/windows-sandbox/prepare-update-test.ps1 -InstallerPath <path> -ExpectedSha256 <64-hex> -ExpectedTargetVersion <semver> [-StageRoot <temp-path>] [-PrepareOnly]`。
 - Sandbox guest 入口：`guest-bootstrap.ps1` 生成升级前报告并启动基线安装器，`guest-start-app.ps1` 使用安全覆盖重新启动应用，`guest-verify.ps1 -ExpectedVersion <semver>` 生成升级后报告。
 
 ## 3. 契约
 
 - 唯一更新清单地址为 `https://github.com/hunxuankai/codex-relay/releases/latest/download/latest.json`，必须使用 HTTPS 且不能来自用户输入。
+- `settings.json.networkProxy` 只允许 `{ enabled: boolean, url: string }`。URL 仅接受无认证的绝对 `http://` / `https://` 地址，必须有主机，禁止 userinfo、path、query 和 fragment；旧设置缺少该字段时默认关闭。
+- updater 检查只有在代理已启用且 URL 非空时传入 `proxy`；返回的 Update 会话会沿用检查时代理下载，不得在下载中途切换。
+- “测试代理”与本机代理发现必须通过候选代理实际请求并解析固定 `latest.json`，不能把 TCP 端口开放等同于代理可用。固定 loopback 候选为 `7890`、`7897`、`10809`、`1080`、`8080`、`3128`，每项 5 秒超时并行检测。
 - 公钥是可公开提交的 minisign 信任根；私钥和密码只存在于 GitHub Actions Secrets 与开发者控制的离线备份中。
 - 发布工作流只能由 `workflow_dispatch` 触发，先运行 `npm run check`，再生成 Windows x64 NSIS、`.sig` 和 `latest.json`。
 - Release 必须先为 Draft；版本、说明、资产 URL 和签名核对完成后才可发布。
@@ -38,6 +42,10 @@
 | 未设置签名 Secrets 的普通构建 | `npm run build` 仍成功，不生成 updater 签名资产 |
 | 未设置或错误的签名 Secrets 的发布构建 | 构建失败，不创建可发布成功状态 |
 | endpoint 断网、非 2xx、无效 JSON 或无目标平台 | 检查进入安全错误状态，本地 Provider 功能继续可用 |
+| 代理 URL 非 HTTP(S)、缺少主机或包含认证/路径/查询/片段 | 返回 `INVALID_PROXY_URL`，不写入 `settings.json` |
+| 手动代理测试失败或超时 | 返回脱敏 `PROXY_TEST_FAILED`，不保存或启用代理 |
+| 本机代理发现被取消 | 不发起任何候选请求，不修改设置 |
+| 多个本机候选可用 | 列出全部结果并由用户选择，不自动采用第一个 |
 | updater 资产签名无效 | 不启动 NSIS，不报告更新成功 |
 | Release 仍为 Draft | `releases/latest` 客户端不可消费该版本 |
 | `latest.json.notes` 仍为占位文案 | 不得发布；修正工作流并重新生成 Draft 资产 |
@@ -57,7 +65,10 @@
 ## 5. 良好、基线与错误用例
 
 - 良好：用户点击检查，发现更高版本，下载资产通过内置公钥校验，NSIS 沿用已登记安装目录完成升级。
+- 良好：用户启用 `http://127.0.0.1:7897` 后检查更新，清单与安装包下载使用同一代理；重新保存代理只影响下一次检查会话。
+- 良好：用户确认本机检测后并行测试固定六个地址，选择成功结果后立即保存并启用。
 - 基线：没有用户点击时不访问网络；普通本地构建在没有任何签名环境变量时生成常规 NSIS。
+- 基线：代理关闭或 URL 为空时不传 `proxy`，保持 updater 默认网络行为。
 - 基线：GitHub API asset URL 的普通 GET 返回 JSON 元数据，但 updater 通过 `Accept: application/octet-stream` 获取实际安装器，下载哈希与 Release 资产一致。
 - 错误：在基础配置开启 `createUpdaterArtifacts`，导致每次本地构建都要求私钥。
 - 错误：只用浏览器打开或普通 GET 检查 GitHub API asset URL，看到 JSON 后直接替换已发布资产或判断 Release 损坏。
@@ -75,6 +86,8 @@
 - `src/release-config.test.ts` 断言固定 HTTPS endpoint、公开公钥、`updater:default` 权限、基础/发布配置分离、Secret 名称、手动触发、Draft 和 NSIS 优先。
 - 工作流结构测试断言 `releaseBody` 使用多行最终说明，并明确拒绝占位文案，防止占位内容进入 `latest.json.notes`。
 - composable 测试断言创建时不检查远端、显式检查、单飞、旧响应防护、确认、进度和安全失败状态。
+- 代理测试断言 `proxy`、`timeout: 5000`、临时资源关闭和错误脱敏；本机发现断言固定六地址、确认前零请求、并发聚合、多个结果保留和全部失败。
+- Settings Rust 测试断言旧 JSON 默认关闭、URL 规范化、非法值不落盘，以及事务备份、写后验证和回滚；所有文件测试使用临时目录。
 - 服务测试只 mock 官方 updater 与本地版本 API，断言 DTO 规范化、资源释放和错误脱敏。
 - 在显式移除两个签名环境变量后运行 `npm run build`，枚举 EXE/NSIS 的实际路径、大小和 SHA-256。
 - 在真实 GitHub Actions 中核对 Draft Release 的 NSIS updater 资产、`.sig` 与 `latest.json`。
@@ -132,6 +145,18 @@ curl.exe -L -H "Accept: application/octet-stream" `
   "https://api.github.com/repos/<owner>/<repo>/releases/assets/<id>" `
   -o updater.exe
 Get-FileHash -Algorithm SHA256 updater.exe
+```
+
+错误：只连接 `127.0.0.1:<端口>` 就宣布代理可用，或把任意用户端口加入自动扫描。
+
+```typescript
+await connectTcp(host, port)
+```
+
+正确：只在用户确认后测试固定 loopback 白名单，并通过 updater 请求真实更新清单。
+
+```typescript
+await check({ proxy: 'http://127.0.0.1:7897', timeout: 5000 })
 ```
 
 错误：把可写 staging 放到未经约束的路径，或直接双击未经哈希核对的安装器。
