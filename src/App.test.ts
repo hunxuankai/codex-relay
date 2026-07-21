@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { computed, ref, shallowRef } from 'vue'
+import { computed, nextTick, ref, shallowRef } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HealthReport } from './types/health'
 import type { ProviderProfile } from './types/provider'
@@ -184,6 +184,53 @@ describe('App', () => {
 
     await wrapper.get('[aria-label="打开设置"]').trigger('click')
     expect(wrapper.find('[data-view="settings"]').exists()).toBe(true)
+  })
+
+  it('shows self-check errors below the header and opens their details', async () => {
+    const state = controllers()
+    state.healthState.report.value = {
+      ...healthReport(),
+      level: 'error',
+      checks: [
+        {
+          id: 'config-file',
+          label: 'config.toml',
+          level: 'error',
+          message: 'config.toml 无法解析。',
+        },
+        {
+          id: 'auth-file',
+          label: 'auth.json',
+          level: 'error',
+          message: 'auth.json 与当前 Provider 不一致。',
+        },
+      ],
+    }
+    mocks.useProviders.mockReturnValue(state.providerState)
+    mocks.useHealth.mockReturnValue(state.healthState)
+    mocks.useSettings.mockReturnValue(state.settingsState)
+    const wrapper = mount(App, { global: { stubs } })
+    await flushPromises()
+
+    const alert = wrapper.get('[aria-label="系统自检错误提示"]')
+    expect(alert.attributes('role')).toBe('alert')
+    expect(alert.text()).toContain('系统自检发现 2 个错误项')
+    expect(alert.element.previousElementSibling).toBe(wrapper.get('.app-header').element)
+
+    await alert.get('[aria-label="查看自检详情"]').trigger('click')
+
+    expect(wrapper.get('[aria-label="自检状态"]').text()).toContain('系统自检')
+    expect(wrapper.get('[aria-label="打开自检"]').attributes('aria-current')).toBe('page')
+
+    state.healthState.report.value = healthReport()
+    await nextTick()
+
+    expect(wrapper.find('[aria-label="系统自检错误提示"]').exists()).toBe(false)
+
+    state.healthState.report.value = healthReport(false)
+    await nextTick()
+
+    expect(wrapper.find('[aria-label="系统自检错误提示"]').exists()).toBe(false)
   })
 
   it('does not claim post-restore refresh success when a refresh fails', async () => {

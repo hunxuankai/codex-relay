@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 const styles = readFileSync('src/style.css', 'utf8')
 const confirmDialog = readFileSync('src/components/ConfirmDialog.vue', 'utf8')
+const selfCheckErrorBanner = readFileSync('src/components/SelfCheckErrorBanner.vue', 'utf8')
 
 describe('global Windows visual system', () => {
   it('uses reusable color tokens for light and dark themes', () => {
@@ -26,5 +27,11 @@ describe('global Windows visual system', () => {
   it('provides a narrow-window layout without a fixed desktop width', () => {
     expect(styles).toMatch(/@media \(max-width:\s*\d+px\)/)
     expect(styles).not.toMatch(/\.app-shell[\s\S]*width:\s*9\d\dpx/)
+  })
+
+  it('keeps the self-check error banner prominent across themes and narrow windows', () => {
+    expect(selfCheckErrorBanner).toContain('color: var(--danger)')
+    expect(selfCheckErrorBanner).toContain('background: var(--danger-soft)')
+    expect(selfCheckErrorBanner).toMatch(/@media \(max-width:\s*\d+px\)/)
   })
 })

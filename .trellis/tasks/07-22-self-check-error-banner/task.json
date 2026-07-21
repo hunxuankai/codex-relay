@@ -1,0 +1,31 @@
+{
+  "id": "self-check-error-banner",
+  "name": "self-check-error-banner",
+  "title": "顶部显示自检错误并支持跳转",
+  "description": "在主界面页头下方显示自检错误数量，并提供跳转到系统自检页面的操作。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "frontend",
+  "package": null,
+  "priority": "P2",
+  "creator": "kai",
+  "assignee": "kai",
+  "createdAt": "2026-07-22",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "src/App.vue",
+    "src/App.test.ts",
+    "src/components/SelfCheckErrorBanner.vue",
+    "src/style.test.ts"
+  ],
+  "notes": "验证：npm run check:frontend（98 个测试）、npm run build:frontend、npm run test:trellis（8 个测试）和 git diff --check 均退出 0；敏感模式命中为 0。未执行桌面窗口人工视觉检查。",
+  "meta": {}
+}

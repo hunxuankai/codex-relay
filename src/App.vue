@@ -6,6 +6,7 @@ import providersIcon from './assets/icons/providers.svg'
 import settingsIcon from './assets/icons/settings.svg'
 import AppNotification from './components/AppNotification.vue'
 import HealthStatus from './components/HealthStatus.vue'
+import SelfCheckErrorBanner from './components/SelfCheckErrorBanner.vue'
 import { useHealth } from './composables/useHealth'
 import { useProviders } from './composables/useProviders'
 import { useSettings } from './composables/useSettings'
@@ -46,6 +47,9 @@ const healthLabel = computed(() => {
   if (healthState.report.value?.level === 'error') return '错误'
   return '检查中'
 })
+const selfCheckErrorCount = computed(
+  () => healthState.report.value?.checks.filter((item) => item.level === 'error').length ?? 0,
+)
 const operationText = computed(
   () =>
     lastOperation.value ??
@@ -196,7 +200,18 @@ onUnmounted(() => stopNotification?.())
       </nav>
     </header>
 
-    <AppNotification :message="appMessage?.message ?? null" :level="appMessage?.level ?? 'success'" />
+    <SelfCheckErrorBanner
+      v-if="selfCheckErrorCount > 0"
+      class="self-check-error-banner-slot"
+      :error-count="selfCheckErrorCount"
+      @view-details="selectView('health')"
+    />
+
+    <AppNotification
+      class="app-notification-slot"
+      :message="appMessage?.message ?? null"
+      :level="appMessage?.level ?? 'success'"
+    />
 
     <section class="app-content">
       <ProvidersView
@@ -242,8 +257,28 @@ onUnmounted(() => stopNotification?.())
 
 .app-shell {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   min-height: 100vh;
+}
+
+.app-header {
+  grid-row: 1;
+}
+
+.self-check-error-banner-slot {
+  grid-row: 2;
+}
+
+.app-notification-slot {
+  grid-row: 3;
+}
+
+.app-content {
+  grid-row: 4;
+}
+
+.status-bar {
+  grid-row: 5;
 }
 
 .app-header,
