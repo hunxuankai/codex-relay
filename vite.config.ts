@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [vue()],
   clearScreen: false,
   server: {
-    port: 1420,
+    port: 43971,
     strictPort: true,
     watch: {
       ignored: ['**/src-tauri/**'],
@@ -17,4 +17,3 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
   },
 })
-

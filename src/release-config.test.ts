@@ -22,6 +22,7 @@ const updaterEndpoint =
 const updaterPublicKey =
   'dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFEMEEwQ0U1QUFFQzI3RApSV1I5d3E1YXpxRFFDbGlIR2UxY3ZZR05BUDhqZnRPYk9ycFd6OVB4MVdMenBFR1RuTjhaVnc4UQo='
 const prepareDevData = readFileSync('scripts/prepare-dev-data.ps1', 'utf8')
+const viteConfig = readFileSync('vite.config.ts', 'utf8')
 const rustEntryPoint = readFileSync('src-tauri/src/main.rs', 'utf8')
 const nsisTemplatePath = 'src-tauri/installer/custom-installer.nsi'
 const nsisTemplate = existsSync(nsisTemplatePath) ? readFileSync(nsisTemplatePath, 'utf8') : ''
@@ -123,6 +124,11 @@ describe('Windows release configuration', () => {
   it('uses the Windows npm command shim when safe development launches Tauri', () => {
     expect(prepareDevData).toContain('& npm.cmd run dev')
     expect(prepareDevData).not.toMatch(/&\s+npm\s+run\s+dev/)
+  })
+
+  it('keeps the uncommon Vite development port aligned with the Tauri dev URL', () => {
+    expect(viteConfig).toMatch(/port:\s*43971/)
+    expect(tauri.build.devUrl).toBe('http://localhost:43971')
   })
 
   it('uses the Windows GUI subsystem for release builds', () => {
