@@ -1,0 +1,30 @@
+{
+  "id": "release-update-guide",
+  "name": "release-update-guide",
+  "title": "记录发布更新操作步骤",
+  "description": "将当前 Windows 应用更新发布流程整理为可执行的简体中文维护者文档，并从发布规范索引和 README 提供入口。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "release documentation",
+  "package": null,
+  "priority": "P2",
+  "creator": "kai",
+  "assignee": "kai",
+  "createdAt": "2026-07-22",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".trellis/spec/release/publishing.md",
+    ".trellis/spec/release/index.md",
+    "README.md"
+  ],
+  "notes": "",
+  "meta": {}
+}

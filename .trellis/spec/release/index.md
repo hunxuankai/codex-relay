@@ -2,6 +2,7 @@
 
 ## 开发前检查
 
+- 准备或执行 Windows 更新发布：读取 [publishing.md](publishing.md)。
 - 修改 Tauri bundle、安装范围、安装目录、升级或卸载：读取 [tauri-nsis.md](tauri-nsis.md)。
 - 修改应用内更新、GitHub Releases、updater artifacts 或更新密钥：读取 [updater.md](updater.md)。
 - 发布、证书、SmartScreen 或产物声明：读取 [signing.md](signing.md)。
@@ -14,10 +15,13 @@
 - 卸载是否继续保留 Codex 配置和应用数据？
 - 普通构建是否仍不依赖更新私钥，发布构建是否只生成 Draft updater 资产？
 - endpoint、公钥、Secrets 名称和 `latest.json` 目标是否与结构测试一致？
+- package、Cargo、锁文件、发布说明和结构测试中的版本是否一致？
+- Draft 的目标提交、最终说明、NSIS、`.sig` 和 `latest.json` 是否逐项核对后才公开？
 - 构建、安装与签名是否按实际证据分别报告？
 
 ## 文件
 
+- [Windows 更新发布操作指南](publishing.md)
 - [Tauri 与 NSIS](tauri-nsis.md)
 - [Tauri 应用内更新](updater.md)
 - [代码签名](signing.md)

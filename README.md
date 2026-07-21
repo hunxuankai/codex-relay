@@ -253,6 +253,8 @@ Codex CLI 缺失或超时属于警告，不阻止 Provider 管理；配置损坏
 
 发布使用 `.github/workflows/release.yml` 的手动 `workflow_dispatch`：运行完整检查后构建 Windows x64 NSIS、`.sig` 和 `latest.json`，并先创建 Draft Release。维护者必须核对版本、说明、资产和签名后再发布；Draft 不应被客户端的 `releases/latest` 消费。更新私钥和可选密码只存放在 GitHub Actions Secrets 与开发者控制的离线备份中，公钥可以公开提交。
 
+维护者准备和公开新版本时，按 [Windows 更新发布操作指南](.trellis/spec/release/publishing.md) 执行版本同步、本地检查、Draft 核对、发布后公开端点检查和 Sandbox/VM 升级验证。
+
 Tauri 更新包签名用于证明下载资产与客户端内置信任根匹配；Windows Authenticode 用于证明 Windows 发布者身份并影响 SmartScreen。两者相互独立。本项目 MVP 保留强制的 Tauri 更新签名，但不启用 Authenticode，因此安装器仍可能显示“未知发布者”。
 
 ## 备份与恢复
