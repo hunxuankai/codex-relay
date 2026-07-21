@@ -33,6 +33,6 @@
     ".trellis/spec/security/",
     ".trellis/spec/testing/"
   ],
-  "notes": "v0.1.1 已公开且资产已复核；v0.1.0 因启动竞态无法触发 updater。用户已在 Sandbox 人工安装 v0.1.1 并确认能进入主界面，该操作只恢复基线、不计应用内升级。下一步提交推送 v0.1.2、核对 Draft 后再经确认发布，以 v0.1.1→v0.1.2 完成真实 updater 与 after.json 验收。",
+  "notes": "v0.1.1 已公开且资产已复核；v0.1.0 因启动竞态无法触发 updater。用户已在 Sandbox 人工安装 v0.1.1 并确认能进入主界面，该操作只恢复基线、不计应用内升级。v0.1.2 已提交推送，Run #5 与 Draft 三项资产均已核对，当前等待用户确认公开发布，再以 v0.1.1→v0.1.2 完成真实 updater 与 after.json 验收。",
   "meta": {}
 }

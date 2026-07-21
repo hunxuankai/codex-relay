@@ -17,7 +17,7 @@
 
 ## 当前进度
 
-Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_progress`。切片 1 至切片 7 已完成：updater 客户端、Draft 发布工作流、`v0.1.0` 公开发布、资产/签名/API 下载兼容性均已核对。切片 8 已完成 Sandbox 功能确认、安全 staging/guest 脚本、dry-run、真实 guest bootstrap/升级前快照及 `v0.1.0` 基线安装；基线应用启动后暴露的 health 初始化竞态已按 RED→GREEN 修复。Run #3 暴露的 Windows 8.3 路径测试假失败已修复并推送到 `f6200b0`；Run #4 成功生成的 `v0.1.1` 已核对并公开发布。用户再次通过安全入口启动 `v0.1.0` 后仍永久停留在启动页，验收改用人工安装 `v0.1.1` 恢复基线，再以 `v0.1.1 → v0.1.2` 完成真实应用内升级。`v0.1.2` 的版本/说明切片已按 RED→GREEN 完成，并通过完整检查和无私钥普通构建；Sandbox 人工恢复 `v0.1.1` 已完成，提交计划也已获用户确认。
+Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_progress`。切片 1 至切片 7 已完成：updater 客户端、Draft 发布工作流、`v0.1.0` 公开发布、资产/签名/API 下载兼容性均已核对。切片 8 已完成 Sandbox 功能确认、安全 staging/guest 脚本、dry-run、真实 guest bootstrap/升级前快照及 `v0.1.0` 基线安装；基线应用启动后暴露的 health 初始化竞态已按 RED→GREEN 修复。Run #3 暴露的 Windows 8.3 路径测试假失败已修复并推送到 `f6200b0`；Run #4 成功生成的 `v0.1.1` 已核对并公开发布。用户再次通过安全入口启动 `v0.1.0` 后仍永久停留在启动页，验收改用人工安装 `v0.1.1` 恢复基线，再以 `v0.1.1 → v0.1.2` 完成真实应用内升级。`v0.1.2` 的版本/说明切片已按 RED→GREEN 完成，并通过完整检查和无私钥普通构建；Sandbox 人工恢复 `v0.1.1` 已完成。候选已提交推送，Run #5 与 Draft 三项资产均已核对，当前等待用户确认公开 `v0.1.2`。
 
 ## 已完成
 
@@ -115,10 +115,16 @@ Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_p
 - 提交前再次显式移除 `TAURI_SIGNING_PRIVATE_KEY` 与密码并运行 `npm run build`，命令于 185.2 秒后退出 0。`src-tauri/target/release/CodexRelay.exe` 为 16,633,344 字节，SHA-256 `48CAB991840DBBB97A08E035FB5EA2E46B1CEBF6C71909801E8F99BCC32EF89A`；`Codex Relay_0.1.2_x64-setup.exe` 为 3,975,782 字节，SHA-256 `A3E2B8F72B7C78C65BE415A5932DB8287F40FADBCACFC45A59E3614132F6B06C`。本轮普通构建未生成 `v0.1.2` `.sig` 或 `latest.json`，符合无私钥边界，但不能作为签名或 updater 成功证据。
 - 已把公开 `v0.1.1` NSIS 写入安全 staging 的只读 input；重新核对结果为 3,976,351 字节、SHA-256 `17F775BF0DBD61E568F81FD06EB66DA1AFFB3CD56B522128859D43CFE92BD405`，等待用户在 guest 内人工安装。`results/before.json` 已存在，`after.json` 尚未生成。
 - 用户在 Sandbox 内人工覆盖安装 `v0.1.1` 后，通过安全入口确认应用已进入主界面。该观察只证明已知良好基线恢复成功，不计为 updater、Tauri 签名或 `v0.1.1 → v0.1.2` 升级成功；Sandbox 保持开启。
+- 用户确认提交分组后，候选提交依次为 `5832198 chore(release): 准备 v0.1.2 恢复升级候选`、`f634be4 docs(release): 固化不可启动基线恢复契约`、`e387adb chore(task): 记录 v0.1.2 恢复链路与验证证据`；`git push origin HEAD:main` 成功，远端 `main` 精确为 `e387adb4ab4617ee3f3c42317ed3599179ada5ae`。
+- 新安装的 GitHub CLI `2.96.0` 通过 API 确认登录账户 `hunxuankai`，未输出 Token。手动触发的 Run #5（`https://github.com/hunxuankai/codex-relay/actions/runs/29845939529`）精确检出 `e387adb4ab4617ee3f3c42317ed3599179ada5ae`，于 `2026-07-21T16:04:08Z` 完成且结论为 `success`；完整检查、Draft 构建和全部收尾步骤均成功。唯一 annotation 是 GitHub 将使用 Node.js 20 的固定 Actions 强制运行在 Node.js 24 的弃用提醒，本次未因此失败。
+- `v0.1.2` Draft Release ID 为 `357470117`，`draft=true`、`prerelease=false`，目标提交精确为 `e387adb4ab4617ee3f3c42317ed3599179ada5ae`。未登录 `releases/latest` 仍返回公开 `v0.1.1`，未登录 tag API 查询 `v0.1.2` 返回 404，证明 Draft 尚未被客户端发现。
+- Draft 三项资产的下载字节与 GitHub digest 完全一致：NSIS 为 3,976,952 字节，SHA-256 `944F55AABACD1615ECEDF95A1D715F11A15DFD6FD8C8CA344341139FFD203D70`；`.sig` 为 424 字节，SHA-256 `0D506B4535CCEBC892EE5C28CCBE3FF5EEEF086EF3BC51B92824C6018C2C5C39`；`latest.json` 为 2,082 字节，SHA-256 `F2DEA8211954E66A251127BF1E32DB17ECF0A355EF98BA3A1A333BDF01073DEB`。
+- Draft `latest.json` 版本为 `0.1.2`，说明与 Release body 一致且包含人工恢复边界；平台恰为 `windows-x86_64` 与 `windows-x86_64-nsis`，两者 URL 均指向 installer asset ID `484875016`，内联签名相同且与独立 `.sig` 文本一致。公钥与签名 payload 的原始 key-id 字节均为 `7DC2AE5ACEA0D00A`；minisign 注释按反向显示为 `0AD0A0CE5AAEC27D`（省略前导零时为 `AD0A0CE5AAEC27D`）。本轮未执行独立密码学验签，真实接受仍等待 Sandbox updater。
+- Draft 审计下载目录在核对后已从系统临时目录安全删除。当前 staging 的 `input/Verify Codex Relay v0.1.2 Update.cmd` 为 195 字节，SHA-256 `3D209E4BD465EA3414ABA962BBB5B9D61DB675F07EDAEB70083599E99C8F10F2`；它只调用现有 `guest-verify.ps1`、固定期望版本 `0.1.2`，且不引用真实默认目录。
 
 ## 尚未解决的问题
 
-- Windows Sandbox 已人工恢复为能进入主界面的 `v0.1.1`；仍需生成、核对并公开 `v0.1.2`，再由用户在 guest 内执行应用点击和可能出现的 UAC。
+- Windows Sandbox 已人工恢复为能进入主界面的 `v0.1.1`；`v0.1.2` Draft 已核对但尚未公开，仍需用户确认发布，再在 guest 内执行应用点击和可能出现的 UAC。
 - GitHub Secrets 的存在由用户确认；本机未安装 GitHub CLI，尚未通过 CLI 独立枚举，但不会读取或输出 Secret 值。
 - `v0.1.1` 已公开发布并完成公开资产复核，但完整端到端签名校验、应用内升级、重启和 `after.json` 数据保留证据仍未完成。基线安装未出现 UAC，UAC 成功与取消路径均未验证。
 
@@ -275,6 +281,6 @@ git ls-files
 ## 下一步
 
 1. `v0.1.1` 人工恢复已完成且能进入主界面；该操作不计为 updater 成功。
-2. 按已确认的提交分组提交并推送 `v0.1.2` 候选，生成 Actions Draft、核对资产，经用户确认后再公开发布。
+2. `v0.1.2` 候选已提交推送，Actions Draft 与资产已核对；等待用户明确确认后公开发布。
 3. 在 Sandbox 中从 `v0.1.1` 手动检查并应用 `v0.1.2`；升级重启后运行目标版本为 `0.1.2` 的核验入口，读取 `after.json` 并核对安装目录和三个 fixture 哈希。
 4. 继续核对 UAC、安装目录沿用、重启、签名失败/断网/取消路径；未执行项如实保留，再完成全范围检查与任务收尾。
