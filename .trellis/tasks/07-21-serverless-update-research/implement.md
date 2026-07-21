@@ -73,13 +73,14 @@ Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_p
 - 用户明确确认后，旧占位 Draft 及其 3 个资产已删除；GitHub 页面显示 “Your release was removed” 且没有剩余 Release。
 - GitHub Actions `发布 Windows 更新 #2`（`https://github.com/hunxuankai/codex-relay/actions/runs/29803671969`）以最新提交 `194a9b54fc691e212a3ed437723866e71bcde992` 运行完成，结论为 `success`；完整检查和 Draft 构建步骤均成功。
 - 新 Draft `Codex Relay v0.1.0` 已生成且未发布，页面显示正式“更新内容 / 首次安装 / 注意事项”中文说明。资产：NSIS 3.79 MB，SHA-256 `e9dcb19419a198ac00244a579d5b81874cc847200fc216d1797fd837a693dad9`；`.sig` 424 字节，SHA-256 `6dfb4765df2d507e48f507603f1c84bdc396c8458c57c5bf28c1e13da0ac3500`；`latest.json` 1.85 KB，SHA-256 `c96bb5862372d881b81edd069d579eda80f1852c0a4ec554b1e78d91cd77c50f`。
+- 用户提供的新 `latest.json` 可解析：版本 `0.1.0`，`notes` 与 Draft 页面正式中文说明一致；`windows-x86_64` 和 `windows-x86_64-nsis` 使用同一签名并指向新 NSIS asset ID `484291952`。签名 envelope 的 key ID 与客户端公开公钥均为 `7DC2AE5ACEA0D00A`，可信注释文件名为 `Codex Relay_0.1.0_x64-setup.exe`。
 - 未执行 Tauri updater 签名、GitHub Actions、Draft Release、安装、升级、UAC 或 Sandbox/VM 验收；上述构建证据不得用于声明这些项目成功。
 
 ## 尚未解决的问题
 
 - Windows Sandbox 功能是否启用尚未用管理员权限确认；必要时需准备快照虚拟机。
 - GitHub Secrets 的存在由用户确认；本机未安装 GitHub CLI，尚未通过 CLI 独立枚举，但不会读取或输出 Secret 值。
-- 新 Draft 的 Release 描述已核对为正式文案，但新 `latest.json` 文件内容尚未由用户提供，仍需确认 `notes`、版本、平台 URL 和内联签名后才能发布。
+- 新 Draft 尚未公开发布，首个带 updater 的版本也尚未手动安装；完整端到端签名校验与升级仍需后续更高 SemVer 版本触发客户端 updater。
 
 ## 行为切片与 TDD 顺序
 
@@ -223,7 +224,6 @@ git ls-files
 
 ## 下一步
 
-1. 用户从新 Draft 下载 `latest.json` 并提供完整公开 JSON 内容。
-2. 核对新清单的正式说明、版本、平台 URL 和内联签名与实际资产一致。
-3. 在用户确认发布动作后公开首个 Release，并手动安装首个带 updater 的版本。
-4. 发布更高 SemVer 版本，在 Sandbox/VM 中完成真实应用内升级与失败场景验收。
+1. 经用户明确确认后公开首个 `v0.1.0` Release。
+2. 下载公开资产并复核公开 URL、文件大小和 SHA-256，然后在隔离环境手动安装首个带 updater 的版本。
+3. 发布更高 SemVer 版本，在 Sandbox/VM 中完成真实应用内升级与失败场景验收。
