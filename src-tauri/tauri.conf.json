@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Codex Relay",
   "mainBinaryName": "CodexRelay",
-  "version": "0.1.0",
+  "version": "../package.json",
   "identifier": "com.codexrelay.desktop",
   "build": {
     "beforeDevCommand": "npm run dev:frontend",
@@ -26,6 +26,14 @@
     ],
     "security": {
       "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost https://ipc.localhost; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/hunxuankai/codex-relay/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFEMEEwQ0U1QUFFQzI3RApSV1I5d3E1YXpxRFFDbGlIR2UxY3ZZR05BUDhqZnRPYk9ycFd6OVB4MVdMenBFR1RuTjhaVnc4UQo="
     }
   },
   "bundle": {

@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Settings, SettingsState } from '../types/settings'
 import SettingsView from './SettingsView.vue'
 
+vi.mock('../components/UpdatePanel.vue', () => ({ default: { template: '<section data-update-panel />' } }))
+
 const mockUseSettings = vi.hoisted(() => vi.fn())
 vi.mock('../composables/useSettings', () => ({ useSettings: mockUseSettings }))
 
@@ -79,5 +81,13 @@ describe('SettingsView', () => {
     mockUseSettings.mockReturnValue(settings)
 
     expect(mount(SettingsView).text()).toContain('无法更新 Windows 开机启动。')
+  })
+
+  it('places updater actions outside the settings form', () => {
+    mockUseSettings.mockReturnValue(controller())
+    const wrapper = mount(SettingsView)
+
+    expect(wrapper.find('[data-update-panel]').exists()).toBe(true)
+    expect(wrapper.get('form').find('[data-update-panel]').exists()).toBe(false)
   })
 })

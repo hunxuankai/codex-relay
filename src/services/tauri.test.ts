@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { getVersion } from '@tauri-apps/api/app'
+import { check } from '@tauri-apps/plugin-updater'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackupSummary } from '../types/backup'
 import type { HealthReport } from '../types/health'
@@ -15,9 +17,11 @@ import {
   RelayCommandError,
   createProvider,
   deleteProvider,
+  checkForUpdate,
   exitApplication,
   getProviderApiKey,
   getSettings,
+  getCurrentVersion,
   importCurrentAuthKey,
   listBackups,
   listProviders,
@@ -34,9 +38,13 @@ import {
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }))
+vi.mock('@tauri-apps/api/app', () => ({ getVersion: vi.fn() }))
+vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn() }))
 
 const invokeMock = vi.mocked(invoke)
 const listenMock = vi.mocked(listen)
+const getVersionMock = vi.mocked(getVersion)
+const checkMock = vi.mocked(check)
 
 const fingerprints = {
   config: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'config' },
@@ -94,6 +102,8 @@ describe('Tauri service boundary', () => {
   beforeEach(() => {
     invokeMock.mockReset()
     listenMock.mockReset()
+    getVersionMock.mockReset()
+    checkMock.mockReset()
   })
 
   it('calls the exact Rust command names and arguments', async () => {
@@ -206,5 +216,80 @@ describe('Tauri service boundary', () => {
     expect(handler).toHaveBeenCalledWith(providerState)
     stop()
     expect(unlisten).toHaveBeenCalledOnce()
+  })
+
+  it('normalizes updater metadata and cumulative download progress', async () => {
+    const close = vi.fn().mockResolvedValue(undefined)
+    const downloadAndInstall = vi.fn(async (onEvent?: (event: unknown) => void) => {
+      onEvent?.({ event: 'Started', data: { contentLength: 10 } })
+      onEvent?.({ event: 'Progress', data: { chunkLength: 4 } })
+      onEvent?.({ event: 'Progress', data: { chunkLength: 6 } })
+      onEvent?.({ event: 'Finished' })
+    })
+    getVersionMock.mockResolvedValue('0.1.0')
+    checkMock.mockResolvedValue({
+      currentVersion: '0.1.0',
+      version: '0.2.0',
+      date: '2026-07-21T00:00:00Z',
+      body: '安全更新。',
+      downloadAndInstall,
+      close,
+    } as never)
+
+    await expect(getCurrentVersion()).resolves.toBe('0.1.0')
+    const session = await checkForUpdate()
+    const progress: unknown[] = []
+
+    expect(session?.info).toEqual({
+      currentVersion: '0.1.0',
+      version: '0.2.0',
+      date: '2026-07-21T00:00:00Z',
+      notes: '安全更新。',
+    })
+    await session?.downloadAndInstall((event) => progress.push(event))
+    expect(progress).toEqual([
+      { downloadedBytes: 0, totalBytes: 10, percent: 0 },
+      { downloadedBytes: 4, totalBytes: 10, percent: 40 },
+      { downloadedBytes: 10, totalBytes: 10, percent: 100 },
+      { downloadedBytes: 10, totalBytes: 10, percent: 100 },
+    ])
+    await session?.close()
+    expect(close).toHaveBeenCalledOnce()
+  })
+
+  it('returns null when the updater reports no newer release', async () => {
+    checkMock.mockResolvedValue(null)
+
+    await expect(checkForUpdate()).resolves.toBeNull()
+  })
+
+  it('maps updater check and install failures to safe stable errors', async () => {
+    checkMock.mockRejectedValueOnce(
+      new Error('https://example.test/latest.json?token=secret signature=unsafe'),
+    )
+
+    await expect(checkForUpdate()).rejects.toMatchObject({
+      code: 'UPDATE_CHECK_FAILED',
+      message: '检查更新失败，请稍后重试。',
+    })
+
+    const close = vi.fn().mockResolvedValue(undefined)
+    checkMock.mockResolvedValueOnce({
+      currentVersion: '0.1.0',
+      version: '0.2.0',
+      date: 'not-a-date',
+      body: null,
+      downloadAndInstall: vi.fn().mockRejectedValue(
+        new Error('Authorization: Bearer secret download failed'),
+      ),
+      close,
+    } as never)
+
+    const session = await checkForUpdate()
+    expect(session?.info.date).toBeNull()
+    await expect(session?.downloadAndInstall(vi.fn())).rejects.toMatchObject({
+      code: 'UPDATE_INSTALL_FAILED',
+      message: '下载或安装更新失败，请稍后重试。',
+    })
   })
 })

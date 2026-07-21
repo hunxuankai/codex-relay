@@ -33,7 +33,17 @@ Windows 当前用户文件与系统集成
 6. 根据 `--autostart` 与设置决定显示窗口或仅托盘。
 7. 同步运行关键自检，后台运行扩展自检并发事件。
 
-启动时不访问模型网络；Codex 探测只运行有超时的本地 `codex --version`。
+启动时不访问模型或更新网络；Codex 探测只运行有超时的本地 `codex --version`。更新网络请求只能由设置页的用户显式动作触发。
+
+## 手动更新数据流
+
+```text
+SettingsView → UpdatePanel → useUpdater → typed updater service
+→ tauri-plugin-updater → 固定 GitHub Releases latest.json
+→ Tauri 公钥校验 → per-machine NSIS 被动更新
+```
+
+`src/services/tauri.ts` 负责把官方 updater 句柄规范化为应用 DTO；组件不得解析远端下载地址或持有插件对象。基础 Tauri 配置拥有固定 endpoint 与公开公钥，发布覆盖只负责开启 updater artifacts，任何签名私钥都不进入应用配置或前端状态。
 
 ## 写入数据流
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
 import AppNotification from '../components/AppNotification.vue'
+import UpdatePanel from '../components/UpdatePanel.vue'
 import { useSettings } from '../composables/useSettings'
 
 const settingsState = useSettings()
@@ -107,6 +108,8 @@ function save() {
         </button>
       </div>
     </form>
+
+    <UpdatePanel />
   </main>
 </template>
 

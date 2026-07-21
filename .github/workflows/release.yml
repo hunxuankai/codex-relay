@@ -1,0 +1,44 @@
+name: 发布 Windows 更新
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 配置 Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 运行完整检查
+        run: npm run check
+
+      - name: 构建 Draft Release
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --config src-tauri/tauri.updater.conf.json
+          tagName: v__VERSION__
+          releaseName: Codex Relay v__VERSION__
+          releaseBody: 请在发布前补充本版本的变更说明，并核对 NSIS、签名和 latest.json 资产。
+          releaseDraft: true
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true

@@ -7,8 +7,9 @@ const props = withDefaults(
     title: string
     message: string
     confirmLabel?: string
+    tone?: 'danger' | 'neutral'
   }>(),
-  { confirmLabel: '确认' },
+  { confirmLabel: '确认', tone: 'danger' },
 )
 
 const emit = defineEmits<{
@@ -85,7 +86,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', handleKeydown))
           取消
         </button>
         <button
-          class="danger-button"
+          :class="props.tone === 'danger' ? 'danger-button' : 'primary-button'"
           type="button"
           aria-label="确认操作"
           @click="emit('confirm')"
@@ -131,5 +132,10 @@ onBeforeUnmount(() => document.removeEventListener('keydown', handleKeydown))
 .danger-button {
   color: var(--on-danger);
   background: var(--danger-button-background);
+}
+
+.primary-button {
+  color: var(--on-danger);
+  background: var(--accent);
 }
 </style>

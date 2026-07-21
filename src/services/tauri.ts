@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type Event, type UnlistenFn } from '@tauri-apps/api/event'
+import { getVersion } from '@tauri-apps/api/app'
+import { check, type DownloadEvent } from '@tauri-apps/plugin-updater'
 import type { BackupSummary } from '../types/backup'
 import type { CommandResult } from '../types/command'
 import type { HealthReport } from '../types/health'
@@ -12,6 +14,7 @@ import type {
   UpdateProviderInput,
 } from '../types/provider'
 import type { Settings, SettingsState } from '../types/settings'
+import type { UpdateProgress, UpdateSession } from '../types/update'
 
 export const PROVIDERS_CHANGED_EVENT = 'providers-changed'
 export const CONFIG_FILES_CHANGED_EVENT = 'config-files-changed'
@@ -115,6 +118,68 @@ export function runCriticalSelfCheck(): Promise<HealthReport> {
 
 export function runExtendedSelfCheck(): Promise<HealthReport> {
   return call('run_extended_self_check')
+}
+
+export function getCurrentVersion(): Promise<string> {
+  return getVersion()
+}
+
+export async function checkForUpdate(): Promise<UpdateSession | null> {
+  let update
+  try {
+    update = await check()
+  } catch {
+    throw new RelayCommandError('UPDATE_CHECK_FAILED', '检查更新失败，请稍后重试。')
+  }
+  if (!update) {
+    return null
+  }
+
+  const date = update.date && !Number.isNaN(Date.parse(update.date)) ? update.date : null
+
+  return {
+    info: {
+      currentVersion: update.currentVersion,
+      version: update.version,
+      date,
+      notes: update.body ?? null,
+    },
+    async downloadAndInstall(onProgress) {
+      let downloadedBytes = 0
+      let totalBytes: number | null = null
+
+      const report = () => {
+        const progress: UpdateProgress = {
+          downloadedBytes,
+          totalBytes,
+          percent: totalBytes === null ? null : (downloadedBytes / totalBytes) * 100,
+        }
+        onProgress(progress)
+      }
+
+      try {
+        await update.downloadAndInstall((event: DownloadEvent) => {
+          if (event.event === 'Started') {
+            totalBytes = event.data.contentLength ?? null
+            report()
+            return
+          }
+          if (event.event === 'Progress') {
+            downloadedBytes += event.data.chunkLength
+            report()
+            return
+          }
+          report()
+        })
+      } catch {
+        throw new RelayCommandError(
+          'UPDATE_INSTALL_FAILED',
+          '下载或安装更新失败，请稍后重试。',
+        )
+      }
+    },
+    close: () => update.close(),
+  }
 }
 
 export function onProvidersChanged(

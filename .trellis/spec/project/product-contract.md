@@ -11,13 +11,14 @@ Codex Relay 是面向 Windows 10/11、当前登录用户和个人可信计算机
 - 在 `providers.json` 保存各 Provider 密钥，在 `auth.json` 保存当前生效密钥。
 - 使用统一事务提供备份、冲突检测、原子替换、写后验证和失败回滚。
 - 支持关键/扩展自检、文件监控、系统托盘、单实例、当前用户开机启动和 Windows 通知。
+- 支持用户在设置页显式检查公开 GitHub Releases 更新，并在 Tauri 签名校验后启动 NSIS 更新。
 - 首次没有 Provider 时显示引导，不自动写入虚假 Provider。
 
 ## 明确非目标
 
 - 不调用模型接口验证 Base URL 或 API Key；启动阶段不发起网络请求。
 - 不提供 Credential Manager、Keyring、DPAPI、Stronghold 或其他密钥加密。
-- 不提供自动更新、云同步、团队权限、远程管理、多用户隔离或 Provider ID 修改。
+- 不提供启动检查、后台轮询、强制更新、云同步、团队权限、远程管理、多用户隔离或 Provider ID 修改。
 - 不把 Codex CLI 缺失视为阻塞 Provider 管理的错误。
 
 ## 数据与卸载契约
