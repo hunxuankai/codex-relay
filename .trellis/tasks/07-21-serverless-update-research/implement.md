@@ -17,7 +17,7 @@
 
 ## 当前进度
 
-Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_progress`。切片 1 至切片 7 已完成：updater 客户端、Draft 发布工作流、`v0.1.0` 公开发布、资产/签名/API 下载兼容性均已核对。切片 8 已完成 Sandbox 功能确认、安全 staging/guest 脚本、dry-run、真实 guest bootstrap/升级前快照及 `v0.1.0` 基线安装；基线应用启动后暴露的 health 初始化竞态已按 RED→GREEN 修复，`v0.1.1` 候选主体已推送。Run #3 暴露的 Windows 8.3 路径测试假失败已在本地修复并重新通过完整检查，修复已提交为 `ad62084` 但尚未推送；远端 `v0.1.1` Draft/公开发布及真实应用内升级仍未完成。
+Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_progress`。切片 1 至切片 7 已完成：updater 客户端、Draft 发布工作流、`v0.1.0` 公开发布、资产/签名/API 下载兼容性均已核对。切片 8 已完成 Sandbox 功能确认、安全 staging/guest 脚本、dry-run、真实 guest bootstrap/升级前快照及 `v0.1.0` 基线安装；基线应用启动后暴露的 health 初始化竞态已按 RED→GREEN 修复。Run #3 暴露的 Windows 8.3 路径测试假失败已修复并推送到 `f6200b0`；Run #4 成功生成的 `v0.1.1` 已核对并公开发布。用户再次通过安全入口启动 `v0.1.0` 后仍永久停留在启动页，验收改用人工安装 `v0.1.1` 恢复基线，再以 `v0.1.1 → v0.1.2` 完成真实应用内升级。`v0.1.2` 的版本/说明切片已按 RED→GREEN 完成，并通过完整检查和无私钥普通构建；Sandbox 人工恢复 `v0.1.1` 已完成，提交计划也已获用户确认。
 
 ## 已完成
 
@@ -43,6 +43,7 @@ Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_p
 - 仅用户手动检查，一条 `windows-x86_64` 稳定通道，NSIS 被动安装，人工恢复而非自动回滚。
 - `createUpdaterArtifacts` 只放在发布配置覆盖中，普通本地构建不依赖私钥。
 - 发布工作流 `workflow_dispatch` → 完整检查 → Windows 构建 → Draft Release → 人工发布。
+- 人工安装 `v0.1.1` 只恢复可操作的 updater 客户端，不计为应用内升级成功；首条端到端 updater 证据改由更高版本 `v0.1.2` 提供。
 
 ## 验证证据
 
@@ -100,12 +101,26 @@ Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_p
 - `22e890a`、`e8c3c55`、`6d5d66d`、`9473b04` 四个候选提交已推送到远端 `main`；`git ls-remote` 与本地 HEAD 均为 `9473b04eca49e28d6ef2f573b1359960d1b21fce`。
 - GitHub Actions `发布 Windows 更新 #3`（`https://github.com/hunxuankai/codex-relay/actions/runs/29835205616`）精确检出 `9473b04`，但在“运行完整检查”步骤失败；Draft 构建步骤被跳过，因此未生成、签名或发布 `v0.1.1` 资产。4 个测试失败均来自同一 Windows 路径别名：Node 预期使用 `C:\Users\RUNNER~1`，PowerShell 实际输出等价的 `C:\Users\runneradmin` 长路径。
 - CI 路径别名修复：Sandbox 测试先要求实际值为绝对路径，再用 `realpathSync.native` 比较现有路径身份，避免把 8.3 短路径与长路径误判为不同目录。本地 Sandbox 专项 7/7、typecheck 和完整 `npm run check` 退出 0；跨会话恢复后再次运行专项 7/7 与完整 `npm run check`，完整检查包含 8 项 Trellis、18 个前端文件共 87 项、107 项 Rust 单元测试、2 项路径安全和 1 项 Provider 工作流。`task.py validate` 与 `git diff --check` 同样通过，318 个跟踪文件中没有禁用的认证/私钥文件名。修复提交为 `ad62084 fix(testing): 兼容 Windows 8.3 路径别名`，仍需推送和新的 GitHub run 证明 Windows runner 恢复。
+- `ad62084` 与任务证据提交 `f6200b0` 已推送；远端 `main` 与 GitHub Actions `发布 Windows 更新 #4`（`https://github.com/hunxuankai/codex-relay/actions/runs/29838852791`）的 `head_sha` 均为 `f6200b027f1ca9294f43e260c328c047146202a5`。Run #4 于 `2026-07-21T14:36:33Z` 完成且结论为 `success`，检出、依赖安装、完整检查、Draft 构建和收尾步骤全部成功。状态轮询在最终成功响应后出现一次传输 EOF；新的独立 API 请求再次确认总状态和全部步骤成功。
+- 新 Draft `Codex Relay v0.1.1` 保持未发布，tag 为 `v0.1.1`，目标提交为 `f6200b0`，Release 说明与工作流正式中文说明一致。公开 `releases/latest` 仍为 `v0.1.0`，公开 tag API 查询 `v0.1.1` 返回 404，证明 Draft 尚未被客户端发现。
+- Draft 三项资产已按实际字节核对：NSIS 为 3,976,351 字节，SHA-256 `17F775BF0DBD61E568F81FD06EB66DA1AFFB3CD56B522128859D43CFE92BD405`；`.sig` 为 424 字节，SHA-256 `78545C7D23EE1A3EFC78FC0069246FEB0BFCED382C758138BFF166013BCCF6DA`；`latest.json` 为 1,991 字节，SHA-256 `EC5337BEBF22D8F1974A3457778EE29B4B44FC8AB1FDA039E11024186A3164AD`。
+- `latest.json` 版本为 `0.1.1`，说明与 Draft 页面一致；`windows-x86_64` 与 `windows-x86_64-nsis` 均指向 installer asset ID `484785887`，两项内联签名与 `.sig` 文本完全一致。签名 envelope 的 key ID 与客户端公开公钥均为 `7DC2AE5ACEA0D00A`；本轮未使用独立 minisign verifier 对安装器字节执行密码学校验，真实签名拒绝/接受仍等待 Sandbox 内 updater 路径验证。
+- 用户明确回复“发布”后，`v0.1.1` 已公开：Release ID `357413189`，`draft=false`、`prerelease=false`，发布时间 `2026-07-21T15:01:49Z`，tag 与公开 `releases/latest` 均为 `v0.1.1`，远端 tag 和 Release 目标都精确指向 `f6200b027f1ca9294f43e260c328c047146202a5`。
+- 公开发布后通过无登录下载重新取得三项资产；实际大小和 SHA-256 与 Draft 核对值完全一致。公开 `latest.json` 仍为 `0.1.1`，两个 Windows 平台 URL 均指向 installer asset ID `484785887`，内联签名保持一致；验证临时目录包含 3 个文件，核对后已从系统临时目录安全删除。
+- Windows Sandbox 客户端、`vmwp`、安全 staging 与 `before.json` 仍存在。`computer-use` 连接仍因本机控制管道不存在而不可用，本轮未向 Sandbox 发送全局按键或执行其它非受控 UI 自动化；guest 桌面入口名称已从脚本确认是 `Start Codex Relay Safely.cmd` 和 `Verify Codex Relay Update.cmd`。
+- 用户在 Sandbox 再次双击 `Start Codex Relay Safely.cmd`，明确观察到 `v0.1.0` 仍停在“正在加载本机配置…”。这与已复现的 health 初始化竞态一致，证明 `v0.1.0 → v0.1.1` 无法通过可见 UI 执行；不得把后续人工安装 `v0.1.1` 记作 updater 成功。
+- `v0.1.2` 恢复链路 RED：先把 `src/release-config.test.ts` 改为要求 package/Cargo 版本 `0.1.2` 及 `v0.1.1 → v0.1.2` 正式说明；专项 11 项中恢复链路用例因实际版本仍为 `0.1.1` 失败。
+- `v0.1.2` 恢复链路 GREEN：最小提升 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml` 与 `Cargo.lock` 版本，并更新发布说明。首次 GREEN 尝试暴露说明遗漏既有契约“首次带 updater 的版本需要手动安装”和“Windows Sandbox”；补回后专项 11/11 与 `npm run typecheck` 通过。
+- `v0.1.2` 完整本地检查：`npm run check` 退出 0；8 项 Trellis 测试、18 个前端测试文件共 87 项、107 项 Rust 单元测试、2 项路径安全和 1 项 Provider 工作流测试通过。
+- 提交前再次显式移除 `TAURI_SIGNING_PRIVATE_KEY` 与密码并运行 `npm run build`，命令于 185.2 秒后退出 0。`src-tauri/target/release/CodexRelay.exe` 为 16,633,344 字节，SHA-256 `48CAB991840DBBB97A08E035FB5EA2E46B1CEBF6C71909801E8F99BCC32EF89A`；`Codex Relay_0.1.2_x64-setup.exe` 为 3,975,782 字节，SHA-256 `A3E2B8F72B7C78C65BE415A5932DB8287F40FADBCACFC45A59E3614132F6B06C`。本轮普通构建未生成 `v0.1.2` `.sig` 或 `latest.json`，符合无私钥边界，但不能作为签名或 updater 成功证据。
+- 已把公开 `v0.1.1` NSIS 写入安全 staging 的只读 input；重新核对结果为 3,976,351 字节、SHA-256 `17F775BF0DBD61E568F81FD06EB66DA1AFFB3CD56B522128859D43CFE92BD405`，等待用户在 guest 内人工安装。`results/before.json` 已存在，`after.json` 尚未生成。
+- 用户在 Sandbox 内人工覆盖安装 `v0.1.1` 后，通过安全入口确认应用已进入主界面。该观察只证明已知良好基线恢复成功，不计为 updater、Tauri 签名或 `v0.1.1 → v0.1.2` 升级成功；Sandbox 保持开启。
 
 ## 尚未解决的问题
 
-- Windows Sandbox 内 `v0.1.0` 已安装并启动，但旧二进制受 health 初始化竞态影响持续停留在启动页；修复仅存在于待发布的 `v0.1.1` 候选中。Windows 自动化控制通道当前不可用，无法在本轮自动双击 guest 桌面入口。
+- Windows Sandbox 已人工恢复为能进入主界面的 `v0.1.1`；仍需生成、核对并公开 `v0.1.2`，再由用户在 guest 内执行应用点击和可能出现的 UAC。
 - GitHub Secrets 的存在由用户确认；本机未安装 GitHub CLI，尚未通过 CLI 独立枚举，但不会读取或输出 Secret 值。
-- `v0.1.1` 候选主体已推送，但 Run #3 检查失败且 CI 路径别名修复尚未推送；当前没有 `v0.1.1` Draft、签名或公开 Release。完整端到端签名校验、应用内升级、重启和 `after.json` 数据保留证据仍未完成。基线安装未出现 UAC，UAC 成功与取消路径均未验证。
+- `v0.1.1` 已公开发布并完成公开资产复核，但完整端到端签名校验、应用内升级、重启和 `after.json` 数据保留证据仍未完成。基线安装未出现 UAC，UAC 成功与取消路径均未验证。
 
 ## 行为切片与 TDD 顺序
 
@@ -199,6 +214,16 @@ Phase 1 规划已完成并获得用户明确实施授权，任务已进入 `in_p
 5. 分别记录成功升级、断网、错误签名、下载失败和 UAC 取消的真实执行/未执行状态。
 6. 关闭 Sandbox 或恢复 VM 快照；不得在主机真实 `.codex` 或 Codex Relay 数据目录运行。
 
+### 切片 9：不可启动基线的恢复升级链路
+
+**公开行为**：人工安装 `v0.1.1` 后应用能正常进入设置页；更高版本 `v0.1.2` 可由 `v0.1.1` 通过官方 updater 检查、签名校验和 NSIS 完成升级。
+
+1. 先把发布结构测试改为要求包/Cargo 版本 `0.1.2`，以及说明中的 `v0.1.1 → v0.1.2`，运行专项测试确认因现有 `0.1.1` 元数据失败。
+2. 最小更新 package、Cargo 与锁文件版本和发布说明，不改产品逻辑；运行专项测试、typecheck 和完整检查。
+3. 从公开 Release 下载 `v0.1.1` NSIS 到安全 staging，核对 3,976,351 字节和 SHA-256 `17F775BF0DBD61E568F81FD06EB66DA1AFFB3CD56B522128859D43CFE92BD405` 后供 guest 人工安装；该步骤只记作恢复。
+4. 构建、提交、推送并生成 `v0.1.2` Draft；核对资产与签名后经用户确认发布。
+5. 在 Sandbox 的 `v0.1.1` 设置页执行应用内升级，随后运行 `Verify Codex Relay Update.cmd -ExpectedVersion 0.1.2` 对应入口并读取 `after.json`。
+
 ## 验证命令
 
 专项命令按切片实际文件名调整，最低集合为：
@@ -249,7 +274,7 @@ git ls-files
 
 ## 下一步
 
-1. 推送 Windows 8.3 路径身份测试修复 `ad62084`，触发新的 GitHub Actions；确认 Windows runner 完整检查恢复后，核对新 Draft 的正式说明、NSIS、`.sig` 与 `latest.json`，再决定是否公开发布。
-2. 保持当前配置化 Sandbox 开启，通过已恢复的桌面安全启动入口重新打开 `v0.1.0`；若仍停留在启动页，不把偶发启动结果替代代码修复证据。
-3. 在 Sandbox 中从 `v0.1.0` 手动检查并应用 `v0.1.1`，运行桌面核验入口并读取 `after.json`。
+1. `v0.1.1` 人工恢复已完成且能进入主界面；该操作不计为 updater 成功。
+2. 按已确认的提交分组提交并推送 `v0.1.2` 候选，生成 Actions Draft、核对资产，经用户确认后再公开发布。
+3. 在 Sandbox 中从 `v0.1.1` 手动检查并应用 `v0.1.2`；升级重启后运行目标版本为 `0.1.2` 的核验入口，读取 `after.json` 并核对安装目录和三个 fixture 哈希。
 4. 继续核对 UAC、安装目录沿用、重启、签名失败/断网/取消路径；未执行项如实保留，再完成全范围检查与任务收尾。

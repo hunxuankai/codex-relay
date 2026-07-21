@@ -33,6 +33,6 @@
     ".trellis/spec/security/",
     ".trellis/spec/testing/"
   ],
-  "notes": "v0.1.1 候选主体已推送；GitHub Actions Run #3 因 Windows 8.3 短路径与 PowerShell 长路径的测试字符串差异在完整检查阶段失败，未生成 Draft。路径身份断言修复已通过本地完整检查并提交为 ad62084，仍需推送并运行新 Actions，再核对 Draft、公开发布和执行 Sandbox 真实升级。",
+  "notes": "v0.1.1 已公开且资产已复核；v0.1.0 因启动竞态无法触发 updater。用户已在 Sandbox 人工安装 v0.1.1 并确认能进入主界面，该操作只恢复基线、不计应用内升级。下一步提交推送 v0.1.2、核对 Draft 后再经确认发布，以 v0.1.1→v0.1.2 完成真实 updater 与 after.json 验收。",
   "meta": {}
 }
