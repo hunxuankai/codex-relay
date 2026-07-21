@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, shallowRef } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, shallowRef, watch } from 'vue'
 import aboutIcon from './assets/icons/about.svg'
 import backupsIcon from './assets/icons/backups.svg'
 import healthIcon from './assets/icons/health.svg'
@@ -8,9 +8,11 @@ import settingsIcon from './assets/icons/settings.svg'
 import AppNotification from './components/AppNotification.vue'
 import HealthStatus from './components/HealthStatus.vue'
 import SelfCheckErrorBanner from './components/SelfCheckErrorBanner.vue'
+import UpdateAvailableBanner from './components/UpdateAvailableBanner.vue'
 import { useHealth } from './composables/useHealth'
 import { useProviders } from './composables/useProviders'
 import { useSettings } from './composables/useSettings'
+import { useUpdater } from './composables/useUpdater'
 import * as relay from './services/tauri'
 import AboutView from './views/AboutView.vue'
 import BackupsView from './views/BackupsView.vue'
@@ -23,6 +25,12 @@ type AppView = 'providers' | 'health' | 'backups' | 'settings' | 'about'
 const providerState = useProviders()
 const healthState = useHealth()
 const settingsState = useSettings()
+const updater = useUpdater({
+  getProxy: () => {
+    const proxy = settingsState.settings.value?.networkProxy
+    return proxy?.enabled && proxy.url ? proxy.url : undefined
+  },
+})
 const activeView = shallowRef<AppView>('providers')
 const onboardingDismissed = shallowRef(false)
 const startCreatingProvider = shallowRef(false)
@@ -132,8 +140,23 @@ function selectView(view: AppView) {
   if (view !== 'providers') startCreatingProvider.value = false
 }
 
+let startupUpdateCheckStarted = false
+const stopStartupUpdateWatch = watch(
+  settingsState.loading,
+  (loading) => {
+    if (loading || startupUpdateCheckStarted) return
+    startupUpdateCheckStarted = true
+    void updater.checkSilently()
+  },
+  { immediate: true },
+)
+
 let stopNotification: (() => void) | undefined
+let updateCheckTimer: ReturnType<typeof setInterval> | undefined
 onMounted(async () => {
+  updateCheckTimer = setInterval(() => {
+    void updater.checkSilently()
+  }, 60 * 60 * 1000)
   await nextTick()
   const versionPromise = relay.getCurrentVersion().then((version) => {
     appVersion.value = version
@@ -149,7 +172,11 @@ onMounted(async () => {
   }
 })
 
-onUnmounted(() => stopNotification?.())
+onUnmounted(() => {
+  stopStartupUpdateWatch()
+  if (updateCheckTimer !== undefined) clearInterval(updateCheckTimer)
+  stopNotification?.()
+})
 </script>
 
 <template>
@@ -212,6 +239,13 @@ onUnmounted(() => stopNotification?.())
       </nav>
     </header>
 
+    <UpdateAvailableBanner
+      v-if="updater.release.value"
+      class="update-available-banner-slot"
+      :version="updater.release.value.version"
+      @view-update="selectView('settings')"
+    />
+
     <SelfCheckErrorBanner
       v-if="selfCheckErrorCount > 0"
       class="self-check-error-banner-slot"
@@ -243,7 +277,7 @@ onUnmounted(() => stopNotification?.())
         @rerun="healthState.runExtended"
       />
       <BackupsView v-else-if="activeView === 'backups'" @restored="handleBackupRestored" />
-      <SettingsView v-else-if="activeView === 'settings'" />
+      <SettingsView v-else-if="activeView === 'settings'" :updater="updater" />
       <AboutView
         v-else
         :app-version="appVersion"
@@ -275,7 +309,7 @@ onUnmounted(() => stopNotification?.())
 
 .app-shell {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
   min-height: 100vh;
 }
 
@@ -283,21 +317,25 @@ onUnmounted(() => stopNotification?.())
   grid-row: 1;
 }
 
-.self-check-error-banner-slot {
+.update-available-banner-slot {
   grid-row: 2;
 }
 
-.app-notification-slot {
+.self-check-error-banner-slot {
   grid-row: 3;
+}
+
+.app-notification-slot {
+  grid-row: 4;
   margin-inline: 1.25rem;
 }
 
 .app-content {
-  grid-row: 4;
+  grid-row: 5;
 }
 
 .status-bar {
-  grid-row: 5;
+  grid-row: 6;
 }
 
 .app-header,

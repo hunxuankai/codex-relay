@@ -87,7 +87,7 @@ defineEmits<{
           <h3>Windows 系统状态</h3>
           <ul>
             <li>只有用户启用或关闭“开机启动”时，才会修改 Windows 自启动状态。</li>
-            <li>应用内更新只在用户明确检查并安装更新时运行。</li>
+            <li>应用会在启动时及运行期间每小时自动检查一次更新，但只有用户明确确认后才会下载并安装。</li>
           </ul>
         </article>
       </div>
@@ -97,7 +97,7 @@ defineEmits<{
       <h2 id="security-title">数据与安全</h2>
       <ul>
         <li><code>providers.json</code>、<code>auth.json</code> 和配置备份可能包含明文 API Key。</li>
-        <li>本程序不会调用模型接口验证 Base URL 或 API Key，也不会在启动时发起更新检查。</li>
+        <li>本程序不会调用模型接口验证 Base URL 或 API Key；自动更新检查失败时静默处理，也不会自动下载或安装。</li>
         <li>从界面清空密钥只会修改本机文件，不会在 Provider 平台吊销远端凭据。</li>
         <li>卸载程序不会删除 Codex 配置、Codex Relay 应用数据、API Key、日志或备份。</li>
       </ul>

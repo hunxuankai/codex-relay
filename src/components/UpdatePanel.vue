@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import ConfirmDialog from './ConfirmDialog.vue'
-import { useUpdater } from '../composables/useUpdater'
+import type { UpdaterController } from '../composables/useUpdater'
 
-const props = defineProps<{ proxy?: string }>()
-const updater = useUpdater({ getProxy: () => props.proxy })
+defineProps<{ updater: UpdaterController }>()
 </script>
 
 <template>

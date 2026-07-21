@@ -2,9 +2,12 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { computed, shallowRef } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Settings, SettingsState } from '../types/settings'
+import type { UpdaterController } from '../composables/useUpdater'
 import SettingsView from './SettingsView.vue'
 
-vi.mock('../components/UpdatePanel.vue', () => ({ default: { template: '<section data-update-panel />' } }))
+vi.mock('../components/UpdatePanel.vue', () => ({
+  default: { props: ['updater'], template: '<section data-update-panel :data-has-updater="Boolean(updater)" />' },
+}))
 
 const mockUseSettings = vi.hoisted(() => vi.fn())
 vi.mock('../composables/useSettings', () => ({ useSettings: mockUseSettings }))
@@ -61,6 +64,22 @@ function proxyController() {
   }
 }
 
+function updaterController(): UpdaterController {
+  return {
+    status: shallowRef('idle'),
+    currentVersion: shallowRef('0.1.2'),
+    release: shallowRef(null),
+    error: shallowRef(null),
+    progress: shallowRef(null),
+    check: vi.fn(),
+    checkSilently: vi.fn(),
+    reset: vi.fn(),
+    requestInstall: vi.fn(),
+    cancelInstall: vi.fn(),
+    confirmInstall: vi.fn(),
+  } as unknown as UpdaterController
+}
+
 describe('SettingsView', () => {
   beforeEach(() => {
     mockUseSettings.mockReset()
@@ -71,7 +90,7 @@ describe('SettingsView', () => {
   it('shows the actual Windows autostart state and inconsistency', async () => {
     const settings = controller()
     mockUseSettings.mockReturnValue(settings)
-    const wrapper = mount(SettingsView)
+    const wrapper = mount(SettingsView, { props: { updater: updaterController() } })
 
     expect(wrapper.text()).toContain('Windows 实际状态：未启用')
     expect(wrapper.text()).toContain('设置与 Windows 实际状态不一致')
@@ -86,7 +105,7 @@ describe('SettingsView', () => {
       autostart: { configuredEnabled: true, actualEnabled: true, isConsistent: true },
     })
     mockUseSettings.mockReturnValue(settings)
-    const wrapper = mount(SettingsView)
+    const wrapper = mount(SettingsView, { props: { updater: updaterController() } })
 
     await wrapper.get('[name="tray-only-on-autostart"]').setValue(false)
     await wrapper.get('[name="close-to-tray"]').setValue(false)
@@ -106,14 +125,16 @@ describe('SettingsView', () => {
     settings.error.value = { code: 'AUTOSTART_FAILED', message: '无法更新 Windows 开机启动。' }
     mockUseSettings.mockReturnValue(settings)
 
-    expect(mount(SettingsView).text()).toContain('无法更新 Windows 开机启动。')
+    expect(mount(SettingsView, { props: { updater: updaterController() } }).text()).toContain('无法更新 Windows 开机启动。')
   })
 
   it('places updater actions outside the settings form', () => {
     mockUseSettings.mockReturnValue(controller())
-    const wrapper = mount(SettingsView)
+    const updater = updaterController()
+    const wrapper = mount(SettingsView, { props: { updater } })
 
     expect(wrapper.find('[data-update-panel]').exists()).toBe(true)
+    expect(wrapper.get('[data-update-panel]').attributes('data-has-updater')).toBe('true')
     expect(wrapper.get('form').find('[data-update-panel]').exists()).toBe(false)
   })
 
@@ -125,7 +146,7 @@ describe('SettingsView', () => {
     proxy.selectedProxy.value = 'http://127.0.0.1:7897'
     mockUseSettings.mockReturnValue(settings)
     mockUseProxyDiscovery.mockReturnValue(proxy)
-    const wrapper = mount(SettingsView)
+    const wrapper = mount(SettingsView, { props: { updater: updaterController() } })
 
     await wrapper.get('[name="proxy-url"]').setValue('http://127.0.0.1:7890')
     await wrapper.get('[data-action="test-proxy"]').trigger('click')

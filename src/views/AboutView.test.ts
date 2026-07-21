@@ -24,6 +24,8 @@ describe('AboutView', () => {
     expect(wrapper.text()).toContain('settings.json')
     expect(wrapper.text()).toContain('transaction.json')
     expect(wrapper.text()).toContain('明文')
+    expect(wrapper.text()).toContain('启动时及运行期间每小时自动检查一次更新')
+    expect(wrapper.text()).toContain('自动下载或安装')
     expect(wrapper.text()).toContain('卸载')
 
     await wrapper.get('[aria-label="打开当前 Codex 配置目录"]').trigger('click')

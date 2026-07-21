@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { reactive, watch } from 'vue'
 import AppNotification from '../components/AppNotification.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import ProxyDiscoveryDialog from '../components/ProxyDiscoveryDialog.vue'
@@ -7,6 +7,9 @@ import ProxySettingsPanel from '../components/ProxySettingsPanel.vue'
 import UpdatePanel from '../components/UpdatePanel.vue'
 import { useProxyDiscovery } from '../composables/useProxyDiscovery'
 import { useSettings } from '../composables/useSettings'
+import type { UpdaterController } from '../composables/useUpdater'
+
+defineProps<{ updater: UpdaterController }>()
 
 const settingsState = useSettings()
 const proxyDiscovery = useProxyDiscovery()
@@ -15,11 +18,6 @@ const draft = reactive({
   closeToTray: true,
   showWindowOnManualStart: true,
   networkProxy: { enabled: false, url: '' },
-})
-
-const effectiveProxy = computed(() => {
-  const proxy = settingsState.settings.value?.networkProxy
-  return proxy?.enabled && proxy.url ? proxy.url : undefined
 })
 
 watch(
@@ -152,7 +150,7 @@ async function applyDetectedProxy() {
       </div>
     </form>
 
-    <UpdatePanel :proxy="effectiveProxy" />
+    <UpdatePanel :updater="updater" />
 
     <ConfirmDialog
       :open="proxyDiscovery.confirmationOpen.value"

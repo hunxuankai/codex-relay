@@ -56,6 +56,44 @@ describe('useUpdater', () => {
     expect(updater.status.value).toBe('upToDate')
   })
 
+  it('checks silently without exposing failures and still allows a later manual check', async () => {
+    const client: UpdateClient = {
+      getCurrentVersion: vi.fn().mockResolvedValue('0.1.0'),
+      checkForUpdate: vi.fn()
+        .mockRejectedValueOnce(new Error('offline'))
+        .mockRejectedValueOnce(new Error('offline')),
+    }
+    const updater = useUpdater({ client })
+
+    await updater.checkSilently()
+
+    expect(updater.status.value).toBe('idle')
+    expect(updater.error.value).toBeNull()
+
+    await updater.check()
+
+    expect(updater.status.value).toBe('error')
+    expect(updater.error.value?.message).toBe('检查更新失败，请稍后重试。')
+    expect(client.checkForUpdate).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps an available update session when a scheduled silent check runs', async () => {
+    const session = createSession('0.2.0')
+    const client: UpdateClient = {
+      getCurrentVersion: vi.fn().mockResolvedValue('0.1.0'),
+      checkForUpdate: vi.fn().mockResolvedValue(session),
+    }
+    const updater = useUpdater({ client })
+
+    await updater.checkSilently()
+    await updater.checkSilently()
+
+    expect(client.checkForUpdate).toHaveBeenCalledOnce()
+    expect(updater.status.value).toBe('available')
+    expect(updater.release.value?.version).toBe('0.2.0')
+    expect(session.close).not.toHaveBeenCalled()
+  })
+
   it('exposes an available release and ignores duplicate checks while busy', async () => {
     let resolveCheck!: (session: UpdateSession | null) => void
     const client: UpdateClient = {

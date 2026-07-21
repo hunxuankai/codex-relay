@@ -1,15 +1,13 @@
 import { mount } from '@vue/test-utils'
-import { shallowRef } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { shallowRef, type ShallowRef } from 'vue'
+import { describe, expect, it, vi } from 'vitest'
 import type { RelayUiError } from '../types/command'
 import type { UpdateProgress, UpdateReleaseInfo } from '../types/update'
 import type { UpdateStatus } from '../composables/useUpdater'
+import type { UpdaterController } from '../composables/useUpdater'
 import UpdatePanel from './UpdatePanel.vue'
 
-const mockUseUpdater = vi.hoisted(() => vi.fn())
-vi.mock('../composables/useUpdater', () => ({ useUpdater: mockUseUpdater }))
-
-function controller() {
+function controller(): UpdaterController {
   return {
     status: shallowRef<UpdateStatus>('idle'),
     currentVersion: shallowRef<string | null>('0.1.0'),
@@ -17,30 +15,25 @@ function controller() {
     error: shallowRef<RelayUiError | null>(null),
     progress: shallowRef<UpdateProgress | null>(null),
     check: vi.fn(),
+    checkSilently: vi.fn(),
     reset: vi.fn(),
     requestInstall: vi.fn(),
     cancelInstall: vi.fn(),
     confirmInstall: vi.fn(),
-  }
+  } as unknown as UpdaterController
 }
 
 describe('UpdatePanel', () => {
-  beforeEach(() => mockUseUpdater.mockReset())
-
   it('checks only after a click and renders release notes as plain text', async () => {
     const updater = controller()
-    mockUseUpdater.mockReturnValue(updater)
-    const wrapper = mount(UpdatePanel, { props: { proxy: 'http://127.0.0.1:7897' } })
-
-    expect(mockUseUpdater).toHaveBeenCalledWith(expect.objectContaining({ getProxy: expect.any(Function) }))
-    expect(mockUseUpdater.mock.calls[0]?.[0].getProxy()).toBe('http://127.0.0.1:7897')
+    const wrapper = mount(UpdatePanel, { props: { updater } })
 
     expect(updater.check).not.toHaveBeenCalled()
     await wrapper.get('button').trigger('click')
     expect(updater.check).toHaveBeenCalledOnce()
 
-    updater.status.value = 'available'
-    updater.release.value = {
+    ;(updater.status as ShallowRef<UpdateStatus>).value = 'available'
+    ;(updater.release as ShallowRef<UpdateReleaseInfo | null>).value = {
       currentVersion: '0.1.0',
       version: '0.2.0',
       date: '2026-07-21T00:00:00Z',

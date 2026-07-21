@@ -1,15 +1,18 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { computed, nextTick, ref, shallowRef } from 'vue'
+import { computed, nextTick, ref, shallowRef, type ShallowRef } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HealthReport } from './types/health'
 import type { ProviderProfile } from './types/provider'
 import type { Settings, SettingsState } from './types/settings'
+import type { UpdaterController, UseUpdaterOptions } from './composables/useUpdater'
+import type { UpdateProgress, UpdateReleaseInfo } from './types/update'
 import App from './App.vue'
 
 const mocks = vi.hoisted(() => ({
   useProviders: vi.fn(),
   useHealth: vi.fn(),
   useSettings: vi.fn(),
+  useUpdater: vi.fn(),
   exitApplication: vi.fn(),
   getCurrentVersion: vi.fn().mockResolvedValue('0.1.2'),
   onAppNotification: vi.fn().mockResolvedValue(() => {}),
@@ -18,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('./composables/useProviders', () => ({ useProviders: mocks.useProviders }))
 vi.mock('./composables/useHealth', () => ({ useHealth: mocks.useHealth }))
 vi.mock('./composables/useSettings', () => ({ useSettings: mocks.useSettings }))
+vi.mock('./composables/useUpdater', () => ({ useUpdater: mocks.useUpdater }))
 vi.mock('./services/tauri', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./services/tauri')>()),
   exitApplication: mocks.exitApplication,
@@ -104,6 +108,22 @@ function controllers(options: { onboarding?: boolean } = {}) {
   return { providerState, healthState, settingsState }
 }
 
+function updaterController(): UpdaterController {
+  return {
+    status: shallowRef('idle'),
+    currentVersion: shallowRef<string | null>('0.1.2'),
+    release: shallowRef<UpdateReleaseInfo | null>(null),
+    error: shallowRef(null),
+    progress: shallowRef<UpdateProgress | null>(null),
+    check: vi.fn(),
+    checkSilently: vi.fn(),
+    reset: vi.fn(),
+    requestInstall: vi.fn(),
+    cancelInstall: vi.fn(),
+    confirmInstall: vi.fn(),
+  } as unknown as UpdaterController
+}
+
 const stubs = {
   ProvidersView: {
     props: ['startCreating'],
@@ -114,7 +134,7 @@ const stubs = {
     emits: ['restored'],
     template: '<div data-view="backups">Backups<button aria-label="模拟恢复完成" @click="$emit(\'restored\')">restore</button></div>',
   },
-  SettingsView: { template: '<div data-view="settings">Settings</div>' },
+  SettingsView: { props: ['updater'], template: '<div data-view="settings">Settings {{ updater ? "shared" : "missing" }}</div>' },
   AboutView: {
     props: ['appVersion', 'configDirectory'],
     emits: ['openDirectory'],
@@ -123,8 +143,13 @@ const stubs = {
 }
 
 describe('App', () => {
+  let updater: UpdaterController
+
   beforeEach(() => {
+    vi.useRealTimers()
     vi.clearAllMocks()
+    updater = updaterController()
+    mocks.useUpdater.mockReturnValue(updater)
     mocks.getCurrentVersion.mockResolvedValue('0.1.2')
     mocks.onAppNotification.mockResolvedValue(() => {})
   })
@@ -135,6 +160,10 @@ describe('App', () => {
     mocks.useHealth.mockReturnValue(state.healthState)
     mocks.useSettings.mockReturnValue(state.settingsState)
     const wrapper = mount(App, { global: { stubs } })
+    await flushPromises()
+
+    expect(updater.checkSilently).toHaveBeenCalledOnce()
+    expect(wrapper.find('[aria-label="软件更新提示"]').exists()).toBe(false)
 
     expect(wrapper.text()).toContain('首次设置')
     expect(wrapper.text()).toContain('打开 Codex 配置目录')
@@ -193,12 +222,76 @@ describe('App', () => {
 
     await wrapper.get('[aria-label="打开设置"]').trigger('click')
     expect(wrapper.find('[data-view="settings"]').exists()).toBe(true)
+    expect(wrapper.get('[data-view="settings"]').text()).toContain('shared')
 
     await wrapper.get('[aria-label="打开关于"]').trigger('click')
     expect(wrapper.get('[data-view="about"]').text()).toContain('0.1.2')
     expect(wrapper.get('[data-view="about"]').text()).toContain('C:\\safe-test\\codex')
     await wrapper.get('[aria-label="模拟打开配置目录"]').trigger('click')
     expect(state.settingsState.openDirectory).toHaveBeenCalledOnce()
+  })
+
+  it('checks on startup and hourly with the latest proxy, then opens the shared update in settings', async () => {
+    vi.useFakeTimers()
+    const state = controllers()
+    state.settingsState.state.value = {
+      ...state.settingsState.state.value,
+      settings: {
+        ...state.settingsState.state.value.settings,
+        networkProxy: { enabled: true, url: 'http://127.0.0.1:7890' },
+      },
+    }
+    state.healthState.report.value = {
+      ...healthReport(),
+      level: 'error',
+      checks: [{
+        id: 'config-file',
+        label: 'config.toml',
+        level: 'error',
+        message: 'config.toml 无法解析。',
+      }],
+    }
+    ;(updater.release as ShallowRef<UpdateReleaseInfo | null>).value = {
+      currentVersion: '0.1.2',
+      version: '0.2.0',
+      date: null,
+      notes: null,
+    }
+    mocks.useProviders.mockReturnValue(state.providerState)
+    mocks.useHealth.mockReturnValue(state.healthState)
+    mocks.useSettings.mockReturnValue(state.settingsState)
+    const wrapper = mount(App, { global: { stubs } })
+    await flushPromises()
+
+    expect(updater.checkSilently).toHaveBeenCalledOnce()
+    const options = mocks.useUpdater.mock.calls[0]?.[0] as UseUpdaterOptions
+    expect(options.getProxy?.()).toBe('http://127.0.0.1:7890')
+
+    state.settingsState.state.value = {
+      ...state.settingsState.state.value,
+      settings: {
+        ...state.settingsState.state.value.settings,
+        networkProxy: { enabled: true, url: 'http://127.0.0.1:7897' },
+      },
+    }
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+
+    expect(updater.checkSilently).toHaveBeenCalledTimes(2)
+    expect(options.getProxy?.()).toBe('http://127.0.0.1:7897')
+
+    const updateBanner = wrapper.get('[aria-label="软件更新提示"]')
+    const healthBanner = wrapper.get('[aria-label="系统自检错误提示"]')
+    expect(updateBanner.text()).toContain('0.2.0')
+    expect(updateBanner.element.nextElementSibling).toBe(healthBanner.element)
+
+    await updateBanner.get('[aria-label="前往软件更新设置"]').trigger('click')
+
+    expect(wrapper.get('[aria-label="打开设置"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-view="settings"]').text()).toContain('shared')
+
+    wrapper.unmount()
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+    expect(updater.checkSilently).toHaveBeenCalledTimes(2)
   })
 
   it('shows self-check errors below the header and opens their details', async () => {

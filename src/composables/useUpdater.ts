@@ -58,10 +58,11 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
     await target.close().catch(() => undefined)
   }
 
-  async function check() {
+  async function runCheck(silent: boolean) {
     if (status.value === 'checking' || status.value === 'downloading' || status.value === 'launching') {
       return
     }
+    if (silent && (status.value === 'available' || status.value === 'confirming')) return
     const sequence = ++requestSequence
     const previousSession = session.value
     session.value = null
@@ -86,9 +87,22 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
       status.value = nextSession ? 'available' : 'upToDate'
     } catch (caught) {
       if (sequence === requestSequence) {
-        setError(caught)
+        if (silent) {
+          error.value = null
+          status.value = 'idle'
+        } else {
+          setError(caught)
+        }
       }
     }
+  }
+
+  function check() {
+    return runCheck(false)
+  }
+
+  function checkSilently() {
+    return runCheck(true)
   }
 
   function reset() {
@@ -141,9 +155,12 @@ export function useUpdater(options: UseUpdaterOptions = {}) {
     error: readonly(error),
     progress: readonly(progress),
     check,
+    checkSilently,
     reset,
     requestInstall,
     cancelInstall,
     confirmInstall,
   }
 }
+
+export type UpdaterController = ReturnType<typeof useUpdater>

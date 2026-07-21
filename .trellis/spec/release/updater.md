@@ -2,7 +2,7 @@
 
 ## 1. 范围与触发条件
 
-修改手动检查更新、`tauri-plugin-updater`、GitHub Releases、`latest.json`、updater artifacts、更新公钥或 GitHub Actions 签名环境变量时，必须遵循本规范。该集成跨越 Vue、Tauri 配置、Rust 插件、NSIS 和 GitHub Actions，因此不能只靠单层测试验收。
+修改自动或手动检查更新、`tauri-plugin-updater`、GitHub Releases、`latest.json`、updater artifacts、更新公钥或 GitHub Actions 签名环境变量时，必须遵循本规范。该集成跨越 Vue、Tauri 配置、Rust 插件、NSIS 和 GitHub Actions，因此不能只靠单层测试验收。
 
 ## 2. 签名与入口
 
@@ -11,7 +11,7 @@
 - 普通构建：`npm run build`，不得引用发布覆盖或要求更新私钥。
 - 发布构建：`npm run build:release` 或 GitHub Actions 中等价的 `tauri build --config src-tauri/tauri.updater.conf.json`。
 - GitHub Secrets：`TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`；`GITHUB_TOKEN` 由 Actions 自动提供。
-- 客户端入口：用户在设置页显式调用 `UpdateClient.checkForUpdate()`；启动、挂载和后台定时器不得调用远端检查。
+- 客户端入口：应用级唯一 updater 控制器在设置首次加载结束后静默检查一次，并在进程运行期间每小时静默检查；设置页可显式调用同一控制器手动检查。自动检查失败不提示，手动检查失败显示安全错误。
 - 代理签名：`checkForUpdate(proxy?: string)`；代理测试调用 `check({ proxy, timeout: 5000 })`，成功后必须关闭临时 Update 资源。
 - Sandbox 主机入口：`scripts/windows-sandbox/prepare-update-test.ps1 -InstallerPath <path> -ExpectedSha256 <64-hex> -ExpectedTargetVersion <semver> [-StageRoot <temp-path>] [-PrepareOnly]`。
 - Sandbox guest 入口：`guest-bootstrap.ps1` 生成升级前报告并启动基线安装器，`guest-start-app.ps1` 使用安全覆盖重新启动应用，`guest-verify.ps1 -ExpectedVersion <semver>` 生成升级后报告。
@@ -67,7 +67,7 @@
 - 良好：用户点击检查，发现更高版本，下载资产通过内置公钥校验，NSIS 沿用已登记安装目录完成升级。
 - 良好：用户启用 `http://127.0.0.1:7897` 后检查更新，清单与安装包下载使用同一代理；重新保存代理只影响下一次检查会话。
 - 良好：用户确认本机检测后并行测试固定六个地址，选择成功结果后立即保存并启用。
-- 基线：没有用户点击时不访问网络；普通本地构建在没有任何签名环境变量时生成常规 NSIS。
+- 基线：启动时和进程运行期间每小时可访问固定更新源；没有用户确认时不下载或安装。普通本地构建在没有任何签名环境变量时生成常规 NSIS。
 - 基线：代理关闭或 URL 为空时不传 `proxy`，保持 updater 默认网络行为。
 - 基线：GitHub API asset URL 的普通 GET 返回 JSON 元数据，但 updater 通过 `Accept: application/octet-stream` 获取实际安装器，下载哈希与 Release 资产一致。
 - 错误：在基础配置开启 `createUpdaterArtifacts`，导致每次本地构建都要求私钥。
@@ -85,7 +85,7 @@
 
 - `src/release-config.test.ts` 断言固定 HTTPS endpoint、公开公钥、`updater:default` 权限、基础/发布配置分离、Secret 名称、手动触发、Draft 和 NSIS 优先。
 - 工作流结构测试断言 `releaseBody` 使用多行最终说明，并明确拒绝占位文案，防止占位内容进入 `latest.json.notes`。
-- composable 测试断言创建时不检查远端、显式检查、单飞、旧响应防护、确认、进度和安全失败状态。
+- composable 测试断言创建时不自行检查远端、应用级静默检查、显式检查、单飞、已有可用 session 保留、旧响应防护、确认、进度和安全失败状态；应用测试使用假定时器断言启动检查、每小时检查和卸载清理。
 - 代理测试断言 `proxy`、`timeout: 5000`、临时资源关闭和错误脱敏；本机发现断言固定六地址、确认前零请求、并发聚合、多个结果保留和全部失败。
 - Settings Rust 测试断言旧 JSON 默认关闭、URL 规范化、非法值不落盘，以及事务备份、写后验证和回滚；所有文件测试使用临时目录。
 - 服务测试只 mock 官方 updater 与本地版本 API，断言 DTO 规范化、资源释放和错误脱敏。
