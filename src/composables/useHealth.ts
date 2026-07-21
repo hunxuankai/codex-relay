@@ -69,6 +69,9 @@ export function useHealth(options: UseHealthOptions = {}) {
         setError(caught)
       }
     } finally {
+      if (requestSequence === stateSequence) {
+        loading.value = false
+      }
       busy.value = false
     }
   }

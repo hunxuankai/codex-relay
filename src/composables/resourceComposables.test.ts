@@ -67,6 +67,28 @@ describe('resource composables', () => {
     expect(health.busy.value).toBe(false)
   })
 
+  it('finishes startup loading when extended health supersedes a pending critical check', async () => {
+    let resolveInitial!: (report: HealthReport) => void
+    const client: HealthClient = {
+      runCriticalSelfCheck: vi.fn().mockReturnValue(new Promise<HealthReport>((resolve) => {
+        resolveInitial = resolve
+      })),
+      runExtendedSelfCheck: vi.fn().mockResolvedValue(warningHealth),
+      onSelfCheckCompleted: vi.fn().mockResolvedValue(() => {}),
+    }
+    const health = useHealth({ client, subscribe: false })
+
+    await health.runExtended()
+
+    expect(health.report.value).toEqual(warningHealth)
+    expect(health.loading.value).toBe(false)
+    expect(health.busy.value).toBe(false)
+
+    resolveInitial(normalHealth)
+    await flushPromises()
+    expect(health.report.value).toEqual(warningHealth)
+  })
+
   it('restores a backup, refreshes the list, and keeps backend success text', async () => {
     const restored: ProviderMutationOutcome = { providers: [], message: '配置备份已恢复。' }
     const listBackups = vi
