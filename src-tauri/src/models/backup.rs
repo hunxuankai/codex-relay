@@ -1,5 +1,37 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum BackupFileName {
+    #[serde(rename = "config.toml")]
+    Config,
+    #[serde(rename = "auth.json")]
+    Auth,
+    #[serde(rename = "providers.json")]
+    Providers,
+    #[serde(rename = "metadata.json")]
+    Metadata,
+}
+
+impl BackupFileName {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Config => "config.toml",
+            Self::Auth => "auth.json",
+            Self::Providers => "providers.json",
+            Self::Metadata => "metadata.json",
+        }
+    }
+
+    pub fn existed_in(self, metadata: &BackupMetadata) -> bool {
+        match self {
+            Self::Config => metadata.config_existed,
+            Self::Auth => metadata.auth_existed,
+            Self::Providers => metadata.providers_existed,
+            Self::Metadata => true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupMetadata {
@@ -13,11 +45,29 @@ pub struct BackupMetadata {
     pub app_version: String,
 }
 
+impl BackupMetadata {
+    pub fn files(&self) -> Vec<BackupFileName> {
+        let mut files = Vec::with_capacity(4);
+        if self.config_existed {
+            files.push(BackupFileName::Config);
+        }
+        if self.auth_existed {
+            files.push(BackupFileName::Auth);
+        }
+        if self.providers_existed {
+            files.push(BackupFileName::Providers);
+        }
+        files.push(BackupFileName::Metadata);
+        files
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupSummary {
     pub directory_name: String,
     pub metadata: BackupMetadata,
+    pub files: Vec<BackupFileName>,
 }
 
 #[cfg(test)]
@@ -40,5 +90,12 @@ mod tests {
         let json = serde_json::to_string(&metadata).unwrap();
         assert!(!json.contains("apiKey"));
         assert!(!json.contains("OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn backup_file_name_rejects_unknown_values() {
+        let error = serde_json::from_str::<BackupFileName>("\"outside.txt\"").unwrap_err();
+
+        assert!(error.to_string().contains("unknown variant"));
     }
 }

@@ -25,6 +25,7 @@ const warningHealth: HealthReport = {
 
 const backup: BackupSummary = {
   directoryName: 'backup-1',
+  files: ['config.toml', 'auth.json', 'providers.json', 'metadata.json'],
   metadata: {
     transactionId: 'tx-1',
     createdAt: '2026-07-20T00:00:00+08:00',
@@ -98,6 +99,7 @@ describe('resource composables', () => {
       .mockResolvedValueOnce([backup])
     const client: BackupClient = {
       listBackups,
+      openBackupFile: vi.fn(),
       restoreBackup: vi.fn().mockResolvedValue(restored),
     }
     const backups = useBackups({ client })
@@ -108,6 +110,44 @@ describe('resource composables', () => {
     expect(client.restoreBackup).toHaveBeenCalledWith('backup-1')
     expect(listBackups).toHaveBeenCalledTimes(2)
     expect(backups.successMessage.value).toBe('配置备份已恢复。')
+  })
+
+  it('opens a selected backup file through the typed client', async () => {
+    const openBackupFile = vi.fn().mockResolvedValue(undefined)
+    const client = {
+      listBackups: vi.fn().mockResolvedValue([backup]),
+      openBackupFile,
+      restoreBackup: vi.fn(),
+    } satisfies BackupClient
+    const backups = useBackups({ client })
+    await flushPromises()
+
+    await backups.openFile('backup-1', 'auth.json')
+
+    expect(openBackupFile).toHaveBeenCalledWith('backup-1', 'auth.json')
+    expect(backups.busy.value).toBe(false)
+    expect(backups.error.value).toBeNull()
+  })
+
+  it('surfaces a safe error when a backup file cannot be opened', async () => {
+    const client = {
+      listBackups: vi.fn().mockResolvedValue([backup]),
+      openBackupFile: vi.fn().mockRejectedValue(
+        new RelayCommandError('OPEN_BACKUP_FILE_FAILED', '无法使用记事本打开备份文件。'),
+      ),
+      restoreBackup: vi.fn(),
+    } satisfies BackupClient
+    const backups = useBackups({ client })
+    await flushPromises()
+
+    await backups.openFile('backup-1', 'auth.json')
+
+    expect(backups.error.value).toEqual({
+      code: 'OPEN_BACKUP_FILE_FAILED',
+      message: '无法使用记事本打开备份文件。',
+    })
+    expect(backups.successMessage.value).toBeNull()
+    expect(backups.busy.value).toBe(false)
   })
 
   it('saves settings and replaces state with the verified backend state', async () => {
@@ -155,6 +195,7 @@ describe('resource composables', () => {
         .fn()
         .mockResolvedValueOnce([backup])
         .mockRejectedValueOnce(new RelayCommandError('BACKUP_REFRESH_FAILED', '刷新备份失败。')),
+      openBackupFile: vi.fn(),
       restoreBackup: vi
         .fn()
         .mockResolvedValue({ providers: [], message: '配置备份已恢复。' }),

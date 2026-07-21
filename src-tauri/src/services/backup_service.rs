@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use crate::models::backup::{BackupMetadata, BackupSummary};
+use crate::models::backup::{BackupFileName, BackupMetadata, BackupSummary};
 use crate::models::transaction::{ConfigTransaction, TransactionOperation};
 use chrono::Utc;
 use std::fmt;
@@ -101,9 +101,11 @@ impl BackupService {
             return Err(error);
         }
 
+        let files = available_backup_files(&directory, &metadata);
         Ok(BackupSummary {
             directory_name,
             metadata,
+            files,
         })
     }
 
@@ -125,9 +127,11 @@ impl BackupService {
             .map(|entry| {
                 let directory_name = entry.file_name().to_string_lossy().into_owned();
                 let metadata = read_metadata(&entry.path().join(METADATA_FILE_NAME))?;
+                let files = available_backup_files(&entry.path(), &metadata);
                 Ok(BackupSummary {
                     directory_name,
                     metadata,
+                    files,
                 })
             })
             .collect::<Result<Vec<_>, AppError>>()?;
@@ -149,6 +153,48 @@ impl BackupService {
                 metadata.providers_existed,
             )?,
         })
+    }
+
+    pub fn resolve_backup_file(
+        &self,
+        directory_name: &str,
+        file_name: BackupFileName,
+    ) -> Result<PathBuf, AppError> {
+        validate_backup_name(directory_name)?;
+        let root = fs::canonicalize(&self.root).map_err(|error| {
+            AppError::new(
+                "BACKUP_DIRECTORY_NOT_FOUND",
+                "备份目录不存在或无法访问。",
+                error.to_string(),
+            )
+        })?;
+        let directory = fs::canonicalize(self.root.join(directory_name)).map_err(|error| {
+            AppError::new(
+                "BACKUP_NOT_FOUND",
+                "所选备份不存在或无法访问。",
+                error.to_string(),
+            )
+        })?;
+        if directory.parent() != Some(root.as_path()) {
+            return Err(invalid_backup_path(
+                "backup directory resolved outside backup root",
+            ));
+        }
+
+        let metadata_path = resolve_file_inside_directory(&directory, METADATA_FILE_NAME)?;
+        let metadata = read_metadata(&metadata_path)?;
+        if !file_name.existed_in(&metadata) {
+            return Err(AppError::new(
+                "BACKUP_FILE_NOT_FOUND",
+                "该备份中不存在所选文件。",
+                "backup metadata records selected file as absent",
+            ));
+        }
+
+        if file_name == BackupFileName::Metadata {
+            return Ok(metadata_path);
+        }
+        resolve_file_inside_directory(&directory, file_name.as_str())
     }
 
     pub fn cleanup_old_backups(
@@ -198,6 +244,14 @@ fn write_optional_snapshot(
         write_new_file(&directory.join(file_name), bytes)?;
     }
     Ok(())
+}
+
+fn available_backup_files(directory: &Path, metadata: &BackupMetadata) -> Vec<BackupFileName> {
+    metadata
+        .files()
+        .into_iter()
+        .filter(|file_name| directory.join(file_name.as_str()).is_file())
+        .collect()
 }
 
 fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
@@ -258,6 +312,26 @@ fn validate_backup_name(name: &str) -> Result<(), AppError> {
     }
 }
 
+fn invalid_backup_path(detail: &str) -> AppError {
+    AppError::new("INVALID_BACKUP_PATH", "备份文件路径无效。", detail)
+}
+
+fn resolve_file_inside_directory(directory: &Path, file_name: &str) -> Result<PathBuf, AppError> {
+    let path = fs::canonicalize(directory.join(file_name)).map_err(|error| {
+        AppError::new(
+            "BACKUP_FILE_MISSING",
+            "备份文件不存在或无法访问。",
+            error.to_string(),
+        )
+    })?;
+    if path.parent() != Some(directory) || !path.is_file() {
+        return Err(invalid_backup_path(
+            "backup file resolved outside selected backup directory or is not a file",
+        ));
+    }
+    Ok(path)
+}
+
 fn safe_component(value: &str) -> String {
     value
         .chars()
@@ -274,6 +348,7 @@ fn safe_component(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::backup::BackupFileName;
     use crate::models::transaction::{ConfigTransaction, TransactionOperation};
     use std::fs;
 
@@ -309,6 +384,14 @@ mod tests {
         assert!(!metadata.contains("OPENAI_API_KEY"));
         assert!(metadata.ends_with('\n'));
         assert!(!summary.metadata.providers_existed);
+        assert_eq!(
+            summary.files,
+            vec![
+                BackupFileName::Config,
+                BackupFileName::Auth,
+                BackupFileName::Metadata,
+            ]
+        );
     }
 
     #[test]
@@ -340,6 +423,128 @@ mod tests {
         assert_eq!(loaded.config.as_deref(), Some(b"second\n".as_slice()));
         assert!(loaded.auth.is_none());
         assert!(loaded.providers.is_some());
+    }
+
+    #[test]
+    fn resolves_an_existing_backup_file_inside_the_selected_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = BackupService::new(directory.path().join("backups"), "0.1.0");
+        let snapshot = FileSnapshot {
+            config: Some(b"model_provider = \"provider-a\"\n".to_vec()),
+            auth: Some(b"{\"OPENAI_API_KEY\":\"test-key-a-not-real\"}\n".to_vec()),
+            providers: None,
+        };
+        let summary = service
+            .create_backup(
+                &transaction("tx-open", "2026-07-20T22:00:00+08:00"),
+                &snapshot,
+            )
+            .unwrap();
+
+        let resolved = service
+            .resolve_backup_file(&summary.directory_name, BackupFileName::Auth)
+            .unwrap();
+
+        assert_eq!(
+            resolved,
+            fs::canonicalize(
+                service
+                    .root()
+                    .join(summary.directory_name)
+                    .join("auth.json")
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn rejects_a_snapshot_file_recorded_as_absent() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = BackupService::new(directory.path().join("backups"), "0.1.0");
+        let summary = service
+            .create_backup(
+                &transaction("tx-absent", "2026-07-20T22:00:00+08:00"),
+                &FileSnapshot {
+                    config: Some(b"model_provider = \"provider-a\"\n".to_vec()),
+                    auth: None,
+                    providers: None,
+                },
+            )
+            .unwrap();
+
+        let error = service
+            .resolve_backup_file(&summary.directory_name, BackupFileName::Auth)
+            .unwrap_err();
+
+        assert_eq!(error.code(), "BACKUP_FILE_NOT_FOUND");
+    }
+
+    #[test]
+    fn rejects_a_snapshot_file_missing_from_disk() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = BackupService::new(directory.path().join("backups"), "0.1.0");
+        let summary = service
+            .create_backup(
+                &transaction("tx-missing", "2026-07-20T22:00:00+08:00"),
+                &FileSnapshot {
+                    config: None,
+                    auth: Some(b"{\"OPENAI_API_KEY\":\"test-key-a-not-real\"}\n".to_vec()),
+                    providers: None,
+                },
+            )
+            .unwrap();
+        fs::remove_file(
+            service
+                .root()
+                .join(&summary.directory_name)
+                .join("auth.json"),
+        )
+        .unwrap();
+
+        let error = service
+            .resolve_backup_file(&summary.directory_name, BackupFileName::Auth)
+            .unwrap_err();
+
+        assert_eq!(error.code(), "BACKUP_FILE_MISSING");
+    }
+
+    #[test]
+    fn listed_files_exclude_a_snapshot_missing_from_disk() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = BackupService::new(directory.path().join("backups"), "0.1.0");
+        let summary = service
+            .create_backup(
+                &transaction("tx-list-missing", "2026-07-20T22:00:00+08:00"),
+                &FileSnapshot {
+                    config: None,
+                    auth: Some(b"{\"OPENAI_API_KEY\":\"test-key-a-not-real\"}\n".to_vec()),
+                    providers: None,
+                },
+            )
+            .unwrap();
+        fs::remove_file(
+            service
+                .root()
+                .join(&summary.directory_name)
+                .join("auth.json"),
+        )
+        .unwrap();
+
+        let listed = service.list_backups().unwrap();
+
+        assert_eq!(listed[0].files, vec![BackupFileName::Metadata]);
+    }
+
+    #[test]
+    fn resolving_a_backup_file_rejects_path_traversal() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = BackupService::new(directory.path().join("backups"), "0.1.0");
+
+        let error = service
+            .resolve_backup_file("..\\outside", BackupFileName::Metadata)
+            .unwrap_err();
+
+        assert_eq!(error.code(), "INVALID_BACKUP_NAME");
     }
 
     #[test]

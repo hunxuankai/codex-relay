@@ -1,3 +1,9 @@
+export type BackupFileName =
+  | 'config.toml'
+  | 'auth.json'
+  | 'providers.json'
+  | 'metadata.json'
+
 export interface BackupMetadata {
   transactionId: string
   createdAt: string
@@ -12,4 +18,5 @@ export interface BackupMetadata {
 export interface BackupSummary {
   directoryName: string
   metadata: BackupMetadata
+  files: readonly BackupFileName[]
 }

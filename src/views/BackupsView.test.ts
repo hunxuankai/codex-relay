@@ -9,6 +9,7 @@ vi.mock('../composables/useBackups', () => ({ useBackups: mockUseBackups }))
 
 const backup: BackupSummary = {
   directoryName: '20260720-transaction-1',
+  files: ['config.toml', 'auth.json', 'providers.json', 'metadata.json'],
   metadata: {
     transactionId: 'transaction-1',
     createdAt: '2026-07-20T00:00:00+08:00',
@@ -21,7 +22,7 @@ const backup: BackupSummary = {
   },
 }
 
-function controller(options: { fail?: boolean } = {}) {
+function controller(options: { fail?: boolean; openFail?: boolean } = {}) {
   const error = shallowRef<{ code: string; message: string } | null>(null)
   const successMessage = shallowRef<string | null>(null)
   const restore = vi.fn().mockImplementation(async () => {
@@ -31,6 +32,14 @@ function controller(options: { fail?: boolean } = {}) {
     }
     successMessage.value = '配置备份已恢复。'
   })
+  const openFile = vi.fn().mockImplementation(async () => {
+    if (options.openFail) {
+      error.value = {
+        code: 'OPEN_BACKUP_FILE_FAILED',
+        message: '无法使用记事本打开备份文件。',
+      }
+    }
+  })
   return {
     backups: ref([backup]),
     loading: shallowRef(false),
@@ -38,6 +47,7 @@ function controller(options: { fail?: boolean } = {}) {
     error,
     successMessage,
     refresh: vi.fn(),
+    openFile,
     restore,
   }
 }
@@ -54,6 +64,63 @@ describe('BackupsView', () => {
     expect(wrapper.text()).toContain('switch_provider')
     expect(wrapper.text()).not.toContain('apiKey')
     expect(wrapper.text()).not.toContain('test-key-not-real')
+  })
+
+  it('expands the backup file list and opens a selected file', async () => {
+    const state = controller()
+    mockUseBackups.mockReturnValue(state)
+    const wrapper = mount(BackupsView)
+
+    await wrapper.get('[aria-label="查看备份文件 transaction-1"]').trigger('click')
+
+    expect(wrapper.text()).toContain('config.toml')
+    expect(wrapper.text()).toContain('auth.json')
+    expect(wrapper.text()).toContain('providers.json')
+    expect(wrapper.text()).toContain('metadata.json')
+
+    await wrapper.get('[aria-label="打开备份文件 auth.json"]').trigger('click')
+    expect(state.openFile).toHaveBeenCalledWith('20260720-transaction-1', 'auth.json')
+  })
+
+  it('keeps only one backup expanded and shows only files in each summary', async () => {
+    const second: BackupSummary = {
+      directoryName: '20260720-transaction-2',
+      files: ['metadata.json'],
+      metadata: {
+        ...backup.metadata,
+        transactionId: 'transaction-2',
+        configExisted: false,
+        authExisted: false,
+        providersExisted: false,
+      },
+    }
+    const state = controller()
+    state.backups.value = [backup, second]
+    mockUseBackups.mockReturnValue(state)
+    const wrapper = mount(BackupsView)
+
+    await wrapper.get('[aria-label="查看备份文件 transaction-1"]').trigger('click')
+    expect(wrapper.find('#backup-files-20260720-transaction-1').exists()).toBe(true)
+
+    await wrapper.get('[aria-label="查看备份文件 transaction-2"]').trigger('click')
+    expect(wrapper.find('#backup-files-20260720-transaction-1').exists()).toBe(false)
+    expect(wrapper.get('#backup-files-20260720-transaction-2').text()).toBe('metadata.json')
+
+    await wrapper.get('[aria-label="收起备份文件 transaction-2"]').trigger('click')
+    expect(wrapper.find('#backup-files-20260720-transaction-2').exists()).toBe(false)
+  })
+
+  it('shows an open failure and leaves restore available', async () => {
+    const state = controller({ openFail: true })
+    mockUseBackups.mockReturnValue(state)
+    const wrapper = mount(BackupsView)
+
+    await wrapper.get('[aria-label="查看备份文件 transaction-1"]').trigger('click')
+    await wrapper.get('[aria-label="打开备份文件 config.toml"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('无法使用记事本打开备份文件。')
+    expect(wrapper.get('[aria-label="恢复备份 transaction-1"]').attributes('disabled')).toBeUndefined()
   })
 
   it('requires confirmation, restores, and requests Provider and health refreshes', async () => {

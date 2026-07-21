@@ -22,6 +22,7 @@ mod tests {
     use crate::app_state::AppState;
     use crate::error::AppError;
     use crate::infrastructure::path_service::AppPaths;
+    use crate::models::backup::BackupFileName;
     use crate::models::health::HealthLevel;
     use crate::models::provider::CreateProviderInput;
     use crate::models::settings::Settings;
@@ -197,5 +198,22 @@ mod tests {
 
         assert!(backups.success);
         assert_eq!(backups.data.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn backup_open_command_rejects_traversal_without_exposing_a_path() {
+        let (_directory, state) = create_state();
+
+        let result = backup_commands::open_backup_file_inner(
+            &state,
+            "..\\outside".into(),
+            BackupFileName::Metadata,
+        );
+        let json = serde_json::to_string(&result).unwrap();
+
+        assert!(!result.success);
+        assert_eq!(result.error.unwrap().code, "INVALID_BACKUP_NAME");
+        assert!(!json.contains("outside"));
+        assert!(!json.contains("CodexRelay"));
     }
 }

@@ -77,7 +77,10 @@ defineEmits<{
           <ul>
             <li><code>providers.json</code>：各 Provider 的 API Key。</li>
             <li><code>settings.json</code>：窗口、托盘、首次引导、自启动和应用网络代理设置。</li>
-            <li><code>backups/</code>：配置事务快照、元数据和设置备份。</li>
+            <li>
+              <code>backups/</code>：配置事务快照、元数据和设置备份；备份页可展开事务文件列表，
+              并使用 Windows 记事本打开所选文件。
+            </li>
             <li><code>logs/</code>：经过密钥脱敏的软件日志。</li>
             <li><code>transaction.json</code>：配置事务进行期间使用的临时标记。</li>
           </ul>

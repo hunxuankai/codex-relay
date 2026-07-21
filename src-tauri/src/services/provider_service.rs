@@ -1,7 +1,7 @@
 use crate::error::AppError;
 use crate::infrastructure::file_fingerprint::FileSetFingerprint;
 use crate::infrastructure::path_service::AppPaths;
-use crate::models::backup::BackupSummary;
+use crate::models::backup::{BackupFileName, BackupSummary};
 use crate::models::provider::{
     ApiKeyChange, CreateProviderInput, ProviderListState, ProviderMutationOutcome, ProviderProfile,
     SwitchOutcome, UpdateProviderInput, WireApi,
@@ -20,6 +20,7 @@ use crate::services::transaction_service::{
 };
 use std::fs;
 use std::io::ErrorKind;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 const CONSISTENT_READ_ATTEMPTS: usize = 3;
@@ -57,6 +58,15 @@ impl ProviderService {
 
     pub fn list_backups(&self) -> Result<Vec<BackupSummary>, AppError> {
         self.backup_service.list_backups()
+    }
+
+    pub fn resolve_backup_file(
+        &self,
+        directory_name: &str,
+        file_name: BackupFileName,
+    ) -> Result<PathBuf, AppError> {
+        self.backup_service
+            .resolve_backup_file(directory_name, file_name)
     }
 
     pub fn paths(&self) -> &AppPaths {

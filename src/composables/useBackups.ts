@@ -1,11 +1,12 @@
 import { readonly, ref, shallowRef } from 'vue'
 import * as relay from '../services/tauri'
-import type { BackupSummary } from '../types/backup'
+import type { BackupFileName, BackupSummary } from '../types/backup'
 import type { RelayUiError } from '../types/command'
 import type { ProviderMutationOutcome } from '../types/provider'
 
 export interface BackupClient {
   listBackups(): Promise<BackupSummary[]>
+  openBackupFile(directoryName: string, fileName: BackupFileName): Promise<void>
   restoreBackup(directoryName: string): Promise<ProviderMutationOutcome>
 }
 
@@ -15,6 +16,7 @@ export interface UseBackupsOptions {
 
 const defaultClient: BackupClient = {
   listBackups: relay.listBackups,
+  openBackupFile: relay.openBackupFile,
   restoreBackup: relay.restoreBackup,
 }
 
@@ -74,6 +76,20 @@ export function useBackups(options: UseBackupsOptions = {}) {
     }
   }
 
+  async function openFile(directoryName: string, fileName: BackupFileName) {
+    if (busy.value) return
+    busy.value = true
+    error.value = null
+    successMessage.value = null
+    try {
+      await client.openBackupFile(directoryName, fileName)
+    } catch (caught) {
+      setError(caught)
+    } finally {
+      busy.value = false
+    }
+  }
+
   void refresh()
 
   return {
@@ -83,6 +99,7 @@ export function useBackups(options: UseBackupsOptions = {}) {
     error: readonly(error),
     successMessage: readonly(successMessage),
     refresh,
+    openFile,
     restore,
   }
 }

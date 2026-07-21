@@ -1,7 +1,7 @@
 use crate::app_state::AppState;
 use crate::commands::command_result;
 use crate::error::CommandResult;
-use crate::models::backup::BackupSummary;
+use crate::models::backup::{BackupFileName, BackupSummary};
 use crate::models::provider::ProviderMutationOutcome;
 
 pub(crate) fn list_backups_inner(state: &AppState) -> CommandResult<Vec<BackupSummary>> {
@@ -11,6 +11,23 @@ pub(crate) fn list_backups_inner(state: &AppState) -> CommandResult<Vec<BackupSu
 #[tauri::command]
 pub fn list_backups(state: tauri::State<'_, AppState>) -> CommandResult<Vec<BackupSummary>> {
     list_backups_inner(&state)
+}
+
+pub(crate) fn open_backup_file_inner(
+    state: &AppState,
+    directory_name: String,
+    file_name: BackupFileName,
+) -> CommandResult<()> {
+    command_result(state.open_backup_file(&directory_name, file_name))
+}
+
+#[tauri::command]
+pub fn open_backup_file(
+    state: tauri::State<'_, AppState>,
+    directory_name: String,
+    file_name: BackupFileName,
+) -> CommandResult<()> {
+    open_backup_file_inner(&state, directory_name, file_name)
 }
 
 pub(crate) async fn restore_backup_inner(

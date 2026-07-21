@@ -81,6 +81,7 @@ pub fn run() {
             commands::settings_commands::open_codex_directory,
             commands::settings_commands::exit_application,
             commands::backup_commands::list_backups,
+            commands::backup_commands::open_backup_file,
             commands::backup_commands::restore_backup,
             commands::self_check_commands::run_critical_self_check,
             commands::self_check_commands::run_extended_self_check,

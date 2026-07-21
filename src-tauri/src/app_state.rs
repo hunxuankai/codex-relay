@@ -1,6 +1,7 @@
 use crate::error::AppError;
 use crate::infrastructure::path_service::AppPaths;
 use crate::infrastructure::safe_log::LogGuard;
+use crate::models::backup::BackupFileName;
 use crate::models::settings::{Settings, SettingsState};
 use crate::services::autostart_service::AutostartService;
 use crate::services::file_watch_service::{ApplicationWriteGuard, FileWatchService};
@@ -8,6 +9,7 @@ use crate::services::provider_service::ProviderService;
 use crate::services::self_check_service::{CodexCommandProbe, SelfCheckService};
 use crate::services::settings_service::SettingsService;
 use crate::tray::TrayRuntime;
+use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
@@ -148,5 +150,45 @@ impl AppState {
                     error.to_string(),
                 )
             })
+    }
+
+    pub fn open_backup_file(
+        &self,
+        directory_name: &str,
+        file_name: BackupFileName,
+    ) -> Result<(), AppError> {
+        let path = self
+            .provider_service
+            .resolve_backup_file(directory_name, file_name)?;
+        notepad_command(&path).spawn().map(|_| ()).map_err(|error| {
+            AppError::new(
+                "OPEN_BACKUP_FILE_FAILED",
+                "无法使用记事本打开备份文件。",
+                error.to_string(),
+            )
+        })
+    }
+}
+
+fn notepad_command(path: &Path) -> Command {
+    let mut command = Command::new("notepad.exe");
+    command.arg(path);
+    command
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notepad_command_uses_the_file_as_its_only_argument() {
+        let path = Path::new(r"C:\safe backup\auth.json");
+        let command = notepad_command(path);
+
+        assert_eq!(command.get_program(), "notepad.exe");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![path.as_os_str()]
+        );
     }
 }

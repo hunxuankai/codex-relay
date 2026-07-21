@@ -23,6 +23,7 @@ describe('AboutView', () => {
     expect(wrapper.text()).toContain('providers.json')
     expect(wrapper.text()).toContain('settings.json')
     expect(wrapper.text()).toContain('transaction.json')
+    expect(wrapper.text()).toContain('Windows 记事本打开所选文件')
     expect(wrapper.text()).toContain('明文')
     expect(wrapper.text()).toContain('启动时及运行期间每小时自动检查一次更新')
     expect(wrapper.text()).toContain('自动下载或安装')

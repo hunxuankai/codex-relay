@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
 import AppNotification from '../components/AppNotification.vue'
+import BackupCard from '../components/BackupCard.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { useBackups } from '../composables/useBackups'
 
@@ -10,6 +11,7 @@ const emit = defineEmits<{
 
 const backupState = useBackups()
 const restoreDirectoryName = shallowRef<string | null>(null)
+const expandedDirectoryName = shallowRef<string | null>(null)
 const selectedBackup = computed(
   () =>
     backupState.backups.value.find(
@@ -23,6 +25,12 @@ async function confirmRestore() {
   restoreDirectoryName.value = null
   await backupState.restore(directoryName)
   if (!backupState.error.value && backupState.successMessage.value) emit('restored')
+}
+
+function toggleFiles(directoryName: string) {
+  expandedDirectoryName.value = expandedDirectoryName.value === directoryName
+    ? null
+    : directoryName
 }
 </script>
 
@@ -44,27 +52,16 @@ async function confirmRestore() {
     <p v-if="backupState.loading.value">正在加载备份…</p>
     <p v-else-if="backupState.backups.value.length === 0">暂无可恢复的事务备份。</p>
     <ul v-else class="backup-list">
-      <li
+      <BackupCard
         v-for="backup in backupState.backups.value"
         :key="backup.directoryName"
-        class="backup-card"
-      >
-        <div class="backup-details">
-          <strong>{{ backup.metadata.transactionId }}</strong>
-          <span>{{ backup.metadata.createdAt }}</span>
-          <span>操作：{{ backup.metadata.operation }}</span>
-          <span>Provider：{{ backup.metadata.providerId ?? '无' }}</span>
-          <span>应用版本：{{ backup.metadata.appVersion }}</span>
-        </div>
-        <button
-          type="button"
-          :aria-label="`恢复备份 ${backup.metadata.transactionId}`"
-          :disabled="backupState.busy.value"
-          @click="restoreDirectoryName = backup.directoryName"
-        >
-          恢复
-        </button>
-      </li>
+        :backup="backup"
+        :expanded="expandedDirectoryName === backup.directoryName"
+        :busy="backupState.busy.value"
+        @toggle="toggleFiles"
+        @open-file="backupState.openFile"
+        @restore="restoreDirectoryName = $event"
+      />
     </ul>
 
     <ConfirmDialog
@@ -89,8 +86,7 @@ async function confirmRestore() {
   padding: 1.25rem;
 }
 
-.view-header,
-.backup-card {
+.view-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -115,20 +111,8 @@ async function confirmRestore() {
   list-style: none;
 }
 
-.backup-card {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: 0.8rem;
-  padding: 1rem;
-}
-
-.backup-details {
-  display: grid;
-  gap: 0.25rem;
-}
-
 @media (max-width: 620px) {
-  .backup-card {
+  .view-header {
     align-items: stretch;
     flex-direction: column;
   }

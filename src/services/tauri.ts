@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type Event, type UnlistenFn } from '@tauri-apps/api/event'
 import { getVersion } from '@tauri-apps/api/app'
 import { check, type DownloadEvent } from '@tauri-apps/plugin-updater'
-import type { BackupSummary } from '../types/backup'
+import type { BackupFileName, BackupSummary } from '../types/backup'
 import type { CommandResult } from '../types/command'
 import type { HealthReport } from '../types/health'
 import type {
@@ -106,6 +106,10 @@ export function exitApplication(): Promise<void> {
 
 export function listBackups(): Promise<BackupSummary[]> {
   return call('list_backups')
+}
+
+export function openBackupFile(directoryName: string, fileName: BackupFileName): Promise<void> {
+  return call('open_backup_file', { directoryName, fileName })
 }
 
 export function restoreBackup(directoryName: string): Promise<ProviderMutationOutcome> {

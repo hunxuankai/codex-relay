@@ -26,6 +26,7 @@ import {
   listBackups,
   listProviders,
   onProvidersChanged,
+  openBackupFile,
   openCodexDirectory,
   restoreBackup,
   runCriticalSelfCheck,
@@ -122,6 +123,7 @@ describe('Tauri service boundary', () => {
       .mockResolvedValueOnce(success(settingsState))
       .mockResolvedValueOnce(success(undefined))
       .mockResolvedValueOnce(success(backups))
+      .mockResolvedValueOnce(success(undefined))
       .mockResolvedValueOnce(success(mutation))
       .mockResolvedValueOnce(success(health))
       .mockResolvedValueOnce(success(health))
@@ -160,6 +162,7 @@ describe('Tauri service boundary', () => {
     await setAutostart(true)
     await openCodexDirectory()
     await listBackups()
+    await openBackupFile('backup-1', 'auth.json')
     await restoreBackup('backup-1')
     await runCriticalSelfCheck()
     await runExtendedSelfCheck()
@@ -178,6 +181,7 @@ describe('Tauri service boundary', () => {
       ['set_autostart', { enabled: true }],
       ['open_codex_directory'],
       ['list_backups'],
+      ['open_backup_file', { directoryName: 'backup-1', fileName: 'auth.json' }],
       ['restore_backup', { directoryName: 'backup-1' }],
       ['run_critical_self_check'],
       ['run_extended_self_check'],
