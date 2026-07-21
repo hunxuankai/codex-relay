@@ -78,6 +78,7 @@
 - 在 Sandbox/VM 中用首个手动安装版本和更高版本验证 UAC、安装目录、重启与数据保留；未执行场景必须明确记录为未验证。
 - `src/sandbox-update.test.ts` 必须执行主机准备、guest bootstrap/start/verify dry-run，并断言映射权限、成对覆盖、报告脱敏、受保护路径唯一性、reparse point 拒绝和真实路径源文件拒绝。
 - start/verify dry-run 必须把安装目录包装为一对外层双引号，并断言输出及 `after.json.installLocation` 等于无引号的规范绝对路径；防止测试只覆盖手写的理想注册表值。
+- GitHub Windows runner 的 Node 临时目录可能使用 `C:\Users\RUNNER~1` 等 8.3 短路径，而 PowerShell `$PSScriptRoot` 会展开为长路径。测试必须先断言输出为绝对路径，再用 `realpathSync.native` 比较现有路径身份；不得把短路径和长路径的原始字符串差异判为越界或数据漂移。
 - 真实 Sandbox 启动后，必须观察 `before.json` 已写回再安装基线；升级后必须运行桌面核验入口并读取 `after.json`，不能用进程存在或窗口出现代替数据保留证据。
 
 ## 7. 错误与正确做法

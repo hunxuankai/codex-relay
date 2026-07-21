@@ -4,12 +4,13 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
 
@@ -17,6 +18,13 @@ const prepareScript = resolve(
   'scripts/windows-sandbox/prepare-update-test.ps1',
 )
 const temporaryRoots: string[] = []
+
+function expectSameExistingPath(actual: string, expected: string) {
+  expect(isAbsolute(actual)).toBe(true)
+  expect(realpathSync.native(actual).toLowerCase()).toBe(
+    realpathSync.native(expected).toLowerCase(),
+  )
+}
 
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) {
@@ -71,7 +79,7 @@ describe('Windows Sandbox update test preparation', () => {
       installer: { fileName: string; sha256: string }
       expectedTargetVersion: string
     }
-    expect(output.stageRoot).toBe(resolve(stageRoot))
+    expectSameExistingPath(output.stageRoot, stageRoot)
     expect(output.installer).toEqual({
       fileName: basename(installerPath),
       sha256: expectedSha256,
@@ -180,8 +188,8 @@ describe('Windows Sandbox update test preparation', () => {
       reportPath: string
       verifyLauncherPath: string
     }
-    expect(output.codexHome).toBe(join(resolve(stageRoot), 'dev-data', 'codex'))
-    expect(output.appData).toBe(join(resolve(stageRoot), 'dev-data', 'app-data'))
+    expectSameExistingPath(output.codexHome, join(stageRoot, 'dev-data', 'codex'))
+    expectSameExistingPath(output.appData, join(stageRoot, 'dev-data', 'app-data'))
     const verifyLauncher = readFileSync(output.verifyLauncherPath, 'utf8')
     expect(verifyLauncher).toContain('guest-verify.ps1')
     expect(verifyLauncher).toContain('-ExpectedVersion "0.1.1"')
@@ -331,8 +339,8 @@ describe('Windows Sandbox update test preparation', () => {
       phase: 'after',
       expectedVersion: '0.1.1',
       installedVersion: '0.1.1',
-      installLocation: resolve(installLocation),
     })
+    expectSameExistingPath(report.installLocation, installLocation)
     expect(report.protectedFiles.every((file) => file.matchesBefore)).toBe(true)
     expect(reportText).not.toContain('test-key-')
   }, 20_000)
@@ -440,12 +448,10 @@ describe('Windows Sandbox update test preparation', () => {
       executablePath: string
       launched: boolean
     }
-    expect(output).toEqual({
-      codexHome: join(resolve(stageRoot), 'dev-data', 'codex'),
-      appData: join(resolve(stageRoot), 'dev-data', 'app-data'),
-      executablePath: resolve(executablePath),
-      launched: false,
-    })
+    expect(output.launched).toBe(false)
+    expectSameExistingPath(output.codexHome, join(stageRoot, 'dev-data', 'codex'))
+    expectSameExistingPath(output.appData, join(stageRoot, 'dev-data', 'app-data'))
+    expectSameExistingPath(output.executablePath, executablePath)
   }, 20_000)
 
   it('rejects a before report that duplicates a protected file entry', () => {
