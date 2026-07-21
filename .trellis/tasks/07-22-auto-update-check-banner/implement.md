@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-- 阶段：实施与定向验证完成；全量质量门禁被工作区内不属于本任务的既有改动阻塞。
+- 阶段：实施、规范同步和全量质量门禁完成；待 Phase 3.4 补充提交并归档。
 - 实施模式：Codex inline；不创建重复的子代理、TDD 或分支收尾流程。
 
 ## TDD 规划门禁
@@ -120,10 +120,8 @@ python .\.trellis\scripts\task.py validate .trellis\tasks\07-22-auto-update-chec
 ## 验证记录
 
 - TDD RED：`useUpdater` 测试先因 `checkSilently is not a function` 失败；更新横幅测试先因组件不存在失败；共享面板和应用编排测试先按预期失败。
-- 定向测试：6 个测试文件、20 个测试全部通过。
-- 完整前端测试：`npm test`，23 个测试文件、110 个测试全部通过。
+- 核心定向复验：`npx vitest run src/composables/useUpdater.test.ts src/components/UpdateAvailableBanner.test.ts src/components/UpdatePanel.test.ts src/views/SettingsView.test.ts src/App.test.ts`，5 个测试文件、19 个测试全部通过。
+- 全量质量门禁：`npm run check` 通过；Trellis 8 个测试、前端 23 个测试文件/110 个测试、Rust 118 个单元测试及 2 个路径安全测试、1 个 Provider 工作流测试均通过，类型检查、Rust fmt 和 Clippy 同步通过。
 - 前端生产构建：`npm run build:frontend` 成功，85 个模块完成转换。
-- Trellis 测试：`npm run test:trellis`，8 个测试通过。
-- Diff/任务材料：`git diff --check` 与 `task.py validate .trellis/tasks/07-22-auto-update-check-banner` 通过。
-- 全量类型检查/`npm run check`：失败于 `src/views/BackupsView.vue:58` 的既有只读数组类型不兼容；该文件属于未完成的 `backup-file-list-open` 改动，本任务未修改。
-- Rust 检查：在 `cargo fmt --check` 阶段失败，要求格式化同一旧任务修改的 `src-tauri/src/app_state.rs` 和 `src-tauri/src/services/backup_service.rs`；为避免混入不相关工作，本任务未改写这些文件，后续 clippy/test 未执行。
+- 规范同步复核：补齐 `.trellis/spec/project/architecture.md` 的启动/小时自动检查、应用级唯一 updater、动态代理和共享 session 契约；全局搜索不再命中“更新网络请求只能由设置页显式触发”等旧描述。
+- 历史阻塞：首次全量检查曾被尚未完成的 `backup-file-list-open` 工作区改动阻塞；该任务提交归档后，本轮重新执行完整门禁并通过，未用重试覆盖或删除原失败事实。
