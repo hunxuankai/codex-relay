@@ -98,16 +98,17 @@ describe('Windows release configuration', () => {
     )
   })
 
-  it('builds the 0.1.1 end-to-end updater verification release', () => {
+  it('builds the 0.1.2 recovery-chain updater verification release', () => {
     const cargoPackageVersion = cargoToml.match(
       /\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
     )?.[1]
 
-    expect(packageJson.version).toBe('0.1.1')
+    expect(packageJson.version).toBe('0.1.2')
     expect(packageLock.version).toBe(packageJson.version)
     expect(packageLock.packages[''].version).toBe(packageJson.version)
     expect(cargoPackageVersion).toBe(packageJson.version)
-    expect(releaseWorkflow).toContain('从 `v0.1.0` 应用内升级到 `v0.1.1`')
+    expect(releaseWorkflow).toContain('从 `v0.1.1` 应用内升级到 `v0.1.2`')
+    expect(releaseWorkflow).toContain('已手动安装 `v0.1.1`')
     expect(releaseWorkflow).toContain('Windows Sandbox')
   })
 
