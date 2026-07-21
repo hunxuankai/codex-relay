@@ -24,6 +24,7 @@
 - `tauri-action` 的 `releaseBody` 会同时写入 Release 描述和 `latest.json.notes`，因此工作流中必须直接提供可公开的最终说明，不能使用“稍后补充”占位文案。事后只编辑 Draft 描述不会重写已上传清单。
 - `tauri-action` 生成的 `latest.json` 可以把平台 URL 写成 GitHub REST asset API（`https://api.github.com/repos/<owner>/<repo>/releases/assets/<id>`）。当前锁定的 `tauri-plugin-updater 2.10.1` 在下载包时会在缺少 `Accept` 的情况下自动加入 `Accept: application/octet-stream`，因此不应仅凭浏览器或普通 GET 返回资产元数据就判定清单失效。
 - 第一个带 updater 的版本需要手动安装；只有更高 SemVer 版本才能验证应用内升级。
+- 如果已安装基线因启动缺陷无法到达手动更新入口，必须先核对公开安装器的版本、大小和 SHA-256，再在隔离环境中人工覆盖安装包含修复的已知良好版本。随后发布严格更高的 SemVer，并只把“已知良好版本通过 updater 升级到更高版本”的链路计为应用内升级证据；人工恢复安装本身不得计为 updater 成功。
 - Tauri 更新签名与 Windows Authenticode 相互独立。没有 Authenticode 证据时，安装器仍按“未知发布者”报告。
 - Sandbox staging 必须位于系统临时目录的真子路径，目标及其现有父路径不得包含 junction/symlink 等 `ReparsePoint`，且既有 staging 必须为空；安装器源路径不得位于真实 `.codex` 或 `%LOCALAPPDATA%\CodexRelay`。输入映射为只读，结果映射为可写，剪贴板和打印机重定向关闭。
 - 真实 guest 只接受 `WDAGUtilityAccount` 且脚本根为 `C:\CodexRelaySandbox`；dry-run 只接受系统临时目录。`CODEX_RELAY_CODEX_HOME` 与 `CODEX_RELAY_APP_DATA_DIR` 必须成对指向 guest 的 `dev-data` 子目录。
@@ -43,6 +44,7 @@
 | 平台 URL 是 GitHub REST asset API | 用当前锁定 updater 的二进制请求语义验证；请求必须携带 `Accept: application/octet-stream`，下载字节数和 SHA-256 必须与 Release 资产一致 |
 | UAC 取消或安装器失败 | 不得报告升级成功；允许用户重新打开旧版本 |
 | 私钥丢失或公钥更换 | 通过手动安装更高版本恢复，不原地替换已发布资产 |
+| 已安装基线永久停在启动页，无法到达更新入口 | 停止等待并记录旧版本缺陷；人工安装已核对的已知良好版本恢复入口，再发布更高 SemVer 验证 updater；恢复安装不计成功证据 |
 | staging 不在临时根、非空或经过 reparse point | 分别返回 `SANDBOX_STAGE_ROOT_MUST_BE_TEMPORARY`、`SANDBOX_STAGE_ROOT_NOT_EMPTY` 或 `SANDBOX_STAGE_ROOT_REPARSE_POINT`，不读取安装器、不创建目录 |
 | guest 身份/根目录不符或两项覆盖越界 | 返回 `SANDBOX_GUEST_REQUIRED` 或 `SANDBOX_BEFORE_REPORT_PATH_UNSAFE`，不启动安装器或应用 |
 | NSIS 安装目录带一对外层双引号 | 去除外层引号后得到规范绝对路径，start 与 verify 使用同一结果 |
@@ -61,6 +63,8 @@
 - 错误：只用浏览器打开或普通 GET 检查 GitHub API asset URL，看到 JSON 后直接替换已发布资产或判断 Release 损坏。
 - 错误：把私钥内容、公钥对应密码或 GitHub Token 写入仓库、任务材料、日志或命令行参数。
 - 错误：发布后替换同一版本的二进制或 `.sig`；修复必须使用新的更高 SemVer。
+- 良好：旧基线无法进入设置页时，先人工安装已核对的已知良好版本，再发布更高 SemVer，并从已知良好版本执行真实应用内升级。
+- 错误：人工覆盖安装后看到新版本能启动，就把它记录为 updater、签名或 NSIS 应用内升级成功。
 - 良好：先核对公开安装器 SHA-256，再由主机准备器生成临时 `.wsb`；guest 只写测试数据到显式覆盖，并把无密钥哈希报告写回专用结果映射。
 - 基线：HKLM 中的 `InstallLocation` 为带外层双引号的绝对路径；安全启动和升级后核验剥离同一对引号后定位已安装 EXE。
 - 错误：把带引号注册表字符串直接传给 `Path.GetFullPath`；它可能被视为含非法字符或相对路径，导致已安装 EXE 被误报为不存在。
@@ -76,6 +80,7 @@
 - 在真实 GitHub Actions 中核对 Draft Release 的 NSIS updater 资产、`.sig` 与 `latest.json`。
 - 若 `latest.json` 使用 GitHub REST asset API URL，确认锁定的 updater 版本会补充 `Accept: application/octet-stream`，并用等价公开请求下载实际资产、核对大小和 SHA-256；依赖升级后必须重新验证这一行为。
 - 在 Sandbox/VM 中用首个手动安装版本和更高版本验证 UAC、安装目录、重启与数据保留；未执行场景必须明确记录为未验证。
+- 若旧基线无法到达更新入口，记录故障版本与根因提交边界；人工恢复后先验证已知良好版本能进入设置页，再以严格更高版本执行 updater。断言必须分别标记“人工恢复”和“应用内升级”，不得合并证据。
 - `src/sandbox-update.test.ts` 必须执行主机准备、guest bootstrap/start/verify dry-run，并断言映射权限、成对覆盖、报告脱敏、受保护路径唯一性、reparse point 拒绝和真实路径源文件拒绝。
 - start/verify dry-run 必须把安装目录包装为一对外层双引号，并断言输出及 `after.json.installLocation` 等于无引号的规范绝对路径；防止测试只覆盖手写的理想注册表值。
 - GitHub Windows runner 的 Node 临时目录可能使用 `C:\Users\RUNNER~1` 等 8.3 短路径，而 PowerShell `$PSScriptRoot` 会展开为长路径。测试必须先断言输出为绝对路径，再用 `realpathSync.native` 比较现有路径身份；不得把短路径和长路径的原始字符串差异判为越界或数据漂移。
@@ -142,6 +147,19 @@ Start-Process .\downloaded-installer.exe
   -InstallerPath $installer `
   -ExpectedSha256 $publishedSha256 `
   -ExpectedTargetVersion '0.1.1'
+```
+
+错误：不可启动的旧基线经人工覆盖安装后，直接宣称应用内更新已验证。
+
+```text
+v0.1.0（不可到达更新入口） --人工安装--> v0.1.1 = updater 成功
+```
+
+正确：把人工恢复与真实 updater 链路分开记录，并为验证发布严格更高版本。
+
+```text
+v0.1.0（不可到达更新入口） --人工恢复--> v0.1.1（已知良好基线）
+v0.1.1 --应用内 updater--> v0.1.2 = updater 验收链路
 ```
 
 错误：直接规范化可能带引号的 NSIS 注册表值。
