@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const styles = readFileSync('src/style.css', 'utf8')
+const app = readFileSync('src/App.vue', 'utf8')
 const confirmDialog = readFileSync('src/components/ConfirmDialog.vue', 'utf8')
 const selfCheckErrorBanner = readFileSync('src/components/SelfCheckErrorBanner.vue', 'utf8')
 
@@ -33,5 +34,9 @@ describe('global Windows visual system', () => {
     expect(selfCheckErrorBanner).toContain('color: var(--danger)')
     expect(selfCheckErrorBanner).toContain('background: var(--danger-soft)')
     expect(selfCheckErrorBanner).toMatch(/@media \(max-width:\s*\d+px\)/)
+  })
+
+  it('keeps the top notification borders inset from the window edges', () => {
+    expect(app).toMatch(/\.app-notification-slot\s*{[\s\S]*?margin-inline:\s*1\.25rem/)
   })
 })

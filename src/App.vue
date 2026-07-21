@@ -271,6 +271,7 @@ onUnmounted(() => stopNotification?.())
 
 .app-notification-slot {
   grid-row: 3;
+  margin-inline: 1.25rem;
 }
 
 .app-content {
