@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 const CONFIG_FILE_NAME: &str = "config.toml";
 const AUTH_FILE_NAME: &str = "auth.json";
 const PROVIDERS_FILE_NAME: &str = "providers.json";
+const PREFERENCES_FILE_NAME: &str = "provider-preferences.json";
 const METADATA_FILE_NAME: &str = "metadata.json";
 
 #[derive(Clone, Default, Eq, PartialEq)]
@@ -17,6 +18,7 @@ pub struct FileSnapshot {
     pub config: Option<Vec<u8>>,
     pub auth: Option<Vec<u8>>,
     pub providers: Option<Vec<u8>>,
+    pub preferences: Option<Vec<u8>>,
 }
 
 impl fmt::Debug for FileSnapshot {
@@ -26,6 +28,7 @@ impl fmt::Debug for FileSnapshot {
             .field("config_existed", &self.config.is_some())
             .field("auth_existed", &self.auth.is_some())
             .field("providers_existed", &self.providers.is_some())
+            .field("preferences_existed", &self.preferences.is_some())
             .finish()
     }
 }
@@ -76,6 +79,7 @@ impl BackupService {
             config_existed: snapshot.config.is_some(),
             auth_existed: snapshot.auth.is_some(),
             providers_existed: snapshot.providers.is_some(),
+            preferences_existed: snapshot.preferences.is_some(),
             app_version: self.app_version.clone(),
         };
 
@@ -86,6 +90,11 @@ impl BackupService {
                 &directory,
                 PROVIDERS_FILE_NAME,
                 snapshot.providers.as_deref(),
+            )?;
+            write_optional_snapshot(
+                &directory,
+                PREFERENCES_FILE_NAME,
+                snapshot.preferences.as_deref(),
             )?;
             let mut metadata_json =
                 serde_json::to_string_pretty(&metadata).map_err(AppError::from)?;
@@ -151,6 +160,10 @@ impl BackupService {
             providers: read_snapshot_file(
                 &directory.join(PROVIDERS_FILE_NAME),
                 metadata.providers_existed,
+            )?,
+            preferences: read_snapshot_file(
+                &directory.join(PREFERENCES_FILE_NAME),
+                metadata.preferences_existed,
             )?,
         })
     }
@@ -232,6 +245,7 @@ fn operation_name(operation: TransactionOperation) -> &'static str {
         TransactionOperation::SwitchProvider => "switch_provider",
         TransactionOperation::RestoreBackup => "restore_backup",
         TransactionOperation::SyncCurrentProvider => "sync_current_provider",
+        TransactionOperation::UpdateProviderPreference => "update_provider_preference",
     }
 }
 
@@ -369,6 +383,7 @@ mod tests {
             config: Some(b"model_provider = \"provider-a\"\n".to_vec()),
             auth: Some(b"{\n  \"OPENAI_API_KEY\": \"test-key-a-not-real\"\n}\n".to_vec()),
             providers: None,
+            preferences: None,
         };
 
         let summary = service
@@ -402,11 +417,13 @@ mod tests {
             config: Some(b"first\n".to_vec()),
             auth: None,
             providers: None,
+            preferences: None,
         };
         let second = FileSnapshot {
             config: Some(b"second\n".to_vec()),
             auth: None,
             providers: Some(b"{\"version\":1,\"providers\":{}}\n".to_vec()),
+            preferences: None,
         };
         service
             .create_backup(&transaction("tx-old", "2026-07-19T22:00:00+08:00"), &first)
@@ -433,6 +450,7 @@ mod tests {
             config: Some(b"model_provider = \"provider-a\"\n".to_vec()),
             auth: Some(b"{\"OPENAI_API_KEY\":\"test-key-a-not-real\"}\n".to_vec()),
             providers: None,
+            preferences: None,
         };
         let summary = service
             .create_backup(
@@ -468,6 +486,7 @@ mod tests {
                     config: Some(b"model_provider = \"provider-a\"\n".to_vec()),
                     auth: None,
                     providers: None,
+                    preferences: None,
                 },
             )
             .unwrap();
@@ -490,6 +509,7 @@ mod tests {
                     config: None,
                     auth: Some(b"{\"OPENAI_API_KEY\":\"test-key-a-not-real\"}\n".to_vec()),
                     providers: None,
+                    preferences: None,
                 },
             )
             .unwrap();
@@ -519,6 +539,7 @@ mod tests {
                     config: None,
                     auth: Some(b"{\"OPENAI_API_KEY\":\"test-key-a-not-real\"}\n".to_vec()),
                     providers: None,
+                    preferences: None,
                 },
             )
             .unwrap();

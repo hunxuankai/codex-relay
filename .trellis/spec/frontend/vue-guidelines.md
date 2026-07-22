@@ -21,6 +21,8 @@ const emit = defineEmits<{ select: [providerId: string] }>()
 
 不得新增 Options API、隐式 `any`、未类型化 emit 或组件内散落的字符串 command 名。
 
+使用 Element Plus 组件前，必须查阅当前安装版本的官方文档和类型声明，核对组件名、Props、Events、Slots 及 `v-model` 类型；不得凭记忆猜测 API。当前项目的模型编辑使用 `ElSelect` 多选，详情偏好使用两行 `ElSegmented`。
+
 ## IPC 契约
 
 只有 `src/services/tauri.ts` 可以导入 `@tauri-apps/api/core` 的 `invoke`。它负责：

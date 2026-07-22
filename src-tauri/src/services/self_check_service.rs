@@ -189,6 +189,7 @@ impl SelfCheckService {
                 &self.paths.config_file,
                 &self.paths.auth_file,
                 &self.paths.providers_file,
+                &self.paths.provider_preferences_file,
             )
         {
             *self
@@ -444,6 +445,7 @@ impl SelfCheckService {
             &self.paths.config_file,
             &self.paths.auth_file,
             &self.paths.providers_file,
+            &self.paths.provider_preferences_file,
         ) {
             Ok(current) if current == baseline => checks.push(normal_check(
                 "external-modification",

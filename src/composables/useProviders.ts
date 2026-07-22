@@ -7,14 +7,19 @@ import type {
   ProviderListState,
   ProviderMutationOutcome,
   ProviderProfile,
+  ModelCatalogItem,
   SwitchOutcome,
   UpdateProviderInput,
+  UpdateProviderPreferenceInput,
 } from '../types/provider'
 
 export interface ProviderClient {
   listProviders(): Promise<ProviderListState>
   createProvider(input: CreateProviderInput): Promise<ProviderMutationOutcome>
   updateProvider(input: UpdateProviderInput): Promise<ProviderMutationOutcome>
+  updateProviderPreference?: (
+    input: UpdateProviderPreferenceInput,
+  ) => Promise<ProviderMutationOutcome>
   deleteProvider(
     providerId: string,
     expectedFiles: FileSetFingerprint,
@@ -33,6 +38,7 @@ const defaultClient: ProviderClient = {
   listProviders: relay.listProviders,
   createProvider: relay.createProvider,
   updateProvider: relay.updateProvider,
+  updateProviderPreference: relay.updateProviderPreference,
   deleteProvider: relay.deleteProvider,
   switchProvider: relay.switchProvider,
   importCurrentAuthKey: relay.importCurrentAuthKey,
@@ -44,6 +50,7 @@ export function useProviders(options: UseProvidersOptions = {}) {
   const shouldSubscribe = options.subscribe ?? true
   const providerList = ref<ProviderProfile[]>([])
   const fingerprints = shallowRef<FileSetFingerprint | null>(null)
+  const modelCatalog = ref<ModelCatalogItem[]>([])
   const currentAuthImportAvailable = shallowRef(false)
   const selectedProviderId = shallowRef<string | null>(null)
   const loading = shallowRef(true)
@@ -63,6 +70,7 @@ export function useProviders(options: UseProvidersOptions = {}) {
   function applyState(state: ProviderListState) {
     providerList.value = state.providers
     fingerprints.value = state.fingerprints
+    modelCatalog.value = state.modelCatalog ?? []
     currentAuthImportAvailable.value = state.currentAuthImportAvailable
     const selectionStillExists = state.providers.some(
       (provider) => provider.id === selectedProviderId.value,
@@ -132,6 +140,19 @@ export function useProviders(options: UseProvidersOptions = {}) {
     return mutate(() => client.updateProvider(input))
   }
 
+  async function updatePreference(providerId: string, model: string, reasoningEffort: string) {
+    if (!fingerprints.value) await refresh()
+    const expectedFiles = fingerprints.value
+    if (!expectedFiles) return undefined
+    if (!client.updateProviderPreference) return undefined
+    return mutate(() => client.updateProviderPreference!({
+        providerId,
+        model,
+        reasoningEffort,
+        expectedFiles,
+      }))
+  }
+
   async function remove(providerId: string) {
     if (!fingerprints.value) {
       await refresh()
@@ -182,6 +203,7 @@ export function useProviders(options: UseProvidersOptions = {}) {
   return {
     providers: readonly(providerList),
     fingerprints: readonly(fingerprints),
+    modelCatalog: readonly(modelCatalog),
     currentAuthImportAvailable: readonly(currentAuthImportAvailable),
     selectedProviderId: readonly(selectedProviderId),
     selectedProvider,
@@ -193,6 +215,7 @@ export function useProviders(options: UseProvidersOptions = {}) {
     refresh,
     create,
     update,
+    updatePreference,
     remove,
     switchTo,
     importCurrentKey,

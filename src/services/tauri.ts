@@ -12,6 +12,7 @@ import type {
   ProviderMutationOutcome,
   SwitchOutcome,
   UpdateProviderInput,
+  UpdateProviderPreferenceInput,
 } from '../types/provider'
 import type { Settings, SettingsState } from '../types/settings'
 import type { UpdateProgress, UpdateSession } from '../types/update'
@@ -67,6 +68,12 @@ export function createProvider(input: CreateProviderInput): Promise<ProviderMuta
 
 export function updateProvider(input: UpdateProviderInput): Promise<ProviderMutationOutcome> {
   return call('update_provider', { input })
+}
+
+export function updateProviderPreference(
+  input: UpdateProviderPreferenceInput,
+): Promise<ProviderMutationOutcome> {
+  return call('update_provider_preference', { input })
 }
 
 export function deleteProvider(

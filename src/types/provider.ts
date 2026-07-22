@@ -9,6 +9,7 @@ export interface FileSetFingerprint {
   config: FileFingerprint
   auth: FileFingerprint
   providers: FileFingerprint
+  preferences?: FileFingerprint
 }
 
 export type WireApi = 'responses'
@@ -18,7 +19,12 @@ export interface ProviderProfile {
   name: string
   baseUrl: string
   wireApi: WireApi
-  model: string | null
+  models?: readonly string[]
+  /** @deprecated legacy DTO compatibility; not persisted by Relay. */
+  model?: string | null
+  selectedModel?: string | null
+  reasoningEfforts?: Record<string, string>
+  preferenceConfigured?: boolean
   apiKeyConfigured: boolean
   isActive: boolean
   isValid: boolean
@@ -35,7 +41,9 @@ export interface CreateProviderInput {
   name: string
   baseUrl: string
   wireApi: string
-  model: string | null
+  models?: string[]
+  /** @deprecated ignored; use models. */
+  model?: string | null
   apiKey: string
   activateAfterSave: boolean
   expectedFiles: FileSetFingerprint
@@ -46,7 +54,9 @@ export interface UpdateProviderInput {
   name: string
   baseUrl: string
   wireApi: string
-  model: string | null
+  models?: string[]
+  /** @deprecated ignored; use models. */
+  model?: string | null
   apiKeyChange: ApiKeyChange
   syncIfActive: boolean
   expectedFiles: FileSetFingerprint
@@ -57,6 +67,20 @@ export interface ProviderListState {
   activeProviderId: string | null
   currentAuthImportAvailable: boolean
   fingerprints: FileSetFingerprint
+  modelCatalog?: ModelCatalogItem[]
+}
+
+export interface ModelCatalogItem {
+  id: string
+  reasoningEfforts: readonly string[]
+  defaultReasoningEffort: string
+}
+
+export interface UpdateProviderPreferenceInput {
+  providerId: string
+  model: string
+  reasoningEffort: string
+  expectedFiles: FileSetFingerprint
 }
 
 export interface ProviderMutationOutcome {

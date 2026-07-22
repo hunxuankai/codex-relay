@@ -8,6 +8,8 @@ pub enum BackupFileName {
     Auth,
     #[serde(rename = "providers.json")]
     Providers,
+    #[serde(rename = "provider-preferences.json")]
+    Preferences,
     #[serde(rename = "metadata.json")]
     Metadata,
 }
@@ -18,6 +20,7 @@ impl BackupFileName {
             Self::Config => "config.toml",
             Self::Auth => "auth.json",
             Self::Providers => "providers.json",
+            Self::Preferences => "provider-preferences.json",
             Self::Metadata => "metadata.json",
         }
     }
@@ -27,6 +30,7 @@ impl BackupFileName {
             Self::Config => metadata.config_existed,
             Self::Auth => metadata.auth_existed,
             Self::Providers => metadata.providers_existed,
+            Self::Preferences => metadata.preferences_existed,
             Self::Metadata => true,
         }
     }
@@ -42,12 +46,13 @@ pub struct BackupMetadata {
     pub config_existed: bool,
     pub auth_existed: bool,
     pub providers_existed: bool,
+    pub preferences_existed: bool,
     pub app_version: String,
 }
 
 impl BackupMetadata {
     pub fn files(&self) -> Vec<BackupFileName> {
-        let mut files = Vec::with_capacity(4);
+        let mut files = Vec::with_capacity(5);
         if self.config_existed {
             files.push(BackupFileName::Config);
         }
@@ -56,6 +61,9 @@ impl BackupMetadata {
         }
         if self.providers_existed {
             files.push(BackupFileName::Providers);
+        }
+        if self.preferences_existed {
+            files.push(BackupFileName::Preferences);
         }
         files.push(BackupFileName::Metadata);
         files
@@ -84,6 +92,7 @@ mod tests {
             config_existed: true,
             auth_existed: true,
             providers_existed: true,
+            preferences_existed: true,
             app_version: "0.1.0".into(),
         };
 

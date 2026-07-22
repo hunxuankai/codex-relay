@@ -18,8 +18,9 @@ Windows 当前用户文件与系统集成
 
 | 文件 | 权威内容 | 禁止行为 |
 |---|---|---|
-| `config.toml` | Provider 名称、URL、Wire API、模型、未知字段与当前 Provider | 不能整文件反序列化后重建 |
+| `config.toml` | Provider 名称、URL、Wire API、Codex 顶层当前 Provider/模型/推理强度、未知字段 | 不能整文件反序列化后重建；不得写入 Relay 私有偏好 |
 | `providers.json` | Provider ID → API Key | 不能当作 Provider 定义唯一来源；损坏时不能覆盖 |
+| `provider-preferences.json` | Provider 可用模型、当前偏好和逐模型推理强度 | 不能写入 Codex `config.toml` 的 Provider 块；模型目录随软件版本发布 |
 | `auth.json` | 当前生效 API Key | 不能通过普通列表、日志或事件返回 |
 | `settings.json` | 窗口、托盘、引导、自启和应用内网络代理偏好 | 自启显示必须同时查询 Windows 实际状态；代理只允许无认证 HTTP(S) URL |
 
@@ -62,11 +63,11 @@ Vue typed DTO + 文件指纹
 → 托盘、事件、自检和安全通知刷新
 ```
 
-Provider 主界面与托盘必须调用同一个 `ProviderService::switch_provider`。当前 Provider 不得删除；目标无默认模型时保留现有顶层 `model`。
+Provider 主界面与托盘必须调用同一个 `ProviderService::switch_provider`。当前 Provider 不得删除；切换时从 `provider-preferences.json` 读取模型和推理强度并写入 Codex 顶层字段。
 
 ## 事件边界
 
-- 监控 `config.toml`、`auth.json`、`providers.json`，对突发变化防抖。
+- 监控 `config.toml`、`auth.json`、`providers.json`、`provider-preferences.json`，对突发变化防抖。
 - 应用事务通过写入守卫和最终指纹只抑制自身事件；外部修改必须刷新状态并触发扩展自检。
 - 事件 payload 只包含 DTO、指纹、状态或安全消息，不含文件全文和密钥。
 - `settings-changed` 只表示设置/自启变化；`app-notification` 只表示显式操作结果。

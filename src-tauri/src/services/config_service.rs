@@ -14,7 +14,6 @@ pub struct ProviderConfig {
     pub name: Option<String>,
     pub base_url: Option<String>,
     pub wire_api: Option<String>,
-    pub model: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -24,7 +23,6 @@ pub struct ProviderInput {
     pub name: String,
     pub base_url: String,
     pub wire_api: String,
-    pub model: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -33,7 +31,6 @@ pub struct ValidatedProviderInput {
     pub name: String,
     pub base_url: String,
     pub wire_api: String,
-    pub model: Option<String>,
 }
 
 pub fn parse_document(source: &str) -> Result<DocumentMut, AppError> {
@@ -74,7 +71,6 @@ pub fn list_provider_configs(document: &DocumentMut) -> Result<Vec<ProviderConfi
                 name: string_field(provider, "name"),
                 base_url: string_field(provider, "base_url"),
                 wire_api: string_field(provider, "wire_api"),
-                model: string_field(provider, "model"),
             })
         })
         .collect())
@@ -129,19 +125,11 @@ pub fn validate_provider_input(input: &ProviderInput) -> Result<ValidatedProvide
         ));
     }
 
-    let model = input
-        .model
-        .as_deref()
-        .map(str::trim)
-        .filter(|model| !model.is_empty())
-        .map(str::to_owned);
-
     Ok(ValidatedProviderInput {
         id,
         name: name.to_owned(),
         base_url: parsed_url.to_string(),
         wire_api: wire_api.to_owned(),
-        model,
     })
 }
 
@@ -153,7 +141,6 @@ pub fn validate_provider_config(
         name: provider.name.clone().unwrap_or_default(),
         base_url: provider.base_url.clone().unwrap_or_default(),
         wire_api: provider.wire_api.clone().unwrap_or_default(),
-        model: provider.model.clone(),
     })
 }
 
@@ -212,18 +199,19 @@ pub fn delete_provider(source: &str, id: &str) -> Result<String, AppError> {
     Ok(document.to_string())
 }
 
-pub fn select_provider(source: &str, provider: &ProviderConfig) -> Result<String, AppError> {
-    let validated = validate_provider_config(provider)?;
+pub fn select_provider_with_preference(
+    source: &str,
+    provider_id: &str,
+    model: &str,
+    reasoning_effort: &str,
+) -> Result<String, AppError> {
+    let provider_id = validate_provider_id(provider_id)?;
     let mut document = parse_document(source)?;
-    {
-        let target = provider_table_mut(&mut document, &validated.id)?;
-        set_provider_fields(target, &validated);
-    }
-    document.insert("model_provider", value(&validated.id));
+    provider_table_mut(&mut document, &provider_id)?;
+    document.insert("model_provider", value(&provider_id));
+    document.insert("model", value(model));
+    document.insert("model_reasoning_effort", value(reasoning_effort));
     document.insert("cli_auth_credentials_store", value("file"));
-    if let Some(model) = validated.model.as_deref() {
-        document.insert("model", value(model));
-    }
     Ok(document.to_string())
 }
 
@@ -262,14 +250,6 @@ fn set_provider_fields(provider: &mut dyn TableLike, input: &ValidatedProviderIn
     provider.insert("name", value(&input.name));
     provider.insert("base_url", value(&input.base_url));
     provider.insert("wire_api", value(&input.wire_api));
-    match input.model.as_deref() {
-        Some(model) => {
-            provider.insert("model", value(model));
-        }
-        None => {
-            provider.remove("model");
-        }
-    }
 }
 
 fn string_field(table: &dyn TableLike, name: &str) -> Option<String> {
@@ -306,7 +286,6 @@ mod tests {
             name: "  Provider C  ".into(),
             base_url: " https://provider-c.example.com/v1 ".into(),
             wire_api: "responses".into(),
-            model: Some("  test-model-c  ".into()),
         }
     }
 
@@ -319,7 +298,6 @@ mod tests {
         assert_eq!(providers.len(), 2);
         assert_eq!(providers[0].id, "provider-a");
         assert_eq!(providers[1].id, "provider-b");
-        assert_eq!(providers[1].model.as_deref(), Some("test-model-b"));
     }
 
     #[test]
@@ -330,7 +308,6 @@ mod tests {
         assert_eq!(validated.name, "Provider C");
         assert_eq!(validated.base_url, "https://provider-c.example.com/v1");
         assert_eq!(validated.wire_api, "responses");
-        assert_eq!(validated.model.as_deref(), Some("test-model-c"));
     }
 
     #[test]
@@ -397,7 +374,6 @@ mod tests {
         let mut input = valid_input("provider-a");
         input.name = "Updated Provider A".into();
         input.base_url = "https://updated.example.com/v1".into();
-        input.model = None;
         let validated = validate_provider_input(&input).unwrap();
 
         let output = update_provider(WITH_UNKNOWN, "provider-a", &validated).unwrap();
@@ -423,34 +399,15 @@ mod tests {
     }
 
     #[test]
-    fn select_provider_updates_required_top_level_fields_and_model() {
-        let document = parse_document(MULTIPLE).unwrap();
-        let provider = list_provider_configs(&document)
-            .unwrap()
-            .into_iter()
-            .find(|provider| provider.id == "provider-b")
-            .unwrap();
-
-        let output = select_provider(MULTIPLE, &provider).unwrap();
+    fn select_provider_updates_only_official_top_level_selection_fields() {
+        let output =
+            select_provider_with_preference(MULTIPLE, "provider-b", "gpt-5.6-sol", "high").unwrap();
 
         assert!(output.contains("model_provider = \"provider-b\""));
-        assert!(output.contains("model = \"test-model-b\""));
+        assert!(output.contains("model = \"gpt-5.6-sol\""));
+        assert!(output.contains("model_reasoning_effort = \"high\""));
         assert!(output.contains("cli_auth_credentials_store = \"file\""));
         assert!(output.contains("[model_providers.provider-a]"));
-    }
-
-    #[test]
-    fn select_provider_without_model_keeps_existing_top_level_model() {
-        let document = parse_document(MULTIPLE).unwrap();
-        let provider = list_provider_configs(&document)
-            .unwrap()
-            .into_iter()
-            .find(|provider| provider.id == "provider-a")
-            .unwrap();
-
-        let output = select_provider(MULTIPLE, &provider).unwrap();
-
-        assert!(output.contains("model = \"test-model\""));
-        assert!(output.contains("model_provider = \"provider-a\""));
+        assert!(output.contains("model = \"test-model-b\""));
     }
 }

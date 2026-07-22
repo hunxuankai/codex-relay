@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, shallowRef, useTemplateRef, watch } from 'vue'
+import { ElOption, ElSelect } from 'element-plus'
 import type {
   ApiKeyChange,
   CreateProviderInput,
   FileSetFingerprint,
   ProviderProfile,
+  ModelCatalogItem,
   UpdateProviderInput,
 } from '../types/provider'
 import ApiKeyInput from './ApiKeyInput.vue'
@@ -18,8 +20,9 @@ const props = withDefaults(
     fingerprints: FileSetFingerprint
     busy: boolean
     existingIds?: readonly string[]
+    modelCatalog?: readonly ModelCatalogItem[]
   }>(),
-  { existingIds: () => [] },
+  { existingIds: () => [], modelCatalog: () => [] },
 )
 
 const emit = defineEmits<{
@@ -31,12 +34,12 @@ const draft = reactive({
   id: '',
   name: '',
   baseUrl: '',
-  model: '',
+  models: [] as string[],
   apiKey: '',
   activateAfterSave: false,
   syncIfActive: false,
 })
-const errors = reactive({ id: '', name: '', baseUrl: '', apiKey: '' })
+const errors = reactive({ id: '', name: '', baseUrl: '', models: '', apiKey: '' })
 const apiKeyAction = shallowRef<ApiKeyChange['action']>('unchanged')
 const form = useTemplateRef<HTMLFormElement>('form')
 const activeFieldsChanged = computed(() => {
@@ -44,7 +47,7 @@ const activeFieldsChanged = computed(() => {
   return (
     draft.baseUrl.trim() !== props.provider.baseUrl ||
     draft.name.trim() !== props.provider.name ||
-    (draft.model.trim() || null) !== props.provider.model ||
+    JSON.stringify(draft.models) !== JSON.stringify(props.provider.models) ||
     apiKeyAction.value === 'set' ||
     apiKeyAction.value === 'clear'
   )
@@ -64,7 +67,7 @@ watch(
     draft.id = props.provider?.id ?? ''
     draft.name = props.provider?.name ?? ''
     draft.baseUrl = props.provider?.baseUrl ?? ''
-    draft.model = props.provider?.model ?? ''
+    draft.models = [...(props.provider?.models ?? [])]
     draft.apiKey = ''
     draft.activateAfterSave = false
     draft.syncIfActive = false
@@ -91,6 +94,7 @@ function clearErrors() {
   errors.id = ''
   errors.name = ''
   errors.baseUrl = ''
+  errors.models = ''
   errors.apiKey = ''
 }
 
@@ -120,7 +124,8 @@ function validate() {
     }
   }
   if (props.mode === 'create' && !draft.apiKey.trim()) errors.apiKey = 'API Key 为必填项。'
-  return !errors.id && !errors.name && !errors.baseUrl && !errors.apiKey
+  if (draft.models.length === 0) errors.models = '请至少选择一个可用模型。'
+  return !errors.id && !errors.name && !errors.baseUrl && !errors.models && !errors.apiKey
 }
 
 function handleClearKey() {
@@ -139,7 +144,7 @@ async function submit() {
     name: draft.name.trim(),
     baseUrl: draft.baseUrl.trim(),
     wireApi: 'responses',
-    model: draft.model.trim() || null,
+    models: [...draft.models],
     expectedFiles: props.fingerprints,
   }
   if (props.mode === 'create') {
@@ -222,19 +227,35 @@ async function submit() {
         <input name="wire-api" value="responses" disabled />
       </label>
 
-      <label class="field">
-        <span>默认模型（可选）</span>
-        <input
-          v-model="draft.model"
-          name="model"
+      <div class="field">
+        <label for="provider-models">可用模型</label>
+        <ElSelect
+          id="provider-models"
+          v-model="draft.models"
+          name="models"
+          multiple
           :disabled="busy"
-          aria-describedby="model-hint"
-          autocomplete="off"
-        />
+          placeholder="请选择一个或多个模型"
+          :aria-invalid="errors.models ? 'true' : undefined"
+          :aria-describedby="errors.models ? 'provider-models-error model-hint' : 'model-hint'"
+        >
+          <ElOption
+            v-for="model in modelCatalog ?? []"
+            :key="model.id"
+            :label="model.id"
+            :value="model.id"
+          />
+        </ElSelect>
         <span id="model-hint" class="field-hint">
-          留空时，切换到此 Provider 不会修改 Codex 当前的模型设置。
+          第一个选择的模型会成为初始偏好；推理强度可在 Provider 详情中设置。
         </span>
-      </label>
+        <span v-if="provider?.selectedModel" class="field-hint">
+          当前偏好：{{ provider.selectedModel }}
+        </span>
+        <span v-if="errors.models" id="provider-models-error" class="field-error" role="alert">
+          {{ errors.models }}
+        </span>
+      </div>
 
       <div class="field">
         <ApiKeyInput
@@ -297,6 +318,10 @@ async function submit() {
 .field input {
   font: inherit;
   font-weight: 400;
+}
+
+.field :deep(.el-select) {
+  width: 100%;
 }
 
 .field-error,

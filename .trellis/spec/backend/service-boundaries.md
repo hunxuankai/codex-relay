@@ -15,6 +15,7 @@
 - `backup_service`：事务快照、列表、加载和最多 20 份清理。
 - `transaction_service`：锁、指纹、备份、临时写、验证和回滚。
 - `provider_service`：组合配置、密钥、认证与事务，作为主界面和托盘的唯一业务入口。
+- `provider_preference_service`：保存 Relay 私有模型目录和逐模型推理强度；不得把该元数据写入 Codex `[model_providers.<id>]`。
 - `settings_service` / `autostart_service`：保存偏好并核对 Windows 实际自启状态。
 - `self_check_service`：关键自检和扩展自检。
 - `file_watch_service`：防抖、写入抑制和脱敏变化事件。

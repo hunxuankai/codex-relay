@@ -59,14 +59,21 @@ pub struct FileSetFingerprint {
     pub config: FileFingerprint,
     pub auth: FileFingerprint,
     pub providers: FileFingerprint,
+    pub preferences: FileFingerprint,
 }
 
 impl FileSetFingerprint {
-    pub fn from_paths(config: &Path, auth: &Path, providers: &Path) -> Result<Self, AppError> {
+    pub fn from_paths(
+        config: &Path,
+        auth: &Path,
+        providers: &Path,
+        preferences: &Path,
+    ) -> Result<Self, AppError> {
         Ok(Self {
             config: FileFingerprint::from_path(config)?,
             auth: FileFingerprint::from_path(auth)?,
             providers: FileFingerprint::from_path(providers)?,
+            preferences: FileFingerprint::from_path(preferences)?,
         })
     }
 }
@@ -108,12 +115,15 @@ mod tests {
         let config = directory.path().join("config.toml");
         let auth = directory.path().join("auth.json");
         let providers = directory.path().join("providers.json");
+        let preferences = directory.path().join("provider-preferences.json");
         fs::write(&config, "model_provider = \"provider-a\"\n").unwrap();
 
-        let fingerprints = FileSetFingerprint::from_paths(&config, &auth, &providers).unwrap();
+        let fingerprints =
+            FileSetFingerprint::from_paths(&config, &auth, &providers, &preferences).unwrap();
 
         assert!(fingerprints.config.exists);
         assert!(!fingerprints.auth.exists);
         assert!(!fingerprints.providers.exists);
+        assert!(!fingerprints.preferences.exists);
     }
 }

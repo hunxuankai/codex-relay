@@ -197,7 +197,7 @@ async fn audited_provider_and_backup_workflow_ignores_default_path_sentinels() {
             name: "Provider B".into(),
             base_url: "https://provider-b.example.test/v1".into(),
             wire_api: "responses".into(),
-            model: None,
+            models: vec!["gpt-5.6-sol".into()],
             api_key: "test-key-b-not-real".into(),
             activate_after_save: false,
             expected_files: state.fingerprints,

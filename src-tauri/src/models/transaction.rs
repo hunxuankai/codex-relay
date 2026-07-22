@@ -9,6 +9,7 @@ pub enum TransactionOperation {
     SwitchProvider,
     RestoreBackup,
     SyncCurrentProvider,
+    UpdateProviderPreference,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

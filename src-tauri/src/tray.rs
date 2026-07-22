@@ -658,7 +658,13 @@ mod tests {
             name: name.into(),
             base_url: format!("https://{id}.example.test/v1"),
             wire_api: WireApi::Responses,
-            model: None,
+            models: vec!["gpt-5.6-sol".into()],
+            selected_model: Some("gpt-5.6-sol".into()),
+            reasoning_efforts: std::collections::BTreeMap::from([(
+                "gpt-5.6-sol".into(),
+                "medium".into(),
+            )]),
+            preference_configured: true,
             api_key_configured,
             is_active: active,
             is_valid: valid,
@@ -856,6 +862,7 @@ mod tests {
                 config: crate::infrastructure::file_fingerprint::FileFingerprint::missing(),
                 auth: crate::infrastructure::file_fingerprint::FileFingerprint::missing(),
                 providers: crate::infrastructure::file_fingerprint::FileFingerprint::missing(),
+                preferences: crate::infrastructure::file_fingerprint::FileFingerprint::missing(),
             },
         };
 

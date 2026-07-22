@@ -1,5 +1,6 @@
 use crate::infrastructure::file_fingerprint::FileSetFingerprint;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -16,7 +17,10 @@ pub struct ProviderProfile {
     pub name: String,
     pub base_url: String,
     pub wire_api: WireApi,
-    pub model: Option<String>,
+    pub models: Vec<String>,
+    pub selected_model: Option<String>,
+    pub reasoning_efforts: BTreeMap<String, String>,
+    pub preference_configured: bool,
     pub api_key_configured: bool,
     pub is_active: bool,
     pub is_valid: bool,
@@ -51,7 +55,7 @@ pub struct CreateProviderInput {
     pub name: String,
     pub base_url: String,
     pub wire_api: String,
-    pub model: Option<String>,
+    pub models: Vec<String>,
     pub api_key: String,
     pub activate_after_save: bool,
     pub expected_files: FileSetFingerprint,
@@ -65,7 +69,7 @@ impl fmt::Debug for CreateProviderInput {
             .field("name", &self.name)
             .field("base_url", &self.base_url)
             .field("wire_api", &self.wire_api)
-            .field("model", &self.model)
+            .field("models", &self.models)
             .field("api_key_configured", &!self.api_key.is_empty())
             .field("activate_after_save", &self.activate_after_save)
             .field("expected_files", &self.expected_files)
@@ -80,7 +84,7 @@ pub struct UpdateProviderInput {
     pub name: String,
     pub base_url: String,
     pub wire_api: String,
-    pub model: Option<String>,
+    pub models: Vec<String>,
     pub api_key_change: ApiKeyChange,
     pub sync_if_active: bool,
     pub expected_files: FileSetFingerprint,
@@ -94,7 +98,7 @@ impl fmt::Debug for UpdateProviderInput {
             .field("name", &self.name)
             .field("base_url", &self.base_url)
             .field("wire_api", &self.wire_api)
-            .field("model", &self.model)
+            .field("models", &self.models)
             .field("api_key_change", &self.api_key_change)
             .field("sync_if_active", &self.sync_if_active)
             .field("expected_files", &self.expected_files)
@@ -109,6 +113,24 @@ pub struct ProviderListState {
     pub active_provider_id: Option<String>,
     pub current_auth_import_available: bool,
     pub fingerprints: FileSetFingerprint,
+    pub model_catalog: Vec<ModelCatalogItem>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCatalogItem {
+    pub id: String,
+    pub reasoning_efforts: Vec<String>,
+    pub default_reasoning_effort: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProviderPreferenceInput {
+    pub provider_id: String,
+    pub model: String,
+    pub reasoning_effort: String,
+    pub expected_files: FileSetFingerprint,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -137,7 +159,10 @@ mod tests {
             name: "Provider A".into(),
             base_url: "https://provider-a.example.com/v1".into(),
             wire_api: WireApi::Responses,
-            model: Some("test-model".into()),
+            models: vec!["gpt-5.6-sol".into()],
+            selected_model: Some("gpt-5.6-sol".into()),
+            reasoning_efforts: BTreeMap::from([("gpt-5.6-sol".into(), "medium".into())]),
+            preference_configured: true,
             api_key_configured: true,
             is_active: true,
             is_valid: true,
@@ -159,13 +184,14 @@ mod tests {
             config: crate::infrastructure::file_fingerprint::FileFingerprint::missing(),
             auth: crate::infrastructure::file_fingerprint::FileFingerprint::missing(),
             providers: crate::infrastructure::file_fingerprint::FileFingerprint::missing(),
+            preferences: crate::infrastructure::file_fingerprint::FileFingerprint::missing(),
         };
         let create = CreateProviderInput {
             id: "provider-a".into(),
             name: "Provider A".into(),
             base_url: "https://provider-a.example.com/v1".into(),
             wire_api: "responses".into(),
-            model: None,
+            models: vec!["gpt-5.6-sol".into()],
             api_key: "test-key-a-not-real".into(),
             activate_after_save: false,
             expected_files: fingerprints,

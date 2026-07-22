@@ -25,6 +25,7 @@
     "@tauri-apps/plugin-autostart": "^2",
     "@tauri-apps/plugin-notification": "^2",
     "@tauri-apps/plugin-updater": "^2.10.1",
+    "element-plus": "^2.14.3",
     "vue": "^3.5"
   },
   "devDependencies": {
@@ -35,6 +36,7 @@
     "@vue/tsconfig": "^0.8",
     "jsdom": "^26",
     "typescript": "~5.9",
+    "unplugin-element-plus": "^0.11.2",
     "vite": "^7",
     "vitest": "^3",
     "vue-tsc": "^3"

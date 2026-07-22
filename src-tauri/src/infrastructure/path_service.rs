@@ -19,6 +19,7 @@ pub struct AppPaths {
     pub auth_file: PathBuf,
     pub app_data_dir: PathBuf,
     pub providers_file: PathBuf,
+    pub provider_preferences_file: PathBuf,
     pub settings_file: PathBuf,
     pub backups_dir: PathBuf,
     pub logs_dir: PathBuf,
@@ -30,6 +31,7 @@ impl AppPaths {
             config_file: codex_home.join("config.toml"),
             auth_file: codex_home.join("auth.json"),
             providers_file: app_data_dir.join("providers.json"),
+            provider_preferences_file: app_data_dir.join("provider-preferences.json"),
             settings_file: app_data_dir.join("settings.json"),
             backups_dir: app_data_dir.join("backups"),
             logs_dir: app_data_dir.join("logs"),
@@ -320,6 +322,10 @@ mod tests {
         assert_eq!(paths.config_file, codex.path().join("config.toml"));
         assert_eq!(paths.auth_file, codex.path().join("auth.json"));
         assert_eq!(paths.providers_file, app_data.path().join("providers.json"));
+        assert_eq!(
+            paths.provider_preferences_file,
+            app_data.path().join("provider-preferences.json")
+        );
         assert_eq!(paths.settings_file, app_data.path().join("settings.json"));
         assert_eq!(paths.backups_dir, app_data.path().join("backups"));
         assert_eq!(paths.logs_dir, app_data.path().join("logs"));

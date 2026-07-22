@@ -11,4 +11,4 @@ test-data/
 providers.json
 auth.json
 src-tauri/gen/
-
+.superpowers/

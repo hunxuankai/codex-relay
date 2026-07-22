@@ -1,4 +1,5 @@
 import { mount } from '@vue/test-utils'
+import { ElSelect } from 'element-plus'
 import { nextTick } from 'vue'
 import { describe, expect, it } from 'vitest'
 import type { FileSetFingerprint, ProviderProfile } from '../types/provider'
@@ -8,14 +9,23 @@ const fingerprints: FileSetFingerprint = {
   config: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'config' },
   auth: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'auth' },
   providers: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'providers' },
+  preferences: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'preferences' },
 }
+
+const modelCatalog = [
+  { id: 'gpt-5.6-sol', reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'], defaultReasoningEffort: 'medium' },
+  { id: 'gpt-5.4-mini', reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'], defaultReasoningEffort: 'none' },
+] as const
 
 const existing: ProviderProfile = {
   id: 'provider-a',
   name: 'Provider A',
   baseUrl: 'https://provider-a.example.test/v1',
   wireApi: 'responses',
-  model: 'model-a',
+  models: ['gpt-5.6-sol', 'gpt-5.4-mini'],
+  selectedModel: 'gpt-5.6-sol',
+  reasoningEfforts: { 'gpt-5.6-sol': 'high', 'gpt-5.4-mini': 'none' },
+  preferenceConfigured: true,
   apiKeyConfigured: true,
   isActive: true,
   isValid: true,
@@ -26,7 +36,7 @@ describe('ProviderEditor', () => {
   it('validates and normalizes a new Provider', async () => {
     const wrapper = mount(ProviderEditor, {
       attachTo: document.body,
-      props: { mode: 'create', provider: null, fingerprints, busy: false },
+      props: { mode: 'create', provider: null, fingerprints, busy: false, modelCatalog },
     })
 
     await wrapper.get('form').trigger('submit')
@@ -42,7 +52,8 @@ describe('ProviderEditor', () => {
     expect((wrapper.get('[name="provider-id"]').element as HTMLInputElement).value).toBe('provider-a')
     await wrapper.get('[name="provider-name"]').setValue('  Provider A  ')
     await wrapper.get('[name="base-url"]').setValue('ftp://invalid.test')
-    await wrapper.get('[name="model"]').setValue('  model-a  ')
+    wrapper.getComponent(ElSelect).vm.$emit('update:modelValue', ['gpt-5.6-sol', 'gpt-5.4-mini'])
+    await nextTick()
     await wrapper.get('#provider-api-key').setValue('test-key-not-real')
     await wrapper.get('form').trigger('submit')
     expect(wrapper.text()).toContain('Base URL 必须使用 HTTP 或 HTTPS')
@@ -55,7 +66,7 @@ describe('ProviderEditor', () => {
       name: 'Provider A',
       baseUrl: 'https://provider-a.example.test/v1',
       wireApi: 'responses',
-      model: 'model-a',
+      models: ['gpt-5.6-sol', 'gpt-5.4-mini'],
       apiKey: 'test-key-not-real',
       activateAfterSave: false,
       expectedFiles: fingerprints,
@@ -71,11 +82,14 @@ describe('ProviderEditor', () => {
         fingerprints,
         busy: false,
         existingIds: ['provider-a'],
+        modelCatalog,
       },
     })
     await wrapper.get('[name="provider-id"]').setValue('provider-a')
     await wrapper.get('[name="provider-name"]').setValue('Provider A')
     await wrapper.get('[name="base-url"]').setValue('https://provider-a.example.test/v1')
+    wrapper.getComponent(ElSelect).vm.$emit('update:modelValue', ['gpt-5.6-sol'])
+    await nextTick()
     await wrapper.get('#provider-api-key').setValue('test-key-not-real')
 
     await wrapper.get('form').trigger('submit')
@@ -86,17 +100,16 @@ describe('ProviderEditor', () => {
 
   it('keeps ID immutable and omits an untouched key during edit', async () => {
     const wrapper = mount(ProviderEditor, {
-      props: { mode: 'edit', provider: existing, fingerprints, busy: false },
+      props: { mode: 'edit', provider: existing, fingerprints, busy: false, modelCatalog },
     })
 
     expect(wrapper.get('[name="provider-id"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[name="wire-api"]').attributes('disabled')).toBeDefined()
     expect((wrapper.get('[name="wire-api"]').element as HTMLInputElement).value).toBe('responses')
-    expect(wrapper.get('[name="model"]').attributes('aria-describedby')).toBe('model-hint')
-    expect(wrapper.text()).toContain('留空时，切换到此 Provider 不会修改 Codex 当前的模型设置。')
+    expect(wrapper.getComponent(ElSelect).props('modelValue')).toEqual(['gpt-5.6-sol', 'gpt-5.4-mini'])
+    expect(wrapper.text()).toContain('当前偏好：gpt-5.6-sol')
     expect(wrapper.text()).toContain('当前 Provider')
     expect(wrapper.find('[name="sync-if-active"]').exists()).toBe(false)
-    await wrapper.get('[name="model"]').setValue('   ')
     await wrapper.get('form').trigger('submit')
 
     expect(wrapper.emitted('submit')?.[0]?.[0]).toEqual({
@@ -104,7 +117,7 @@ describe('ProviderEditor', () => {
       name: 'Provider A',
       baseUrl: 'https://provider-a.example.test/v1',
       wireApi: 'responses',
-      model: null,
+      models: ['gpt-5.6-sol', 'gpt-5.4-mini'],
       apiKeyChange: { action: 'unchanged' },
       syncIfActive: false,
       expectedFiles: fingerprints,
@@ -113,7 +126,7 @@ describe('ProviderEditor', () => {
 
   it('emits explicit key clearing without trying to sync a missing key', async () => {
     const wrapper = mount(ProviderEditor, {
-      props: { mode: 'edit', provider: existing, fingerprints, busy: false },
+      props: { mode: 'edit', provider: existing, fingerprints, busy: false, modelCatalog },
     })
 
     await wrapper.get('[aria-label="清空 API Key"]').trigger('click')
@@ -131,7 +144,7 @@ describe('ProviderEditor', () => {
 
   it('offers immediate sync only after active fields change', async () => {
     const wrapper = mount(ProviderEditor, {
-      props: { mode: 'edit', provider: existing, fingerprints, busy: false },
+      props: { mode: 'edit', provider: existing, fingerprints, busy: false, modelCatalog },
     })
 
     await wrapper.get('[name="provider-name"]').setValue('Provider A Updated')

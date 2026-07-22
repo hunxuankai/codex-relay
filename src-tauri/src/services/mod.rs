@@ -3,6 +3,7 @@ pub mod autostart_service;
 pub mod backup_service;
 pub mod config_service;
 pub mod file_watch_service;
+pub mod provider_preference_service;
 pub mod provider_secret_service;
 pub mod provider_service;
 pub mod self_check_service;

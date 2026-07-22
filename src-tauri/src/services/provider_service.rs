@@ -3,14 +3,19 @@ use crate::infrastructure::file_fingerprint::FileSetFingerprint;
 use crate::infrastructure::path_service::AppPaths;
 use crate::models::backup::{BackupFileName, BackupSummary};
 use crate::models::provider::{
-    ApiKeyChange, CreateProviderInput, ProviderListState, ProviderMutationOutcome, ProviderProfile,
-    SwitchOutcome, UpdateProviderInput, WireApi,
+    ApiKeyChange, CreateProviderInput, ModelCatalogItem, ProviderListState,
+    ProviderMutationOutcome, ProviderProfile, SwitchOutcome, UpdateProviderInput,
+    UpdateProviderPreferenceInput, WireApi,
 };
 use crate::models::transaction::TransactionOperation;
 use crate::services::auth_service::{AuthService, render_auth_json};
 use crate::services::backup_service::BackupService;
 use crate::services::config_service::{
     self, ProviderConfig, ProviderInput, ValidatedProviderInput,
+};
+use crate::services::provider_preference_service::{
+    ProviderPreference, ProviderPreferenceService, ProviderPreferenceStore, model_catalog,
+    serialize_store as serialize_preference_store,
 };
 use crate::services::provider_secret_service::{
     ProviderSecret, ProviderSecretService, ProviderSecretStore, normalize_api_key, serialize_store,
@@ -31,6 +36,7 @@ pub struct ProviderService {
     transaction_service: TransactionService,
     backup_service: BackupService,
     secret_service: ProviderSecretService,
+    preference_service: ProviderPreferenceService,
     auth_service: AuthService,
 }
 
@@ -50,6 +56,9 @@ impl ProviderService {
         Self {
             backup_service,
             secret_service: ProviderSecretService::new(paths.providers_file.clone()),
+            preference_service: ProviderPreferenceService::new(
+                paths.provider_preferences_file.clone(),
+            ),
             auth_service: AuthService::new(paths.auth_file.clone()),
             paths,
             transaction_service,
@@ -113,8 +122,8 @@ impl ProviderService {
             name: input.name,
             base_url: input.base_url,
             wire_api: input.wire_api,
-            model: input.model,
         })?;
+        let preference = ProviderPreference::from_models(&input.models)?;
         let api_key = normalize_api_key(&input.api_key)?;
         let disk = self.read_consistent_state(AuthReadMode::Skip)?;
         let mut new_config = config_service::create_provider(&disk.config_source, &validated)?;
@@ -125,11 +134,17 @@ impl ProviderService {
                 api_key: api_key.clone(),
             },
         );
+        let mut new_preferences = disk.preference_store.clone();
+        new_preferences
+            .providers
+            .insert(validated.id.clone(), preference.clone());
 
         let auth_change = if input.activate_after_save {
-            new_config = config_service::select_provider(
+            new_config = config_service::select_provider_with_preference(
                 &new_config,
-                &provider_config_from_validated(&validated),
+                &validated.id,
+                &preference.selected_model,
+                &preference.reasoning_efforts[&preference.selected_model],
             )?;
             FileChange::Write(render_auth_json(&api_key)?)
         } else {
@@ -148,9 +163,20 @@ impl ProviderService {
                         config: FileChange::Write(new_config.into_bytes()),
                         auth: auth_change,
                         providers: FileChange::Write(provider_bytes),
+                        preferences: FileChange::Write(serialize_preference_store(
+                            &new_preferences,
+                        )?),
                     },
                 },
-                |paths| validate_provider_written(paths, &validated, Some(&api_key), activate),
+                |paths| {
+                    validate_provider_written(
+                        paths,
+                        &validated,
+                        Some(&api_key),
+                        Some(&preference),
+                        activate,
+                    )
+                },
             )
             .await?;
 
@@ -177,13 +203,24 @@ impl ProviderService {
             name: input.name,
             base_url: input.base_url,
             wire_api: input.wire_api,
-            model: input.model,
         })?;
         let disk = self.read_consistent_state(AuthReadMode::Skip)?;
         let is_active = config_service::current_provider_id(&disk.document).as_deref()
             == Some(validated.id.as_str());
         let new_config =
             config_service::update_provider(&disk.config_source, &validated.id, &validated)?;
+        let mut new_preferences = disk.preference_store.clone();
+        let selected_changed =
+            if let Some(preference) = new_preferences.providers.get_mut(&validated.id) {
+                preference.reconcile_models(&input.models)?
+            } else {
+                new_preferences.providers.insert(
+                    validated.id.clone(),
+                    ProviderPreference::from_models(&input.models)?,
+                );
+                false
+            };
+        let preference = new_preferences.providers[&validated.id].clone();
         let mut new_store = disk.store.clone();
         let (provider_change, effective_key) = match input.api_key_change {
             ApiKeyChange::Unchanged => (
@@ -215,9 +252,11 @@ impl ProviderService {
                 .as_deref()
                 .ok_or_else(provider_api_key_missing)?;
             (
-                config_service::select_provider(
+                config_service::select_provider_with_preference(
                     &new_config,
-                    &provider_config_from_validated(&validated),
+                    &validated.id,
+                    &preference.selected_model,
+                    &preference.reasoning_efforts[&preference.selected_model],
                 )?,
                 FileChange::Write(render_auth_json(api_key)?),
             )
@@ -235,6 +274,9 @@ impl ProviderService {
                         config: FileChange::Write(final_config.into_bytes()),
                         auth: auth_change,
                         providers: provider_change,
+                        preferences: FileChange::Write(serialize_preference_store(
+                            &new_preferences,
+                        )?),
                     },
                 },
                 |paths| {
@@ -242,19 +284,25 @@ impl ProviderService {
                         paths,
                         &validated,
                         effective_key.as_deref(),
+                        Some(&preference),
                         sync_active,
                     )
                 },
             )
             .await?;
 
+        let fallback_note = if selected_changed {
+            format!(" 当前偏好模型已改为 {}。", preference.selected_model)
+        } else {
+            String::new()
+        };
         let message = if is_active {
             format!(
-                "Provider「{}」已更新。请重启 Codex 后生效。",
-                validated.name
+                "Provider「{}」已更新。{}请重启 Codex 后生效。",
+                validated.name, fallback_note
             )
         } else {
-            format!("Provider「{}」已更新。", validated.name)
+            format!("Provider「{}」已更新。{}", validated.name, fallback_note)
         };
         Ok(ProviderMutationOutcome {
             providers: self.list_providers()?.providers,
@@ -279,6 +327,8 @@ impl ProviderService {
         let new_config = config_service::delete_provider(&disk.config_source, &provider_id)?;
         let mut new_store = disk.store.clone();
         new_store.providers.remove(&provider_id);
+        let mut new_preferences = disk.preference_store.clone();
+        new_preferences.providers.remove(&provider_id);
 
         self.transaction_service
             .execute(
@@ -290,6 +340,9 @@ impl ProviderService {
                         config: FileChange::Write(new_config.into_bytes()),
                         auth: FileChange::Unchanged,
                         providers: FileChange::Write(serialize_store(&new_store)?),
+                        preferences: FileChange::Write(serialize_preference_store(
+                            &new_preferences,
+                        )?),
                     },
                 },
                 |paths| validate_provider_deleted(paths, &provider_id),
@@ -314,7 +367,17 @@ impl ProviderService {
         let validated = config_service::validate_provider_config(&provider)?;
         let api_key =
             configured_key(&disk.store, &provider_id).ok_or_else(provider_api_key_missing)?;
-        let new_config = config_service::select_provider(&disk.config_source, &provider)?;
+        let preference = disk
+            .preference_store
+            .providers
+            .get(&provider_id)
+            .ok_or_else(provider_preference_missing)?;
+        let new_config = config_service::select_provider_with_preference(
+            &disk.config_source,
+            &provider_id,
+            &preference.selected_model,
+            &preference.reasoning_efforts[&preference.selected_model],
+        )?;
 
         self.transaction_service
             .execute(
@@ -326,9 +389,18 @@ impl ProviderService {
                         config: FileChange::Write(new_config.into_bytes()),
                         auth: FileChange::Write(render_auth_json(&api_key)?),
                         providers: FileChange::Unchanged,
+                        preferences: FileChange::Unchanged,
                     },
                 },
-                |paths| validate_provider_written(paths, &validated, Some(&api_key), true),
+                |paths| {
+                    validate_provider_written(
+                        paths,
+                        &validated,
+                        Some(&api_key),
+                        Some(preference),
+                        true,
+                    )
+                },
             )
             .await?;
 
@@ -340,6 +412,78 @@ impl ProviderService {
                 "已切换到「{}」。配置已写入，请重启 Codex 后生效。",
                 validated.name
             ),
+        })
+    }
+
+    pub async fn update_provider_preference(
+        &self,
+        input: UpdateProviderPreferenceInput,
+    ) -> Result<ProviderMutationOutcome, AppError> {
+        let provider_id = config_service::validate_provider_id(&input.provider_id)?;
+        let disk = self.read_consistent_state(AuthReadMode::Skip)?;
+        if !disk
+            .provider_configs
+            .iter()
+            .any(|provider| provider.id == provider_id)
+        {
+            return Err(provider_not_found(&provider_id));
+        }
+        let mut new_preferences = disk.preference_store.clone();
+        let preference = new_preferences
+            .providers
+            .get_mut(&provider_id)
+            .ok_or_else(provider_preference_missing)?;
+        preference.select(&input.model, &input.reasoning_effort)?;
+        let expected_preference = preference.clone();
+        let is_active = config_service::current_provider_id(&disk.document).as_deref()
+            == Some(provider_id.as_str());
+        let config_change = if is_active {
+            FileChange::Write(
+                config_service::select_provider_with_preference(
+                    &disk.config_source,
+                    &provider_id,
+                    &expected_preference.selected_model,
+                    &expected_preference.reasoning_efforts[&expected_preference.selected_model],
+                )?
+                .into_bytes(),
+            )
+        } else {
+            FileChange::Unchanged
+        };
+
+        self.transaction_service
+            .execute(
+                TransactionRequest {
+                    operation: TransactionOperation::UpdateProviderPreference,
+                    provider_id: Some(provider_id.clone()),
+                    expected_files: Some(input.expected_files),
+                    changes: FileChanges {
+                        config: config_change,
+                        auth: FileChange::Unchanged,
+                        providers: FileChange::Unchanged,
+                        preferences: FileChange::Write(serialize_preference_store(
+                            &new_preferences,
+                        )?),
+                    },
+                },
+                |paths| {
+                    validate_preference_written(
+                        paths,
+                        &provider_id,
+                        &expected_preference,
+                        is_active,
+                    )
+                },
+            )
+            .await?;
+
+        Ok(ProviderMutationOutcome {
+            providers: self.list_providers()?.providers,
+            message: if is_active {
+                "模型偏好已写入当前 Codex 配置，请重启 Codex 后生效。".into()
+            } else {
+                "模型偏好已保存，将在应用此 Provider 时生效。".into()
+            },
         })
     }
 
@@ -396,6 +540,7 @@ impl ProviderService {
                         config: FileChange::Unchanged,
                         auth: FileChange::Unchanged,
                         providers: FileChange::Write(serialize_store(&new_store)?),
+                        preferences: FileChange::Unchanged,
                     },
                 },
                 |paths| validate_secret_only(paths, &active, &api_key),
@@ -418,6 +563,7 @@ impl ProviderService {
             let document = config_service::parse_document(&config_source)?;
             let provider_configs = config_service::list_provider_configs(&document)?;
             let store = self.secret_service.load_or_create()?;
+            let preference_store = self.preference_service.load()?;
             let auth_key = match auth_mode {
                 AuthReadMode::Skip => None,
                 AuthReadMode::Lenient => self.auth_service.read_api_key().ok().flatten(),
@@ -430,6 +576,7 @@ impl ProviderService {
                     document,
                     provider_configs,
                     store,
+                    preference_store,
                     auth_key,
                     fingerprints: after,
                 });
@@ -444,6 +591,7 @@ impl ProviderService {
             &self.paths.config_file,
             &self.paths.auth_file,
             &self.paths.providers_file,
+            &self.paths.provider_preferences_file,
         )
     }
 
@@ -457,6 +605,7 @@ impl ProviderService {
                     provider,
                     active_provider_id.as_deref(),
                     configured_key(&disk.store, &provider.id).is_some(),
+                    disk.preference_store.providers.get(&provider.id),
                 )
             })
             .collect();
@@ -469,6 +618,18 @@ impl ProviderService {
             active_provider_id,
             current_auth_import_available,
             fingerprints: disk.fingerprints.clone(),
+            model_catalog: model_catalog()
+                .iter()
+                .map(|entry| ModelCatalogItem {
+                    id: entry.id.into(),
+                    reasoning_efforts: entry
+                        .reasoning_efforts
+                        .iter()
+                        .map(|effort| (*effort).into())
+                        .collect(),
+                    default_reasoning_effort: entry.default_reasoning_effort.into(),
+                })
+                .collect(),
         }
     }
 }
@@ -485,6 +646,7 @@ struct DiskState {
     document: toml_edit::DocumentMut,
     provider_configs: Vec<ProviderConfig>,
     store: ProviderSecretStore,
+    preference_store: ProviderPreferenceStore,
     auth_key: Option<String>,
     fingerprints: FileSetFingerprint,
 }
@@ -493,6 +655,7 @@ fn profile_from_config(
     provider: &ProviderConfig,
     active_provider_id: Option<&str>,
     api_key_configured: bool,
+    preference: Option<&ProviderPreference>,
 ) -> ProviderProfile {
     match config_service::validate_provider_config(provider) {
         Ok(validated) => ProviderProfile {
@@ -500,7 +663,14 @@ fn profile_from_config(
             name: validated.name,
             base_url: validated.base_url,
             wire_api: WireApi::Responses,
-            model: validated.model,
+            models: preference
+                .map(|value| value.models.clone())
+                .unwrap_or_default(),
+            selected_model: preference.map(|value| value.selected_model.clone()),
+            reasoning_efforts: preference
+                .map(|value| value.reasoning_efforts.clone())
+                .unwrap_or_default(),
+            preference_configured: preference.is_some(),
             api_key_configured,
             is_active: active_provider_id == Some(provider.id.as_str()),
             is_valid: true,
@@ -511,22 +681,19 @@ fn profile_from_config(
             name: provider_display_name(provider),
             base_url: provider.base_url.clone().unwrap_or_default(),
             wire_api: WireApi::Responses,
-            model: provider.model.clone(),
+            models: preference
+                .map(|value| value.models.clone())
+                .unwrap_or_default(),
+            selected_model: preference.map(|value| value.selected_model.clone()),
+            reasoning_efforts: preference
+                .map(|value| value.reasoning_efforts.clone())
+                .unwrap_or_default(),
+            preference_configured: preference.is_some(),
             api_key_configured,
             is_active: active_provider_id == Some(provider.id.as_str()),
             is_valid: false,
             validation_message: Some(error.public_message().to_owned()),
         },
-    }
-}
-
-fn provider_config_from_validated(validated: &ValidatedProviderInput) -> ProviderConfig {
-    ProviderConfig {
-        id: validated.id.clone(),
-        name: Some(validated.name.clone()),
-        base_url: Some(validated.base_url.clone()),
-        wire_api: Some(validated.wire_api.clone()),
-        model: validated.model.clone(),
     }
 }
 
@@ -552,6 +719,7 @@ fn validate_provider_written(
     paths: &AppPaths,
     expected: &ValidatedProviderInput,
     expected_key: Option<&str>,
+    expected_preference: Option<&ProviderPreference>,
     require_active_auth: bool,
 ) -> Result<(), AppError> {
     let source = read_required_utf8(&paths.config_file)?;
@@ -573,6 +741,15 @@ fn validate_provider_written(
         return Err(post_write_validation_error(
             "provider secret state does not match expected value",
         ));
+    }
+
+    if let Some(expected_preference) = expected_preference {
+        validate_preference_written(
+            paths,
+            &expected.id,
+            expected_preference,
+            require_active_auth,
+        )?;
     }
 
     if require_active_auth {
@@ -608,6 +785,13 @@ fn validate_provider_deleted(paths: &AppPaths, provider_id: &str) -> Result<(), 
             "deleted provider still exists in providers.json",
         ));
     }
+    let preferences =
+        ProviderPreferenceService::new(paths.provider_preferences_file.clone()).load()?;
+    if preferences.providers.contains_key(provider_id) {
+        return Err(post_write_validation_error(
+            "deleted provider still exists in provider-preferences.json",
+        ));
+    }
     Ok(())
 }
 
@@ -620,6 +804,41 @@ fn validate_secret_only(paths: &AppPaths, provider_id: &str, key: &str) -> Resul
             "imported provider secret does not match auth key",
         ))
     }
+}
+
+fn validate_preference_written(
+    paths: &AppPaths,
+    provider_id: &str,
+    expected: &ProviderPreference,
+    require_active_config: bool,
+) -> Result<(), AppError> {
+    let store = ProviderPreferenceService::new(paths.provider_preferences_file.clone()).load()?;
+    if store.providers.get(provider_id) != Some(expected) {
+        return Err(post_write_validation_error(
+            "provider preference does not match expected value",
+        ));
+    }
+    if require_active_config {
+        let source = read_required_utf8(&paths.config_file)?;
+        let document = config_service::parse_document(&source)?;
+        let model = document.get("model").and_then(toml_edit::Item::as_str);
+        let effort = document
+            .get("model_reasoning_effort")
+            .and_then(toml_edit::Item::as_str);
+        if config_service::current_provider_id(&document).as_deref() != Some(provider_id)
+            || model != Some(expected.selected_model.as_str())
+            || effort
+                != expected
+                    .reasoning_efforts
+                    .get(&expected.selected_model)
+                    .map(String::as_str)
+        {
+            return Err(post_write_validation_error(
+                "top-level model preference does not match expected value",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn read_optional_utf8(path: &std::path::Path) -> Result<Option<String>, AppError> {
@@ -651,6 +870,14 @@ fn provider_api_key_missing() -> AppError {
         "PROVIDER_API_KEY_MISSING",
         "该 Provider 尚未设置 API Key，无法启用。",
         "target provider has no configured API key",
+    )
+}
+
+fn provider_preference_missing() -> AppError {
+    AppError::new(
+        "PROVIDER_PREFERENCE_MISSING",
+        "该 Provider 尚未配置可用模型，无法启用。",
+        "target provider has no configured model preference",
     )
 }
 
@@ -691,6 +918,8 @@ mod tests {
     const AUTH_A: &str = include_str!("../../../fixtures/auth-api-key.json");
     const PROVIDERS_MULTIPLE: &str = include_str!("../../../fixtures/providers-multiple.json");
     const PROVIDERS_EMPTY: &str = include_str!("../../../fixtures/providers-empty.json");
+    const PREFERENCES_MULTIPLE: &str =
+        include_str!("../../../fixtures/provider-preferences-multiple.json");
 
     fn create_paths(directory: &tempfile::TempDir) -> AppPaths {
         let codex = directory.path().join("codex");
@@ -704,6 +933,7 @@ mod tests {
         fs::write(&paths.config_file, config).unwrap();
         fs::write(&paths.auth_file, auth).unwrap();
         fs::write(&paths.providers_file, providers).unwrap();
+        fs::write(&paths.provider_preferences_file, PREFERENCES_MULTIPLE).unwrap();
     }
 
     fn create_input(state: &ProviderListState, activate_after_save: bool) -> CreateProviderInput {
@@ -712,7 +942,7 @@ mod tests {
             name: "Provider C".into(),
             base_url: "https://provider-c.example.com/v1".into(),
             wire_api: "responses".into(),
-            model: Some("test-model-c".into()),
+            models: vec!["gpt-5.6-sol".into(), "gpt-5.4-mini".into()],
             api_key: "test-key-c-not-real".into(),
             activate_after_save,
             expected_files: state.fingerprints.clone(),
@@ -831,7 +1061,8 @@ wire_api = "chat_completions"
         );
         let config = fs::read_to_string(&paths.config_file).unwrap();
         assert!(config.contains("model_provider = \"provider-c\""));
-        assert!(config.contains("model = \"test-model-c\""));
+        assert!(config.contains("model = \"gpt-5.6-sol\""));
+        assert!(config.contains("model_reasoning_effort = \"medium\""));
         assert!(config.contains("cli_auth_credentials_store = \"file\""));
         assert!(
             fs::read_to_string(&paths.auth_file)
@@ -852,7 +1083,7 @@ wire_api = "chat_completions"
             name: "Updated Provider A".into(),
             base_url: "https://updated.example.com/v1".into(),
             wire_api: "responses".into(),
-            model: None,
+            models: vec!["gpt-5.6-sol".into()],
             api_key_change: ApiKeyChange::Unchanged,
             sync_if_active: false,
             expected_files: before.fingerprints,
@@ -883,7 +1114,7 @@ wire_api = "chat_completions"
             name: "Provider A".into(),
             base_url: "https://provider-a.example.com/v2".into(),
             wire_api: "responses".into(),
-            model: Some("updated-model".into()),
+            models: vec!["gpt-5.4-mini".into()],
             api_key_change: ApiKeyChange::Set("test-key-a-updated-not-real".into()),
             sync_if_active: true,
             expected_files: before.fingerprints,
@@ -895,7 +1126,8 @@ wire_api = "chat_completions"
         assert!(auth.contains("test-key-a-updated-not-real"));
         let config = fs::read_to_string(&paths.config_file).unwrap();
         assert!(config.contains("base_url = \"https://provider-a.example.com/v2\""));
-        assert!(config.contains("model = \"updated-model\""));
+        assert!(config.contains("model = \"gpt-5.4-mini\""));
+        assert!(config.contains("model_reasoning_effort = \"none\""));
     }
 
     #[tokio::test]
@@ -910,7 +1142,7 @@ wire_api = "chat_completions"
             name: "Provider B".into(),
             base_url: "https://provider-b.example.com/v1".into(),
             wire_api: "responses".into(),
-            model: Some("test-model-b".into()),
+            models: vec!["gpt-5.5".into()],
             api_key_change: ApiKeyChange::Clear,
             sync_if_active: false,
             expected_files: before.fingerprints,

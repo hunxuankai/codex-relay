@@ -18,6 +18,7 @@ pub enum WatchedFileKind {
     Config,
     Auth,
     Providers,
+    Preferences,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -55,6 +56,7 @@ impl Drop for ApplicationWriteGuard {
             &self.paths.config_file,
             &self.paths.auth_file,
             &self.paths.providers_file,
+            &self.paths.provider_preferences_file,
         )
         .ok();
         if let Ok(mut state) = self.state.lock() {
@@ -122,6 +124,7 @@ impl WatchWorker {
                     &worker_paths.config_file,
                     &worker_paths.auth_file,
                     &worker_paths.providers_file,
+                    &worker_paths.provider_preferences_file,
                 ) {
                     Ok(fingerprints) => fingerprints,
                     Err(_) => {
@@ -256,6 +259,8 @@ fn classify_path(paths: &AppPaths, changed: &Path) -> Option<WatchedFileKind> {
         Some(WatchedFileKind::Auth)
     } else if paths_equal(changed, &paths.providers_file) {
         Some(WatchedFileKind::Providers)
+    } else if paths_equal(changed, &paths.provider_preferences_file) {
+        Some(WatchedFileKind::Preferences)
     } else {
         None
     }

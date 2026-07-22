@@ -4,6 +4,7 @@ import AppNotification from '../components/AppNotification.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import ProviderEditor from '../components/ProviderEditor.vue'
 import ProviderList from '../components/ProviderList.vue'
+import ProviderPreferenceControls from '../components/ProviderPreferenceControls.vue'
 import ProviderStatus from '../components/ProviderStatus.vue'
 import { useProviders } from '../composables/useProviders'
 import type { CreateProviderInput, UpdateProviderInput } from '../types/provider'
@@ -82,6 +83,12 @@ async function importCurrentKey() {
   await providerState.importCurrentKey(providerId)
   confirmImportCurrentKey.value = false
 }
+
+function updateSelectedPreference(model: string, reasoningEffort: string) {
+  const providerId = providerState.selectedProvider.value?.id
+  if (!providerId) return
+  void providerState.updatePreference(providerId, model, reasoningEffort)
+}
 </script>
 
 <template>
@@ -116,6 +123,7 @@ async function importCurrentKey() {
         :fingerprints="providerState.fingerprints.value"
         :existing-ids="providerState.providers.value.map((provider) => provider.id)"
         :busy="providerState.busy.value"
+        :model-catalog="providerState.modelCatalog.value"
         @submit="submitEditor"
         @cancel="cancelEditor"
       />
@@ -136,14 +144,17 @@ async function importCurrentKey() {
           <div><dt>Base URL</dt><dd>{{ providerState.selectedProvider.value.baseUrl }}</dd></div>
           <div><dt>Wire API</dt><dd>{{ providerState.selectedProvider.value.wireApi }}</dd></div>
           <div>
-            <dt>默认模型</dt>
-            <dd>{{ providerState.selectedProvider.value.model || '未指定（切换时保留现有模型）' }}</dd>
-          </div>
-          <div>
             <dt>API Key</dt>
             <dd>{{ providerState.selectedProvider.value.apiKeyConfigured ? '密钥已配置' : '未配置密钥' }}</dd>
           </div>
         </dl>
+        <ProviderPreferenceControls
+          :provider="providerState.selectedProvider.value"
+          :model-catalog="providerState.modelCatalog.value"
+          :busy="providerState.busy.value"
+          @select="updateSelectedPreference"
+          @configure="openEdit(providerState.selectedProvider.value.id)"
+        />
         <div class="detail-actions">
           <button
             type="button"
@@ -160,7 +171,8 @@ async function importCurrentKey() {
               providerState.busy.value ||
               providerState.selectedProvider.value.isActive ||
               !providerState.selectedProvider.value.isValid ||
-              !providerState.selectedProvider.value.apiKeyConfigured
+              !providerState.selectedProvider.value.apiKeyConfigured ||
+              !providerState.selectedProvider.value.preferenceConfigured
             "
             @click="providerState.switchTo(providerState.selectedProvider.value.id)"
           >

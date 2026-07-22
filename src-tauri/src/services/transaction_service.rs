@@ -6,6 +6,7 @@ use crate::models::backup::BackupSummary;
 use crate::models::settings::Settings;
 use crate::models::transaction::{ConfigTransaction, TransactionOperation};
 use crate::services::backup_service::{BackupService, FileSnapshot};
+use crate::services::provider_preference_service::ProviderPreferenceStore;
 use crate::services::provider_secret_service::ProviderSecretStore;
 use chrono::Utc;
 use std::fmt;
@@ -24,6 +25,7 @@ pub enum ManagedFileKind {
     Config,
     Auth,
     Providers,
+    Preferences,
     TransactionMarker,
     Settings,
 }
@@ -121,6 +123,7 @@ pub struct FileChanges {
     pub config: FileChange,
     pub auth: FileChange,
     pub providers: FileChange,
+    pub preferences: FileChange,
 }
 
 #[derive(Clone)]
@@ -346,6 +349,7 @@ impl TransactionService {
             config: change_from_snapshot(selected_snapshot.config.as_deref()),
             auth: change_from_snapshot(selected_snapshot.auth.as_deref()),
             providers: change_from_snapshot(selected_snapshot.providers.as_deref()),
+            preferences: change_from_snapshot(selected_snapshot.preferences.as_deref()),
         };
 
         self.execute(
@@ -365,6 +369,9 @@ impl TransactionService {
             config: self.file_ops.read_optional(&self.paths.config_file)?,
             auth: self.file_ops.read_optional(&self.paths.auth_file)?,
             providers: self.file_ops.read_optional(&self.paths.providers_file)?,
+            preferences: self
+                .file_ops
+                .read_optional(&self.paths.provider_preferences_file)?,
         })
     }
 
@@ -373,6 +380,7 @@ impl TransactionService {
             &self.paths.config_file,
             &self.paths.auth_file,
             &self.paths.providers_file,
+            &self.paths.provider_preferences_file,
         )
     }
 
@@ -393,6 +401,12 @@ impl TransactionService {
             &self.paths.providers_file,
             ManagedFileKind::Providers,
             &changes.providers,
+            WritePhase::Forward,
+        )?;
+        self.apply_change(
+            &self.paths.provider_preferences_file,
+            ManagedFileKind::Preferences,
+            &changes.preferences,
             WritePhase::Forward,
         )
     }
@@ -444,6 +458,12 @@ impl TransactionService {
     ) -> Result<(), AppError> {
         let mut first_error = None;
         for (path, kind, change, original) in [
+            (
+                &self.paths.provider_preferences_file,
+                ManagedFileKind::Preferences,
+                &changes.preferences,
+                snapshot.preferences.as_deref(),
+            ),
             (
                 &self.paths.providers_file,
                 ManagedFileKind::Providers,
@@ -556,6 +576,17 @@ fn validate_managed_file(kind: ManagedFileKind, bytes: &[u8]) -> Result<(), AppE
                 ))
             }
         }
+        ManagedFileKind::Preferences => {
+            let store: ProviderPreferenceStore =
+                serde_json::from_slice(bytes).map_err(|error| {
+                    AppError::new(
+                        "INVALID_TEMP_PROVIDER_PREFERENCES",
+                        "临时 provider-preferences.json 验证失败。",
+                        error.to_string(),
+                    )
+                })?;
+            crate::services::provider_preference_service::serialize_store(&store).map(|_| ())
+        }
         ManagedFileKind::TransactionMarker => serde_json::from_slice::<serde_json::Value>(bytes)
             .map(|_| ())
             .map_err(|error| {
@@ -599,6 +630,10 @@ fn validate_snapshot_matches(paths: &AppPaths, snapshot: &FileSnapshot) -> Resul
         (&paths.config_file, snapshot.config.as_deref()),
         (&paths.auth_file, snapshot.auth.as_deref()),
         (&paths.providers_file, snapshot.providers.as_deref()),
+        (
+            &paths.provider_preferences_file,
+            snapshot.preferences.as_deref(),
+        ),
     ] {
         let actual = match fs::read(path) {
             Ok(bytes) => Some(bytes),
@@ -689,6 +724,7 @@ wire_api = "responses"
                 config: FileChange::Write(CONFIG_B.to_vec()),
                 auth: FileChange::Write(AUTH_B.to_vec()),
                 providers: FileChange::Unchanged,
+                preferences: FileChange::Unchanged,
             },
         }
     }
@@ -702,6 +738,7 @@ wire_api = "responses"
             &paths.config_file,
             &paths.auth_file,
             &paths.providers_file,
+            &paths.provider_preferences_file,
         )
         .unwrap();
         let backup = BackupService::new(paths.backups_dir.clone(), "0.1.0");
@@ -745,6 +782,7 @@ wire_api = "responses"
             &paths.config_file,
             &paths.auth_file,
             &paths.providers_file,
+            &paths.provider_preferences_file,
         )
         .unwrap();
         fs::write(&paths.config_file, b"model_provider = \"external\"\n").unwrap();
@@ -1047,6 +1085,7 @@ wire_api = "responses"
                     config: Some(CONFIG_B.to_vec()),
                     auth: Some(AUTH_B.to_vec()),
                     providers: Some(PROVIDERS.to_vec()),
+                    preferences: None,
                 },
             )
             .unwrap();

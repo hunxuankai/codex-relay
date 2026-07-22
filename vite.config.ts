@@ -1,8 +1,9 @@
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
+import ElementPlus from 'unplugin-element-plus/vite'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), ElementPlus()],
   clearScreen: false,
   server: {
     port: 43971,
@@ -15,5 +16,10 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
+    server: {
+      deps: {
+        inline: ['element-plus'],
+      },
+    },
   },
 })

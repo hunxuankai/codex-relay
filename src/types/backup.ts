@@ -2,6 +2,7 @@ export type BackupFileName =
   | 'config.toml'
   | 'auth.json'
   | 'providers.json'
+  | 'provider-preferences.json'
   | 'metadata.json'
 
 export interface BackupMetadata {
@@ -12,6 +13,7 @@ export interface BackupMetadata {
   configExisted: boolean
   authExisted: boolean
   providersExisted: boolean
+  preferencesExisted?: boolean
   appVersion: string
 }
 

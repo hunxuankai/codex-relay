@@ -42,7 +42,8 @@ defineEmits<{
     <section class="info-card" aria-labelledby="workflow-title">
       <h2 id="workflow-title">工作原理</h2>
       <ol class="workflow-list">
-        <li><code>config.toml</code> 保存 Provider 地址、模型等非秘密配置。</li>
+        <li><code>config.toml</code> 保存 Provider 地址及 Codex 顶层当前模型、推理强度等官方配置。</li>
+        <li><code>provider-preferences.json</code> 保存 Relay 的 Provider 模型集合和逐模型推理强度偏好。</li>
         <li><code>providers.json</code> 保存每个 Provider 对应的 API Key。</li>
         <li>切换 Provider 时，将目标配置同步到 <code>config.toml</code>，并将目标密钥写入 <code>auth.json</code>。</li>
         <li>每次受管写入前创建备份；写入失败时尝试恢复所有已触及文件。</li>
@@ -57,9 +58,9 @@ defineEmits<{
           <ul>
             <li>
               <code>config.toml</code>：新增、编辑或删除 <code>model_providers</code> 中的目标
-              Provider。启用或切换时还会更新顶层 <code>model_provider</code> 和
-              <code>cli_auth_credentials_store</code>；若目标 Provider 配置了默认模型，还会更新
-              顶层 <code>model</code>，否则保留原值。
+              Provider。启用或切换时还会更新顶层 <code>model_provider</code>、<code>model</code>、
+              <code>model_reasoning_effort</code> 和 <code>cli_auth_credentials_store</code>。Relay
+              不会把私有偏好写入 <code>[model_providers.&lt;id&gt;]</code>。
             </li>
             <li>
               <code>auth.json</code>：启用或切换时重新生成，只保存当前生效的
@@ -76,6 +77,7 @@ defineEmits<{
           <h3>Codex Relay 应用数据</h3>
           <ul>
             <li><code>providers.json</code>：各 Provider 的 API Key。</li>
+            <li><code>provider-preferences.json</code>：各 Provider 的可用模型、当前偏好和逐模型推理强度。</li>
             <li><code>settings.json</code>：窗口、托盘、首次引导、自启动和应用网络代理设置。</li>
             <li>
               <code>backups/</code>：配置事务快照、元数据和设置备份；备份页可展开事务文件列表，

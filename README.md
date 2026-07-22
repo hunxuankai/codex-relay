@@ -180,7 +180,7 @@ Codex 配置目录按以下优先级解析：
 
 ### `config.toml`
 
-Codex Provider 配置的主要数据源。Codex Relay 只局部修改目标 Provider、顶层 `model_provider`、`cli_auth_credentials_store`，以及目标 Provider 明确配置模型时的顶层 `model`。其他 Provider、注释、`[features]` 和未知字段必须保留。
+Codex Provider 配置的主要数据源。Codex Relay 只局部修改目标 Provider、顶层 `model_provider`、`model`、`model_reasoning_effort` 和 `cli_auth_credentials_store`。Provider 块内不写入 Relay 私有模型偏好；其他 Provider、注释、`[features]` 和未知字段必须保留。
 
 ### `auth.json`
 
@@ -197,6 +197,10 @@ Codex Provider 配置的主要数据源。Codex Relay 只局部修改目标 Prov
 ### `providers.json`
 
 位于 `%LOCALAPPDATA%\CodexRelay\providers.json`，按 Provider ID 保存独立 API Key。文件损坏时不会静默覆盖；应用先保存损坏副本，再返回安全错误并引导重新设置密钥。
+
+### `provider-preferences.json`
+
+位于 `%LOCALAPPDATA%\CodexRelay\provider-preferences.json`，保存每个 Provider 的可用模型、当前偏好模型以及每个模型独立的 `model_reasoning_effort`。模型目录随软件版本发布，不支持在线更新；该文件不是 Codex 官方配置，不会写入 `[model_providers.<id>]`。当前 Provider 的偏好修改会同步顶层 `model` 与 `model_reasoning_effort`，其他 Provider 在应用时生效。
 
 ### 其他应用数据
 
@@ -222,7 +226,7 @@ Codex Provider 配置的主要数据源。Codex Relay 只局部修改目标 Prov
 
 新增和编辑会先校验 ID、名称、HTTP(S) Base URL、固定 `responses` Wire API、模型和密钥规则。Provider ID 创建后不可修改。当前 Provider 的生效字段修改可选择立即同步；清除当前密钥时不能立即同步，现有 `auth.json` 可能继续保留当前生效密钥。
 
-切换步骤包括：重新读取三个文件、验证目标与密钥、检查外部修改指纹、创建统一备份、生成内存结果、写入临时文件、解析验证、替换正式文件、再次验证、刷新托盘与界面。成功提示包含“请重启 Codex 后生效”。
+切换步骤包括：重新读取四个受管文件、验证目标偏好与密钥、检查外部修改指纹、创建统一备份、生成内存结果、写入临时文件、解析验证、替换正式文件、再次验证、刷新托盘与界面。成功提示包含“请重启 Codex 后生效”。
 
 当前 Provider 不能直接删除，必须先切换到其他 Provider。详见 [配置事务安全](.trellis/spec/security/transaction-safety.md)。
 
@@ -259,7 +263,7 @@ Tauri 更新包签名用于证明下载资产与客户端内置信任根匹配�
 
 ## 备份与恢复
 
-每次 Provider 创建、编辑、删除、切换、同步或恢复前都会创建事务备份。备份包含原始 `config.toml`、`auth.json`、`providers.json` 文件快照，因此备份中可能包含明文 API Key；`metadata.json` 不含密钥。最多保留最近 20 份，并避免删除当前事务需要的备份。
+每次 Provider 创建、编辑、删除、切换、同步或恢复前都会创建事务备份。备份包含原始 `config.toml`、`auth.json`、`providers.json`、`provider-preferences.json` 文件快照，因此备份中可能包含明文 API Key；`metadata.json` 不含密钥。最多保留最近 20 份，并避免删除当前事务需要的备份。
 
 备份页可在每条记录中展开实际存在的文件列表，并直接使用 Windows 记事本打开所选文件。该入口只允许上述四种事务备份文件，不向前端返回文件内容或绝对路径。
 

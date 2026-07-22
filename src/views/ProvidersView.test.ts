@@ -11,7 +11,13 @@ const fingerprints = {
   config: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'config' },
   auth: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'auth' },
   providers: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'providers' },
+  preferences: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'preferences' },
 }
+
+const modelCatalog = [
+  { id: 'gpt-5.6-sol', reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'], defaultReasoningEffort: 'medium' },
+  { id: 'gpt-5.4-mini', reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'], defaultReasoningEffort: 'none' },
+] as const
 
 function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
   return {
@@ -19,7 +25,10 @@ function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
     name: 'Provider A',
     baseUrl: 'https://provider-a.example.test/v1',
     wireApi: 'responses',
-    model: null,
+    models: ['gpt-5.6-sol'],
+    selectedModel: 'gpt-5.6-sol',
+    reasoningEfforts: { 'gpt-5.6-sol': 'medium' },
+    preferenceConfigured: true,
     apiKeyConfigured: true,
     isActive: false,
     isValid: true,
@@ -51,6 +60,7 @@ function controller() {
   return {
     providers,
     fingerprints: shallowRef(fingerprints),
+    modelCatalog: ref([...modelCatalog]),
     currentAuthImportAvailable: shallowRef(false),
     selectedProviderId,
     selectedProvider,
@@ -65,6 +75,7 @@ function controller() {
     remove,
     switchTo,
     importCurrentKey: vi.fn(),
+    updatePreference: vi.fn(),
     selectProvider: vi.fn((id: string) => {
       selectedProviderId.value = id
       selectedProvider.value = providers.value.find((item) => item.id === id) ?? null
@@ -86,6 +97,8 @@ describe('ProvidersView', () => {
     await wrapper.get('[name="provider-id"]').setValue('provider-b')
     await wrapper.get('[name="provider-name"]').setValue('Provider B')
     await wrapper.get('[name="base-url"]').setValue('https://provider-b.example.test/v1')
+    wrapper.getComponent({ name: 'ElSelect' }).vm.$emit('update:modelValue', ['gpt-5.6-sol'])
+    await nextTick()
     await wrapper.get('#provider-api-key').setValue('test-key-not-real')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -147,7 +160,7 @@ describe('ProvidersView', () => {
     expect(detail.text()).toContain('provider-a')
     expect(detail.text()).toContain('https://provider-a.example.test/v1')
     expect(detail.text()).toContain('responses')
-    expect(detail.text()).toContain('未指定（切换时保留现有模型）')
+    expect(detail.text()).toContain('gpt-5.6-sol')
     expect(detail.text()).toContain('密钥已配置')
     expect(detail.find('[aria-label="编辑所选 Provider"]').exists()).toBe(true)
   })

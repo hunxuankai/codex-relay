@@ -8,7 +8,7 @@
 ## 2. 签名
 
 ```rust
-enum BackupFileName { Config, Auth, Providers, Metadata }
+enum BackupFileName { Config, Auth, Providers, Preferences, Metadata }
 
 fn BackupService::resolve_backup_file(
     &self,
@@ -27,7 +27,7 @@ fn open_backup_file(
 前端对应接口：
 
 ```typescript
-type BackupFileName = 'config.toml' | 'auth.json' | 'providers.json' | 'metadata.json'
+type BackupFileName = 'config.toml' | 'auth.json' | 'providers.json' | 'provider-preferences.json' | 'metadata.json'
 openBackupFile(directoryName: string, fileName: BackupFileName): Promise<void>
 ```
 
@@ -35,7 +35,7 @@ openBackupFile(directoryName: string, fileName: BackupFileName): Promise<void>
 
 - `BackupSummary.files` 只包含元数据允许且当前磁盘实际存在的固定文件名。
 - `metadata.json` 对有效备份通常存在；其余文件由 `configExisted`、`authExisted`、
-  `providersExisted` 限定。
+  `providersExisted`、`preferencesExisted` 限定。
 - command 只把后端验证后的规范化路径作为 `notepad.exe` 的单个参数。
 - 前端、事件、通知和日志不得包含备份文件内容、API Key 或绝对路径。
 - 不支持 `settings-*.json`、`.corrupt-*` 或备份目录中的其他文件。

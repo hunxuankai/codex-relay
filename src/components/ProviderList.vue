@@ -63,8 +63,16 @@ const emit = defineEmits<{
               <dd>{{ provider.wireApi }}</dd>
             </div>
             <div>
-              <dt>默认模型</dt>
-              <dd>{{ provider.model || '未指定（切换时保留现有模型）' }}</dd>
+              <dt>偏好模型</dt>
+              <dd>
+                {{
+                  provider.selectedModel ||
+                  provider.model ||
+                  (provider.preferenceConfigured === false
+                    ? '模型偏好未配置'
+                    : '未指定（切换时保留现有模型）')
+                }}
+              </dd>
             </div>
           </dl>
           <p v-if="provider.validationMessage" class="validation-message">
@@ -83,7 +91,7 @@ const emit = defineEmits<{
             <button
               type="button"
               :aria-label="`使用 ${provider.name}`"
-              :disabled="busy || provider.isActive || !provider.isValid || !provider.apiKeyConfigured"
+              :disabled="busy || provider.isActive || !provider.isValid || !provider.apiKeyConfigured || provider.preferenceConfigured === false"
               @click="emit('use', provider.id)"
             >
               使用

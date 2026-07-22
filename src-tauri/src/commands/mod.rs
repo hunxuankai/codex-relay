@@ -88,6 +88,11 @@ mod tests {
             include_str!("../../../fixtures/providers-multiple.json"),
         )
         .unwrap();
+        fs::write(
+            &paths.provider_preferences_file,
+            include_str!("../../../fixtures/provider-preferences-multiple.json"),
+        )
+        .unwrap();
         let autostart = AutostartService::new(Arc::new(FakeAutostartBackend::default()));
         let state = AppState::new(paths, "0.1.0", autostart, Arc::new(FakeCodexProbe)).unwrap();
         (directory, state)
@@ -116,7 +121,7 @@ mod tests {
             name: "Provider".into(),
             base_url: "https://example.com/v1".into(),
             wire_api: "responses".into(),
-            model: None,
+            models: vec!["gpt-5.6-sol".into()],
             api_key: "test-key-command-not-real".into(),
             activate_after_save: false,
             expected_files: current.fingerprints,
