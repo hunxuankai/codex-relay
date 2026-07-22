@@ -30,6 +30,12 @@ const emit = defineEmits<{ select: [providerId: string] }>()
 - 使用 Element Plus 后不得再用全局 `button:hover`、`button:disabled`、`input:not(...)` 或 `input[type=checkbox]` 重设背景、边框、文字和尺寸；这些选择器会命中组件内部原生节点，产生白字浅底、双层输入框和开关错位。应改用 `.el-button`、`.el-input__wrapper`、`.el-switch` 等明确组件边界。
 - `ElCard` 的插槽内容位于 `.el-card__body`；grid、gap、padding、对齐等内容布局必须写在 `:deep(.el-card__body)`，卡片根类只负责边框、背景、圆角和选中态。
 - `ElButton` 会为默认插槽增加内容 `<span>`；按钮内包含图标与文字或多个字段时，必须增加显式内容容器，或对 `.el-button > span` 设置布局，不能假设按钮的直接子节点仍是业务元素。
+- 绑定到 `ElButton` 的装饰类只负责布局（如宽度、对齐、间距），不要在裸类规则中直接
+  设置 `color`、`background`、`background-color` 或 `border-color`。这些声明会与 Element
+  Plus 的 `:hover`、`:active` 和 `.is-disabled` 状态规则竞争，尤其会把危险纯按钮的白色
+  hover 文字覆盖回危险色，导致危险背景上的文字不可读。颜色应优先由 `type`、`plain`、
+  `text`、`link` 和主题 `--el-*` 变量提供；确需覆盖时必须使用明确的状态选择器，并补充
+  浅色、暗色和禁用状态测试。
 - 继续显式导入组件并由 `unplugin-element-plus` 按需注入样式；不得改成 `app.use(ElementPlus)` 全量导入。
 - 危险确认通过共享 `ConfirmDialog` 使用 `ElDialog`；必须关闭遮罩点击关闭，默认聚焦安全动作，并验证 Escape 与关闭后焦点恢复。
 - 测试优先使用可见文本、`aria-label`、公开 props/emits 或组件类型，不锁定 `.el-*` 私有 DOM 层级。
@@ -53,6 +59,26 @@ const emit = defineEmits<{ select: [providerId: string] }>()
 </style>
 
 <!-- 错误：为了组件覆盖率把所有语义结构机械替换成通用容器 -->
+```
+
+按钮样式示例：
+
+```vue
+<!-- 正确：语义颜色由 Element Plus 管理，类名只做布局 -->
+<ElButton class="clear-key-button" type="danger" plain>清空密钥</ElButton>
+
+<style scoped>
+.clear-key-button {
+  width: fit-content;
+}
+</style>
+
+<!-- 错误：静态颜色覆盖 hover/active 的语义颜色 -->
+<style scoped>
+.clear-key-button {
+  color: var(--danger);
+}
+</style>
 ```
 
 ## IPC 契约

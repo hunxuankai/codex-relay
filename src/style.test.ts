@@ -1,10 +1,50 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const styles = readFileSync('src/style.css', 'utf8')
 const app = readFileSync('src/App.vue', 'utf8')
 const confirmDialog = readFileSync('src/components/ConfirmDialog.vue', 'utf8')
 const selfCheckErrorBanner = readFileSync('src/components/SelfCheckErrorBanner.vue', 'utf8')
+const apiKeyInput = readFileSync('src/components/ApiKeyInput.vue', 'utf8')
+
+function collectVueSources(directory: string): Array<{ path: string; source: string }> {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) return collectVueSources(path)
+    if (!entry.isFile() || !entry.name.endsWith('.vue')) return []
+    return [{ path: path.replace(/\\/g, '/'), source: readFileSync(path, 'utf8') }]
+  })
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function findDirectButtonColorOverrides() {
+  return collectVueSources('src').flatMap(({ path, source }) => {
+    const buttonClasses = new Set<string>()
+    for (const button of source.matchAll(/<ElButton\b([\s\S]*?)>/g)) {
+      const classAttribute = (button[1] ?? '').match(/\bclass="([^"]+)"/)
+      for (const className of (classAttribute?.[1] ?? '').split(/\s+/)) {
+        if (className) buttonClasses.add(className)
+      }
+    }
+
+    const styles = [...source.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)]
+      .map((match) => match[1] ?? '')
+      .join('\n')
+
+    return [...buttonClasses].flatMap((className) => {
+      const rule = new RegExp(`\\.${escapeRegExp(className)}\\s*\\{([\\s\\S]*?)\\}`, 'g')
+      return [...styles.matchAll(rule)]
+        .filter((match) =>
+          /(?:^|[;\n])\s*(?:color|background(?:-color)?|border-color)\s*:/.test(match[1] ?? ''),
+        )
+        .map(() => `${path}: .${className}`)
+    })
+  })
+}
 
 describe('global Windows visual system', () => {
   it('uses reusable color tokens for light and dark themes', () => {
@@ -39,6 +79,11 @@ describe('global Windows visual system', () => {
     expect(styles).toContain('--el-button-disabled-text-color: var(--accent-strong)')
     expect(styles).toContain('.el-button--danger.is-disabled')
     expect(styles).toContain('--el-button-disabled-text-color: var(--danger)')
+  })
+
+  it('lets Element Plus own semantic state colors across decorated buttons', () => {
+    expect(apiKeyInput).toMatch(/type="danger"\s+plain\s+[\s\S]*class="danger-link"/)
+    expect(findDirectButtonColorOverrides()).toEqual([])
   })
 
   it('provides a narrow-window layout without a fixed desktop width', () => {

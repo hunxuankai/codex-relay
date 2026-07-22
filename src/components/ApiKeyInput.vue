@@ -103,7 +103,6 @@ function confirmClear() {
 
 .danger-link {
   width: fit-content;
-  color: var(--danger);
 }
 
 .clear-confirmation {
