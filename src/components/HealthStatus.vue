@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, useTemplateRef, watch } from 'vue'
 import type { DeepReadonly } from 'vue'
 import type { HealthReport } from '../types/health'
 
@@ -8,6 +8,7 @@ const props = defineProps<{
   loading: boolean
   busy: boolean
   errorMessage: string | null
+  targetCheck?: Readonly<{ id: string }> | null
 }>()
 
 const emit = defineEmits<{
@@ -21,6 +22,23 @@ const summaryLabel = computed(() => {
   if (props.report?.level === 'error') return '错误'
   return '尚未检查'
 })
+
+const checkElements = useTemplateRef<HTMLElement[]>('checkElements')
+
+watch(
+  () => props.targetCheck,
+  async (targetCheck) => {
+    if (!targetCheck) return
+    await nextTick()
+    const target = checkElements.value?.find(
+      (element) => element.dataset.checkId === targetCheck.id && element.dataset.level === 'error',
+    )
+    if (!target) return
+    target.scrollIntoView({ block: 'center' })
+    target.focus({ preventScroll: true })
+  },
+  { immediate: true, flush: 'post' },
+)
 </script>
 
 <template>
@@ -42,9 +60,12 @@ const summaryLabel = computed(() => {
       <li
         v-for="check in report.checks"
         :key="check.id"
+        ref="checkElements"
         class="health-check"
+        tabindex="-1"
         :data-check-id="check.id"
         :data-level="check.level"
+        :data-targeted="check.id === targetCheck?.id && check.level === 'error' ? 'true' : undefined"
       >
         <div class="check-heading">
           <strong>{{ check.label }}</strong>
@@ -121,5 +142,11 @@ const summaryLabel = computed(() => {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.health-check[data-targeted='true'] {
+  outline: 3px solid var(--danger);
+  outline-offset: 2px;
+  background: var(--danger-soft);
 }
 </style>

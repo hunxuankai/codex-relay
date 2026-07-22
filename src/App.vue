@@ -32,6 +32,7 @@ const updater = useUpdater({
   },
 })
 const activeView = shallowRef<AppView>('providers')
+const healthCheckTarget = shallowRef<{ id: string } | null>(null)
 const onboardingDismissed = shallowRef(false)
 const startCreatingProvider = shallowRef(false)
 const pendingFirstProvider = shallowRef(false)
@@ -60,6 +61,9 @@ const healthLabel = computed(() => {
 })
 const selfCheckErrorCount = computed(
   () => healthState.report.value?.checks.filter((item) => item.level === 'error').length ?? 0,
+)
+const firstSelfCheckErrorId = computed(
+  () => healthState.report.value?.checks.find((item) => item.level === 'error')?.id ?? null,
 )
 const operationText = computed(
   () =>
@@ -137,7 +141,15 @@ async function handleBackupRestored() {
 
 function selectView(view: AppView) {
   activeView.value = view
+  healthCheckTarget.value = null
   if (view !== 'providers') startCreatingProvider.value = false
+}
+
+function openSelfCheckErrorDetails() {
+  const id = firstSelfCheckErrorId.value
+  if (!id) return
+  selectView('health')
+  healthCheckTarget.value = { id }
 }
 
 let startupUpdateCheckStarted = false
@@ -250,7 +262,7 @@ onUnmounted(() => {
       v-if="selfCheckErrorCount > 0"
       class="self-check-error-banner-slot"
       :error-count="selfCheckErrorCount"
-      @view-details="selectView('health')"
+      @view-details="openSelfCheckErrorDetails"
     />
 
     <AppNotification
@@ -274,6 +286,7 @@ onUnmounted(() => {
         :loading="healthState.loading.value"
         :busy="healthState.busy.value"
         :error-message="healthState.error.value?.message ?? null"
+        :target-check="healthCheckTarget"
         @rerun="healthState.runExtended"
       />
       <BackupsView v-else-if="activeView === 'backups'" @restored="handleBackupRestored" />

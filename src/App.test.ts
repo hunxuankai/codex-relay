@@ -295,6 +295,11 @@ describe('App', () => {
   })
 
   it('shows self-check errors below the header and opens their details', async () => {
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    })
     const state = controllers()
     state.healthState.report.value = {
       ...healthReport(),
@@ -317,7 +322,7 @@ describe('App', () => {
     mocks.useProviders.mockReturnValue(state.providerState)
     mocks.useHealth.mockReturnValue(state.healthState)
     mocks.useSettings.mockReturnValue(state.settingsState)
-    const wrapper = mount(App, { global: { stubs } })
+    const wrapper = mount(App, { attachTo: document.body, global: { stubs } })
     await flushPromises()
 
     const alert = wrapper.get('[aria-label="系统自检错误提示"]')
@@ -329,6 +334,10 @@ describe('App', () => {
 
     expect(wrapper.get('[aria-label="自检状态"]').text()).toContain('系统自检')
     expect(wrapper.get('[aria-label="打开自检"]').attributes('aria-current')).toBe('page')
+    const firstError = wrapper.get('[data-check-id="config-file"]')
+    expect(firstError.attributes('data-targeted')).toBe('true')
+    expect(document.activeElement).toBe(firstError.element)
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' })
 
     state.healthState.report.value = healthReport()
     await nextTick()
@@ -339,6 +348,7 @@ describe('App', () => {
     await nextTick()
 
     expect(wrapper.find('[aria-label="系统自检错误提示"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('does not claim post-restore refresh success when a refresh fails', async () => {
