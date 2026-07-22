@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { ElButton, ElInput, ElSwitch } from 'element-plus'
 import type { NetworkProxySettings } from '../types/settings'
 
 const props = defineProps<{
@@ -17,19 +18,6 @@ const emit = defineEmits<{
 
 const trimmedUrl = computed(() => props.modelValue.url.trim())
 
-function updateEnabled(event: Event) {
-  emit('update:modelValue', {
-    ...props.modelValue,
-    enabled: (event.target as HTMLInputElement).checked,
-  })
-}
-
-function updateUrl(event: Event) {
-  emit('update:modelValue', {
-    ...props.modelValue,
-    url: (event.target as HTMLInputElement).value,
-  })
-}
 </script>
 
 <template>
@@ -40,46 +28,47 @@ function updateUrl(event: Event) {
         <strong>启用应用内代理</strong>
         <small>用于检查更新和下载安装包，不影响 Codex CLI。</small>
       </span>
-      <input
-        type="checkbox"
+      <ElSwitch
         aria-label="启用应用内代理"
-        :checked="modelValue.enabled"
+        :model-value="modelValue.enabled"
         :disabled="busy"
-        @change="updateEnabled"
+        @change="emit('update:modelValue', { ...modelValue, enabled: Boolean($event) })"
       />
     </label>
     <label class="proxy-address">
       <span>代理地址</span>
-      <input
+      <ElInput
         name="proxy-url"
         type="url"
         autocomplete="off"
         placeholder="http://127.0.0.1:7890"
-        :value="modelValue.url"
+        :model-value="modelValue.url"
         :disabled="busy"
-        @input="updateUrl"
+        @update:model-value="emit('update:modelValue', { ...modelValue, url: String($event) })"
       />
       <small>仅支持无认证的 HTTP/HTTPS 代理，必须包含协议。</small>
     </label>
     <div class="proxy-actions">
-      <button
+      <ElButton
         v-if="trimmedUrl"
         data-action="test-proxy"
-        type="button"
+        type="primary"
+        native-type="button"
         :disabled="busy || testing || discovering"
         @click="emit('test')"
       >
         {{ testing ? '正在测试…' : '测试代理' }}
-      </button>
-      <button
+      </ElButton>
+      <ElButton
         v-else
         data-action="discover-proxy"
-        type="button"
+        type="primary"
+        native-type="button"
         :disabled="busy || testing || discovering"
         @click="emit('discover')"
       >
         {{ discovering ? '正在检测…' : '一键设置本机代理' }}
-      </button>
+      </ElButton>
     </div>
   </section>
 </template>
@@ -113,9 +102,8 @@ function updateUrl(event: Event) {
   gap: 0.25rem;
 }
 
-.proxy-address input {
+.proxy-address :deep(.el-input) {
   width: 100%;
-  box-sizing: border-box;
 }
 
 .setting-row small,

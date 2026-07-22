@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
+import { ElButton, ElCard, ElSwitch } from 'element-plus'
 import AppNotification from '../components/AppNotification.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import ProxyDiscoveryDialog from '../components/ProxyDiscoveryDialog.vue'
@@ -32,8 +33,8 @@ watch(
   { immediate: true },
 )
 
-function toggleAutostart(event: Event) {
-  settingsState.setAutostart((event.target as HTMLInputElement).checked)
+function toggleAutostart(value: boolean | string | number) {
+  settingsState.setAutostart(Boolean(value))
 }
 
 function save() {
@@ -75,9 +76,9 @@ async function applyDetectedProxy() {
         <p class="eyebrow">Settings</p>
         <h1>应用设置</h1>
       </div>
-      <button type="button" :disabled="settingsState.loading.value" @click="settingsState.refresh">
+      <ElButton native-type="button" :disabled="settingsState.loading.value" @click="settingsState.refresh">
         刷新状态
-      </button>
+      </ElButton>
     </header>
 
     <AppNotification :message="settingsState.successMessage.value" level="success" />
@@ -87,7 +88,7 @@ async function applyDetectedProxy() {
 
     <p v-if="settingsState.loading.value && !settingsState.settings.value">正在加载设置…</p>
     <form v-else-if="settingsState.settings.value" class="settings-form" @submit.prevent="save">
-      <section class="settings-section">
+      <ElCard class="settings-section" shadow="never">
         <h2>开机启动</h2>
         <label class="setting-row">
           <span>
@@ -96,10 +97,9 @@ async function applyDetectedProxy() {
               Windows 实际状态：{{ settingsState.autostart.value?.actualEnabled ? '已启用' : '未启用' }}
             </small>
           </span>
-          <input
-            type="checkbox"
+          <ElSwitch
             aria-label="登录 Windows 后自动启动"
-            :checked="settingsState.autostart.value?.actualEnabled ?? false"
+            :model-value="settingsState.autostart.value?.actualEnabled ?? false"
             :disabled="settingsState.busy.value"
             @change="toggleAutostart"
           />
@@ -107,7 +107,7 @@ async function applyDetectedProxy() {
         <p v-if="settingsState.autostart.value && !settingsState.autostart.value.isConsistent" class="warning" role="status">
           设置与 Windows 实际状态不一致，请重新切换或刷新后重试。
         </p>
-      </section>
+      </ElCard>
 
       <ProxySettingsPanel
         v-model="draft.networkProxy"
@@ -118,35 +118,35 @@ async function applyDetectedProxy() {
         @discover="proxyDiscovery.requestDiscovery"
       />
 
-      <section class="settings-section">
+      <ElCard class="settings-section" shadow="never">
         <h2>窗口与托盘</h2>
         <label class="setting-row">
           <span>开机自动启动时仅显示托盘</span>
-          <input
+          <ElSwitch
             v-model="draft.trayOnlyOnAutostart"
             name="tray-only-on-autostart"
-            type="checkbox"
+            aria-label="开机自动启动时仅显示托盘"
           />
         </label>
         <label class="setting-row">
           <span>关闭窗口时隐藏到托盘</span>
-          <input v-model="draft.closeToTray" name="close-to-tray" type="checkbox" />
+          <ElSwitch v-model="draft.closeToTray" name="close-to-tray" aria-label="关闭窗口时隐藏到托盘" />
         </label>
         <label class="setting-row">
           <span>手动启动时显示主窗口</span>
-          <input
+          <ElSwitch
             v-model="draft.showWindowOnManualStart"
             name="show-window-on-manual-start"
-            type="checkbox"
+            aria-label="手动启动时显示主窗口"
           />
         </label>
-      </section>
+      </ElCard>
 
       <div class="settings-actions">
-        <button type="submit" :disabled="settingsState.busy.value">保存设置</button>
-        <button type="button" :disabled="settingsState.busy.value" @click="settingsState.openDirectory">
+        <ElButton type="primary" native-type="submit" :disabled="settingsState.busy.value">保存设置</ElButton>
+        <ElButton native-type="button" :disabled="settingsState.busy.value" @click="settingsState.openDirectory">
           打开 Codex 配置目录
-        </button>
+        </ElButton>
       </div>
     </form>
 
@@ -174,8 +174,7 @@ async function applyDetectedProxy() {
 
 <style scoped>
 .settings-view,
-.settings-form,
-.settings-section {
+.settings-form {
   display: grid;
   gap: 1rem;
 }
@@ -210,6 +209,11 @@ async function applyDetectedProxy() {
 .settings-section {
   border: 1px solid var(--border);
   border-radius: 0.8rem;
+}
+
+.settings-section :deep(.el-card__body) {
+  display: grid;
+  gap: 1rem;
   padding: 1rem;
 }
 

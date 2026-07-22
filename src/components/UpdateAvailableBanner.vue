@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ElAlert, ElButton } from 'element-plus'
+
 defineProps<{ version: string }>()
 
 const emit = defineEmits<{
@@ -8,18 +10,21 @@ const emit = defineEmits<{
 
 <template>
   <section class="update-available-banner" aria-label="软件更新提示" role="status">
-    <div class="update-available-copy">
-      <span class="update-available-icon" aria-hidden="true">↑</span>
-      <strong>发现新版本 {{ version }}，可前往设置页下载并安装。</strong>
-    </div>
-    <button
-      type="button"
+    <ElAlert
+      class="update-available-copy"
+      type="info"
+      :title="`发现新版本 ${version}，可前往设置页下载并安装。`"
+      :closable="false"
+      show-icon
+    />
+    <ElButton
+      native-type="button"
       class="update-available-action"
       aria-label="前往软件更新设置"
       @click="emit('viewUpdate')"
     >
       前往更新
-    </button>
+    </ElButton>
   </section>
 </template>
 
@@ -36,20 +41,9 @@ const emit = defineEmits<{
 }
 
 .update-available-copy {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-}
-
-.update-available-icon {
-  display: inline-grid;
-  flex: 0 0 auto;
-  width: 1.6rem;
-  height: 1.6rem;
-  place-items: center;
-  border: 2px solid currentColor;
-  border-radius: 50%;
-  font-weight: 800;
+  flex: 1;
+  padding: 0;
+  background: transparent;
 }
 
 .update-available-action {

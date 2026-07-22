@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { shallowRef } from 'vue'
+import { ElButton, ElInput } from 'element-plus'
 
 defineProps<{
   configured: boolean
@@ -26,7 +27,7 @@ function confirmClear() {
   <div class="api-key-field">
     <label class="field-label" for="provider-api-key">API Key</label>
     <div class="input-row">
-      <input
+      <ElInput
         id="provider-api-key"
         v-model="model"
         class="text-input"
@@ -38,34 +39,36 @@ function confirmClear() {
         autocomplete="off"
         spellcheck="false"
       />
-      <button
-        type="button"
+      <ElButton
+        native-type="button"
         :aria-label="visible ? '隐藏 API Key' : '显示 API Key'"
         :disabled="disabled"
         @click="visible = !visible"
       >
         {{ visible ? '隐藏' : '显示' }}
-      </button>
+      </ElButton>
     </div>
     <p class="field-help">
       {{ configured ? '未输入新值时不会覆盖现有密钥。' : '密钥仅保存在本机明文配置文件中。' }}
     </p>
-    <button
+    <ElButton
       v-if="configured && !confirmingClear"
-      type="button"
+      native-type="button"
+      type="danger"
+      plain
       class="danger-link"
       aria-label="清空 API Key"
       :disabled="disabled"
       @click="confirmingClear = true"
     >
       清空密钥
-    </button>
+    </ElButton>
     <div v-if="confirmingClear" class="clear-confirmation" role="alert">
       <span>确认清空已保存的 API Key？</span>
-      <button type="button" aria-label="确认清空 API Key" @click="confirmClear">确认清空</button>
-      <button type="button" aria-label="取消清空 API Key" @click="confirmingClear = false">
+      <ElButton type="danger" native-type="button" aria-label="确认清空 API Key" @click="confirmClear">确认清空</ElButton>
+      <ElButton native-type="button" aria-label="取消清空 API Key" @click="confirmingClear = false">
         取消
-      </button>
+      </ElButton>
     </div>
   </div>
 </template>

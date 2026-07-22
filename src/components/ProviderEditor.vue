@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, shallowRef, useTemplateRef, watch } from 'vue'
-import { ElOption, ElSelect } from 'element-plus'
+import { ElButton, ElCheckbox, ElInput, ElOption, ElSelect } from 'element-plus'
 import type {
   ApiKeyChange,
   CreateProviderInput,
@@ -173,7 +173,7 @@ async function submit() {
         <p class="eyebrow">{{ mode === 'create' ? 'New Provider' : provider?.id }}</p>
         <h2 class="editor-title">{{ mode === 'create' ? '新增 Provider' : `编辑 ${provider?.name}` }}</h2>
       </div>
-      <button type="button" :disabled="busy" @click="emit('cancel')">取消</button>
+      <ElButton native-type="button" :disabled="busy" @click="emit('cancel')">取消</ElButton>
     </header>
 
     <p v-if="mode === 'edit' && provider?.isActive" class="current-warning" role="note">
@@ -183,7 +183,7 @@ async function submit() {
     <form ref="form" class="editor-form" novalidate @submit.prevent="submit">
       <label class="field">
         <span>Provider ID</span>
-        <input
+        <ElInput
           v-model="draft.id"
           name="provider-id"
           :disabled="busy || mode === 'edit'"
@@ -197,7 +197,7 @@ async function submit() {
 
       <label class="field">
         <span>名称</span>
-        <input
+        <ElInput
           v-model="draft.name"
           name="provider-name"
           :disabled="busy"
@@ -210,7 +210,7 @@ async function submit() {
 
       <label class="field">
         <span>Base URL</span>
-        <input
+        <ElInput
           v-model="draft.baseUrl"
           name="base-url"
           type="url"
@@ -224,7 +224,7 @@ async function submit() {
 
       <label class="field">
         <span>Wire API</span>
-        <input name="wire-api" value="responses" disabled />
+        <ElInput name="wire-api" model-value="responses" disabled />
       </label>
 
       <div class="field">
@@ -269,18 +269,16 @@ async function submit() {
         <span v-if="errors.apiKey" id="api-key-error" class="field-error" role="alert">{{ errors.apiKey }}</span>
       </div>
 
-      <label v-if="mode === 'create'" class="check-field">
-        <input v-model="draft.activateAfterSave" type="checkbox" name="activate-after-save" />
+      <ElCheckbox v-if="mode === 'create'" v-model="draft.activateAfterSave" class="check-field" name="activate-after-save">
         保存后立即启用
-      </label>
-      <label v-if="canSyncActiveChanges" class="check-field">
-        <input v-model="draft.syncIfActive" type="checkbox" name="sync-if-active" />
+      </ElCheckbox>
+      <ElCheckbox v-if="canSyncActiveChanges" v-model="draft.syncIfActive" class="check-field" name="sync-if-active">
         保存后立即同步当前 Codex 配置
-      </label>
+      </ElCheckbox>
 
-      <button class="submit-button" type="submit" :disabled="busy">
+      <ElButton class="submit-button" type="primary" native-type="submit" :disabled="busy">
         {{ busy ? '正在保存…' : '保存 Provider' }}
-      </button>
+      </ElButton>
     </form>
   </section>
 </template>
@@ -315,7 +313,7 @@ async function submit() {
   font-weight: 600;
 }
 
-.field input {
+.field :deep(.el-input__inner) {
   font: inherit;
   font-weight: 400;
 }

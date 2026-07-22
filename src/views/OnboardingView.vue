@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { shallowRef } from 'vue'
+import { ElButton, ElCard } from 'element-plus'
 import AppNotification from '../components/AppNotification.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
@@ -29,7 +30,7 @@ function importCurrentKey() {
 
 <template>
   <main class="onboarding-view">
-    <section class="onboarding-card" aria-label="首次设置">
+    <ElCard class="onboarding-card" shadow="always" aria-label="首次设置">
       <p class="eyebrow">Codex Relay</p>
       <h1>首次设置</h1>
       <p>尚未检测到可用的 Codex Provider 配置。你可以现在新增，也可以稍后再设置。</p>
@@ -39,55 +40,59 @@ function importCurrentKey() {
 
       <aside v-if="canImportCurrentKey && currentProviderName" class="import-callout">
         <p>检测到当前 Codex 配置中存在 API Key，是否将其保存到当前 Provider「{{ currentProviderName }}」？</p>
-        <button
-          type="button"
+        <ElButton
+          type="primary"
+          native-type="button"
           aria-label="保存当前 auth.json 密钥"
           :disabled="busy"
           @click="confirmImport = true"
         >
           保存到当前 Provider
-        </button>
+        </ElButton>
       </aside>
 
       <div class="onboarding-actions">
-        <button
-          type="button"
+        <ElButton
+          native-type="button"
           data-onboarding-action
           aria-label="打开 Codex 配置目录"
           :disabled="busy"
           @click="emit('openDirectory')"
         >
           打开 Codex 配置目录
-        </button>
-        <button
-          type="button"
+        </ElButton>
+        <ElButton
+          type="primary"
+          native-type="button"
           data-onboarding-action
           aria-label="新增第一个 Provider"
           :disabled="busy"
           @click="emit('addProvider')"
         >
           新增第一个 Provider
-        </button>
-        <button
-          type="button"
+        </ElButton>
+        <ElButton
+          native-type="button"
           data-onboarding-action
           aria-label="稍后设置"
           :disabled="busy"
           @click="emit('later')"
         >
           稍后设置
-        </button>
-        <button
-          type="button"
+        </ElButton>
+        <ElButton
+          type="danger"
+          plain
+          native-type="button"
           data-onboarding-action
           aria-label="退出"
           :disabled="busy"
           @click="emit('exit')"
         >
           退出
-        </button>
+        </ElButton>
       </div>
-    </section>
+    </ElCard>
 
     <ConfirmDialog
       :open="confirmImport"
@@ -108,7 +113,6 @@ function importCurrentKey() {
   padding: 1.5rem;
 }
 
-.onboarding-card,
 .onboarding-actions {
   display: grid;
   gap: 1rem;
@@ -118,9 +122,14 @@ function importCurrentKey() {
   width: min(100%, 38rem);
   border: 1px solid var(--border);
   border-radius: 1rem;
-  padding: 1.5rem;
   background: var(--surface);
   box-shadow: var(--shadow);
+}
+
+.onboarding-card :deep(.el-card__body) {
+  display: grid;
+  gap: 1rem;
+  padding: 1.5rem;
 }
 
 .onboarding-card h1,

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, useTemplateRef, watch } from 'vue'
+import { ElButton, ElTag } from 'element-plus'
 import type { DeepReadonly } from 'vue'
 import type { HealthReport } from '../types/health'
 
@@ -48,9 +49,9 @@ watch(
         <p class="eyebrow">Health</p>
         <h1>系统自检</h1>
       </div>
-      <span class="health-summary" :data-level="report?.level ?? 'unknown'">
+      <ElTag class="health-summary" :data-level="report?.level ?? 'unknown'" :type="report?.level === 'normal' ? 'success' : report?.level === 'warning' ? 'warning' : report?.level === 'error' ? 'danger' : 'info'" effect="plain" round>
         {{ summaryLabel }}
-      </span>
+      </ElTag>
     </header>
 
     <p v-if="errorMessage" class="health-error" role="alert">{{ errorMessage }}</p>
@@ -75,14 +76,15 @@ watch(
       </li>
     </ul>
 
-    <button
-      type="button"
+    <ElButton
+      type="primary"
+      native-type="button"
       aria-label="重新运行完整自检"
       :disabled="busy"
       @click="emit('rerun')"
     >
       {{ busy ? '正在检查…' : '重新运行完整自检' }}
-    </button>
+    </ElButton>
   </section>
 </template>
 

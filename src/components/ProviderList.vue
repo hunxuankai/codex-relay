@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ElButton, ElCard, ElEmpty } from 'element-plus'
 import type { ProviderProfile } from '../types/provider'
 import ProviderStatus from './ProviderStatus.vue'
 
@@ -24,33 +25,38 @@ const emit = defineEmits<{
         <p class="eyebrow">Providers</p>
         <h2 class="provider-list-title">模型服务</h2>
       </div>
-      <button
+      <ElButton
         class="primary-button"
-        type="button"
+        type="primary"
+        native-type="button"
         aria-label="新增 Provider"
         :disabled="busy"
         @click="emit('create')"
       >
         新增
-      </button>
+      </ElButton>
     </header>
 
-    <p v-if="providers.length === 0" class="empty-state">还没有 Provider。</p>
+    <ElEmpty v-if="providers.length === 0" class="empty-state" description="还没有 Provider。" />
     <ul v-else class="provider-items">
       <li v-for="provider in providers" :key="provider.id">
-        <article
+        <ElCard
           class="provider-card"
           :class="{ selected: selectedProviderId === provider.id }"
+          shadow="never"
         >
-          <button
+          <ElButton
             class="provider-select"
-            type="button"
+            text
+            native-type="button"
             :aria-label="`选择 ${provider.name}`"
             @click="emit('select', provider.id)"
           >
-            <span class="provider-name">{{ provider.name }}</span>
-            <span class="provider-id">{{ provider.id }}</span>
-          </button>
+            <span class="provider-select-content">
+              <span class="provider-name">{{ provider.name }}</span>
+              <span class="provider-id">{{ provider.id }}</span>
+            </span>
+          </ElButton>
 
           <ProviderStatus :provider="provider" />
           <dl class="provider-details">
@@ -80,32 +86,35 @@ const emit = defineEmits<{
           </p>
 
           <div class="provider-actions">
-            <button
-              type="button"
+            <ElButton
+              native-type="button"
               :aria-label="`编辑 ${provider.name}`"
               :disabled="busy"
               @click="emit('edit', provider.id)"
             >
               编辑
-            </button>
-            <button
-              type="button"
+            </ElButton>
+            <ElButton
+              type="primary"
+              native-type="button"
               :aria-label="`使用 ${provider.name}`"
               :disabled="busy || provider.isActive || !provider.isValid || !provider.apiKeyConfigured || provider.preferenceConfigured === false"
               @click="emit('use', provider.id)"
             >
               使用
-            </button>
-            <button
-              type="button"
+            </ElButton>
+            <ElButton
+              type="danger"
+              plain
+              native-type="button"
               :aria-label="`删除 ${provider.name}`"
               :disabled="busy || provider.isActive"
               @click="emit('delete', provider.id)"
             >
               删除
-            </button>
+            </ElButton>
           </div>
-        </article>
+        </ElCard>
       </li>
     </ul>
   </section>
@@ -149,11 +158,14 @@ const emit = defineEmits<{
 }
 
 .provider-card {
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  background: var(--surface);
+}
+
+.provider-card :deep(.el-card__body) {
   display: grid;
   gap: 0.75rem;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: 0.8rem;
   padding: 0.9rem;
 }
 
@@ -164,16 +176,38 @@ const emit = defineEmits<{
 }
 
 .provider-select {
-  justify-content: space-between;
-  gap: 1rem;
+  width: 100%;
+  justify-content: stretch;
   border: 0;
   padding: 0;
-  background: transparent;
   text-align: left;
 }
 
+:deep(.provider-select > span) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.provider-select-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  min-width: 0;
+}
+
 .provider-name {
+  min-width: 0;
   font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.provider-id {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .provider-details {

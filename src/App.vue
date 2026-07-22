@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, shallowRef, watch } from 'vue'
+import { ElButton, ElConfigProvider } from 'element-plus'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import aboutIcon from './assets/icons/about.svg'
 import backupsIcon from './assets/icons/backups.svg'
 import healthIcon from './assets/icons/health.svg'
@@ -192,62 +194,68 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="startupLoading" class="startup-screen" aria-live="polite">
-    <strong>Codex Relay</strong>
-    <span>正在加载本机配置…</span>
-  </div>
+  <ElConfigProvider :locale="zhCn" size="large" :z-index="3000">
+    <div v-if="startupLoading" class="startup-screen" aria-live="polite">
+      <strong>Codex Relay</strong>
+      <span>正在加载本机配置…</span>
+    </div>
 
-  <OnboardingView
-    v-else-if="showOnboarding"
-    :busy="providerState.busy?.value || settingsState.busy.value"
-    :current-provider-name="providerState.activeProvider.value?.name ?? null"
-    :can-import-current-key="providerState.currentAuthImportAvailable.value"
-    :success-message="providerState.successMessage.value"
-    :error-message="providerState.error.value?.message ?? settingsState.error.value?.message ?? null"
-    @open-directory="settingsState.openDirectory"
-    @add-provider="addFirstProvider"
-    @later="configureLater"
-    @exit="exitApplication"
-    @import-current-key="importCurrentKey"
-  />
+    <OnboardingView
+      v-else-if="showOnboarding"
+      :busy="providerState.busy?.value || settingsState.busy.value"
+      :current-provider-name="providerState.activeProvider.value?.name ?? null"
+      :can-import-current-key="providerState.currentAuthImportAvailable.value"
+      :success-message="providerState.successMessage.value"
+      :error-message="providerState.error.value?.message ?? settingsState.error.value?.message ?? null"
+      @open-directory="settingsState.openDirectory"
+      @add-provider="addFirstProvider"
+      @later="configureLater"
+      @exit="exitApplication"
+      @import-current-key="importCurrentKey"
+    />
 
-  <div v-else class="app-shell">
+    <div v-else class="app-shell">
     <header class="app-header">
       <div>
         <p class="eyebrow">Codex Relay</p>
         <h1>Provider 控制台</h1>
       </div>
       <nav class="app-nav" aria-label="主导航">
-        <button
-          type="button"
+        <ElButton
+          text
+          native-type="button"
           aria-label="打开 Providers"
           :aria-current="activeView === 'providers' ? 'page' : undefined"
           @click="selectView('providers')"
-        ><img :src="providersIcon" alt="" />Providers</button>
-        <button
-          type="button"
+        ><img :src="providersIcon" alt="" />Providers</ElButton>
+        <ElButton
+          text
+          native-type="button"
           aria-label="打开自检"
           :aria-current="activeView === 'health' ? 'page' : undefined"
           @click="selectView('health')"
-        ><img :src="healthIcon" alt="" />自检</button>
-        <button
-          type="button"
+        ><img :src="healthIcon" alt="" />自检</ElButton>
+        <ElButton
+          text
+          native-type="button"
           aria-label="打开备份与恢复"
           :aria-current="activeView === 'backups' ? 'page' : undefined"
           @click="selectView('backups')"
-        ><img :src="backupsIcon" alt="" />备份</button>
-        <button
-          type="button"
+        ><img :src="backupsIcon" alt="" />备份</ElButton>
+        <ElButton
+          text
+          native-type="button"
           aria-label="打开设置"
           :aria-current="activeView === 'settings' ? 'page' : undefined"
           @click="selectView('settings')"
-        ><img :src="settingsIcon" alt="" />设置</button>
-        <button
-          type="button"
+        ><img :src="settingsIcon" alt="" />设置</ElButton>
+        <ElButton
+          text
+          native-type="button"
           aria-label="打开关于"
           :aria-current="activeView === 'about' ? 'page' : undefined"
           @click="selectView('about')"
-        ><img :src="aboutIcon" alt="" />关于</button>
+        ><img :src="aboutIcon" alt="" />关于</ElButton>
       </nav>
     </header>
 
@@ -304,11 +312,12 @@ onUnmounted(() => {
       <span>当前 Provider：{{ providerState.activeProvider.value?.name ?? '未设置' }}</span>
       <span>最近操作：{{ operationText }}</span>
       <span>自检：{{ healthLabel }}</span>
-      <button type="button" aria-label="打开 Codex 配置目录" @click="settingsState.openDirectory">
+      <ElButton text native-type="button" aria-label="打开 Codex 配置目录" @click="settingsState.openDirectory">
         打开目录
-      </button>
+      </ElButton>
     </footer>
-  </div>
+    </div>
+  </ElConfigProvider>
 </template>
 
 <style scoped>
@@ -383,13 +392,18 @@ onUnmounted(() => {
   overflow: auto;
 }
 
-.app-nav button {
+.app-nav :deep(.el-button) {
+  display: inline-flex;
+  align-items: center;
+}
+
+.app-nav :deep(.el-button > span) {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
 }
 
-.app-nav button[aria-current='page'] {
+.app-nav :deep(.el-button[aria-current='page']) {
   border-color: var(--accent);
   color: var(--accent-strong);
   background: var(--accent-soft);
@@ -412,7 +426,7 @@ onUnmounted(() => {
   background: var(--surface);
 }
 
-.status-bar button {
+.status-bar :deep(.el-button) {
   margin-left: auto;
 }
 
@@ -431,7 +445,7 @@ onUnmounted(() => {
     flex-direction: column;
   }
 
-  .status-bar button {
+  .status-bar :deep(.el-button) {
     margin-left: 0;
   }
 }

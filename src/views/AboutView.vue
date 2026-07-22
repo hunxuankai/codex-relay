@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ElButton, ElCard } from 'element-plus'
 defineProps<{
   appVersion: string | null
   configDirectory: string | null
@@ -22,7 +23,7 @@ defineEmits<{
       </div>
     </header>
 
-    <section class="info-card current-info" aria-labelledby="current-info-title">
+    <ElCard class="info-card current-info" shadow="never" aria-labelledby="current-info-title">
       <h2 id="current-info-title">当前信息</h2>
       <dl class="info-list">
         <div>
@@ -34,12 +35,12 @@ defineEmits<{
           <dd><code>{{ configDirectory ?? '正在检测' }}</code></dd>
         </div>
       </dl>
-      <button type="button" aria-label="打开当前 Codex 配置目录" @click="$emit('openDirectory')">
+      <ElButton type="primary" plain native-type="button" aria-label="打开当前 Codex 配置目录" @click="$emit('openDirectory')">
         打开配置目录
-      </button>
-    </section>
+      </ElButton>
+    </ElCard>
 
-    <section class="info-card" aria-labelledby="workflow-title">
+    <ElCard class="info-card" shadow="never" aria-labelledby="workflow-title">
       <h2 id="workflow-title">工作原理</h2>
       <ol class="workflow-list">
         <li><code>config.toml</code> 保存 Provider 地址及 Codex 顶层当前模型、推理强度等官方配置。</li>
@@ -48,9 +49,9 @@ defineEmits<{
         <li>切换 Provider 时，将目标配置同步到 <code>config.toml</code>，并将目标密钥写入 <code>auth.json</code>。</li>
         <li>每次受管写入前创建备份；写入失败时尝试恢复所有已触及文件。</li>
       </ol>
-    </section>
+    </ElCard>
 
-    <section class="info-card" aria-labelledby="modified-title">
+    <ElCard class="info-card" shadow="never" aria-labelledby="modified-title">
       <h2 id="modified-title">会修改哪些内容</h2>
       <div class="content-grid">
         <article class="content-section">
@@ -96,9 +97,9 @@ defineEmits<{
           </ul>
         </article>
       </div>
-    </section>
+    </ElCard>
 
-    <section class="info-card warning-card" aria-labelledby="security-title">
+    <ElCard class="info-card warning-card" shadow="never" aria-labelledby="security-title">
       <h2 id="security-title">数据与安全</h2>
       <ul>
         <li><code>providers.json</code>、<code>auth.json</code> 和配置备份可能包含明文 API Key。</li>
@@ -106,13 +107,12 @@ defineEmits<{
         <li>从界面清空密钥只会修改本机文件，不会在 Provider 平台吊销远端凭据。</li>
         <li>卸载程序不会删除 Codex 配置、Codex Relay 应用数据、API Key、日志或备份。</li>
       </ul>
-    </section>
+    </ElCard>
   </main>
 </template>
 
 <style scoped>
 .about-view,
-.info-card,
 .content-grid,
 .content-section,
 .workflow-list,
@@ -152,11 +152,16 @@ defineEmits<{
 .info-card {
   border: 1px solid var(--border);
   border-radius: 0.8rem;
-  padding: 1rem;
   background: var(--surface);
 }
 
-.current-info {
+.info-card :deep(.el-card__body) {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.current-info :deep(.el-card__body) {
   justify-items: start;
 }
 

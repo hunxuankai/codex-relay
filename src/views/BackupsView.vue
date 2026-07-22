@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
+import { ElButton, ElEmpty, ElSkeleton } from 'element-plus'
 import AppNotification from '../components/AppNotification.vue'
 import BackupCard from '../components/BackupCard.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -41,16 +42,16 @@ function toggleFiles(directoryName: string) {
         <p class="eyebrow">Backups</p>
         <h1>备份与恢复</h1>
       </div>
-      <button type="button" :disabled="backupState.loading.value" @click="backupState.refresh">
+      <ElButton native-type="button" :disabled="backupState.loading.value" @click="backupState.refresh">
         刷新列表
-      </button>
+      </ElButton>
     </header>
 
     <AppNotification :message="backupState.successMessage.value" level="success" />
     <AppNotification :message="backupState.error.value?.message ?? null" level="error" />
 
-    <p v-if="backupState.loading.value">正在加载备份…</p>
-    <p v-else-if="backupState.backups.value.length === 0">暂无可恢复的事务备份。</p>
+    <ElSkeleton v-if="backupState.loading.value" :rows="3" animated aria-label="正在加载备份" />
+    <ElEmpty v-else-if="backupState.backups.value.length === 0" description="暂无可恢复的事务备份。" />
     <ul v-else class="backup-list">
       <BackupCard
         v-for="backup in backupState.backups.value"

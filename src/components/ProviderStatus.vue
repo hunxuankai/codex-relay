@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ElTag } from 'element-plus'
 import type { ProviderProfile } from '../types/provider'
 
 defineProps<{
@@ -8,14 +9,15 @@ defineProps<{
 
 <template>
   <div class="provider-status" aria-label="Provider 状态">
-    <span v-if="provider.isActive" class="status-badge status-current">当前</span>
-    <span
-      class="status-badge"
-      :class="provider.apiKeyConfigured ? 'status-ready' : 'status-warning'"
+    <ElTag v-if="provider.isActive" type="success" effect="plain" round>当前</ElTag>
+    <ElTag
+      :type="provider.apiKeyConfigured ? 'success' : 'warning'"
+      effect="plain"
+      round
     >
       {{ provider.apiKeyConfigured ? '密钥已配置' : '未配置密钥' }}
-    </span>
-    <span v-if="!provider.isValid" class="status-badge status-error">配置无效</span>
+    </ElTag>
+    <ElTag v-if="!provider.isValid" type="danger" effect="plain" round>配置无效</ElTag>
   </div>
 </template>
 
@@ -26,23 +28,8 @@ defineProps<{
   gap: 0.4rem;
 }
 
-.status-badge {
-  border: 1px solid currentColor;
-  border-radius: 999px;
-  padding: 0.12rem 0.5rem;
-  font-size: 0.75rem;
-}
-
-.status-current,
-.status-ready {
-  color: var(--success);
-}
-
-.status-warning {
-  color: var(--warning);
-}
-
-.status-error {
-  color: var(--danger);
+.provider-status :deep(.el-tag) {
+  height: auto;
+  min-height: 1.6rem;
 }
 </style>

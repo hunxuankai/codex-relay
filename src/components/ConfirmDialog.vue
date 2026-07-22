@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
+import { nextTick, shallowRef, useTemplateRef, watch } from 'vue'
+import { ElButton, ElDialog } from 'element-plus'
+import type { ButtonInstance } from 'element-plus'
 
 const props = withDefaults(
   defineProps<{
@@ -17,9 +19,17 @@ const emit = defineEmits<{
   cancel: []
 }>()
 
-const dialog = useTemplateRef<HTMLElement>('dialog')
-const cancelButton = useTemplateRef<HTMLButtonElement>('cancelButton')
+const cancelButton = useTemplateRef<ButtonInstance>('cancelButton')
 const previousFocus = shallowRef<HTMLElement | null>(null)
+
+function focusCancelButton() {
+  const element = cancelButton.value?.$el
+  if (element instanceof HTMLButtonElement) element.focus()
+}
+
+function scheduleCancelFocus() {
+  setTimeout(focusCancelButton, 0)
+}
 
 watch(
   () => props.open,
@@ -27,115 +37,71 @@ watch(
     if (open) {
       previousFocus.value = document.activeElement instanceof HTMLElement ? document.activeElement : null
       await nextTick()
-      cancelButton.value?.focus()
-    } else {
-      await nextTick()
-      previousFocus.value?.focus()
-      previousFocus.value = null
+      scheduleCancelFocus()
+      return
     }
+    await nextTick()
+    previousFocus.value?.focus()
+    previousFocus.value = null
   },
   { immediate: true },
 )
 
-function handleKeydown(event: KeyboardEvent) {
-  if (!props.open) return
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    emit('cancel')
-    return
-  }
-  if (event.key !== 'Tab' || !dialog.value) return
-  const focusable = Array.from(
-    dialog.value.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled])'),
-  )
-  const first = focusable[0]
-  const last = focusable[focusable.length - 1]
-  if (!first || !last) return
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault()
-    last.focus()
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault()
-    first.focus()
-  }
+function handleModelValue(value: boolean) {
+  if (!value && props.open) emit('cancel')
 }
-
-onMounted(() => document.addEventListener('keydown', handleKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', handleKeydown))
 </script>
 
 <template>
-  <div v-if="open" class="dialog-backdrop" role="presentation">
-    <section
-      ref="dialog"
-      class="confirm-dialog"
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="confirm-dialog-title"
-      aria-describedby="confirm-dialog-message"
-    >
-      <h2 id="confirm-dialog-title" class="dialog-title">{{ title }}</h2>
-      <p id="confirm-dialog-message" class="dialog-message">{{ message }}</p>
+  <ElDialog
+    class="confirm-dialog"
+    :model-value="open"
+    :title="title"
+    width="min(28rem, calc(100vw - 2rem))"
+    :show-close="false"
+    :close-on-click-modal="false"
+    destroy-on-close
+    role="alertdialog"
+    aria-describedby="confirm-dialog-message"
+    @update:model-value="handleModelValue"
+    @open-auto-focus="scheduleCancelFocus"
+    @opened="scheduleCancelFocus"
+  >
+    <p id="confirm-dialog-message" class="dialog-message">{{ message }}</p>
+    <template #footer>
       <div class="dialog-actions">
-        <button
+        <ElButton
           ref="cancelButton"
-          type="button"
+          native-type="button"
           aria-label="取消确认"
           @click="emit('cancel')"
         >
           取消
-        </button>
-        <button
+        </ElButton>
+        <ElButton
           :class="props.tone === 'danger' ? 'danger-button' : 'primary-button'"
-          type="button"
+          :type="props.tone === 'danger' ? 'danger' : 'primary'"
+          native-type="button"
           aria-label="确认操作"
           @click="emit('confirm')"
         >
           {{ confirmLabel }}
-        </button>
+        </ElButton>
       </div>
-    </section>
-  </div>
+    </template>
+  </ElDialog>
 </template>
 
 <style scoped>
-.dialog-backdrop {
-  position: fixed;
-  z-index: 100;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 1rem;
-  background: var(--overlay);
-}
-
-.confirm-dialog {
-  width: min(28rem, 100%);
-  border-radius: 1rem;
-  padding: 1.25rem;
-  background: var(--surface);
-  box-shadow: var(--shadow);
-  box-shadow: var(--shadow);
-}
-
-.dialog-title,
 .dialog-message {
-  margin-top: 0;
+  margin: 0;
+  color: var(--text-primary);
+  line-height: 1.65;
 }
 
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.75rem;
-}
-
-.danger-button {
-  color: var(--on-danger);
-  background: var(--danger-button-background);
-}
-
-.primary-button {
-  color: var(--on-danger);
-  background: var(--accent);
 }
 </style>

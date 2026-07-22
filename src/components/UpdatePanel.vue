@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ElButton, ElCard, ElProgress } from 'element-plus'
 import ConfirmDialog from './ConfirmDialog.vue'
 import type { UpdaterController } from '../composables/useUpdater'
 
@@ -6,19 +7,19 @@ defineProps<{ updater: UpdaterController }>()
 </script>
 
 <template>
-  <section class="update-panel" aria-labelledby="update-panel-title">
+  <ElCard class="update-panel" shadow="never" aria-labelledby="update-panel-title">
     <div class="update-header">
       <div>
         <h2 id="update-panel-title">应用更新</h2>
         <p class="version-text">当前版本：{{ updater.currentVersion.value ?? '检查后显示' }}</p>
       </div>
-      <button
-        type="button"
+      <ElButton
+        native-type="button"
         :disabled="['checking', 'downloading', 'launching'].includes(updater.status.value)"
         @click="updater.check"
       >
         {{ updater.status.value === 'checking' ? '正在检查…' : '检查更新' }}
-      </button>
+      </ElButton>
     </div>
 
     <p v-if="updater.status.value === 'upToDate'" role="status">当前已是最新版本。</p>
@@ -27,14 +28,13 @@ defineProps<{ updater: UpdaterController }>()
       <p>发现新版本 {{ updater.release.value?.version }}</p>
       <p v-if="updater.release.value?.date">发布日期：{{ updater.release.value.date }}</p>
       <p v-if="updater.release.value?.notes" class="release-notes">{{ updater.release.value.notes }}</p>
-      <button type="button" @click="updater.requestInstall">下载并安装</button>
+      <ElButton type="primary" native-type="button" @click="updater.requestInstall">下载并安装</ElButton>
     </div>
 
     <div v-if="updater.status.value === 'downloading'" class="download-status" role="status" aria-live="polite">
-      <progress
+      <ElProgress
         v-if="updater.progress.value?.totalBytes !== null && updater.progress.value?.totalBytes !== undefined"
-        :value="updater.progress.value.downloadedBytes"
-        :max="updater.progress.value.totalBytes"
+        :percentage="Math.round(updater.progress.value.percent ?? 0)"
       />
       <p>
         {{ updater.progress.value?.percent === null || updater.progress.value?.percent === undefined
@@ -59,11 +59,10 @@ defineProps<{ updater: UpdaterController }>()
       @confirm="updater.confirmInstall"
       @cancel="updater.cancelInstall"
     />
-  </section>
+  </ElCard>
 </template>
 
 <style scoped>
-.update-panel,
 .release-info,
 .download-status {
   display: grid;
@@ -73,6 +72,11 @@ defineProps<{ updater: UpdaterController }>()
 .update-panel {
   border: 1px solid var(--border);
   border-radius: 0.8rem;
+}
+
+.update-panel :deep(.el-card__body) {
+  display: grid;
+  gap: 0.75rem;
   padding: 1rem;
 }
 
@@ -105,7 +109,7 @@ defineProps<{ updater: UpdaterController }>()
   color: var(--danger);
 }
 
-progress {
+.update-panel :deep(.el-progress) {
   width: 100%;
 }
 

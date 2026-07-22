@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
+import { ElButton } from 'element-plus'
 import AppNotification from '../components/AppNotification.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import ProviderEditor from '../components/ProviderEditor.vue'
@@ -156,16 +157,17 @@ function updateSelectedPreference(model: string, reasoningEffort: string) {
           @configure="openEdit(providerState.selectedProvider.value.id)"
         />
         <div class="detail-actions">
-          <button
-            type="button"
+          <ElButton
+            native-type="button"
             aria-label="编辑所选 Provider"
             :disabled="providerState.busy.value"
             @click="openEdit(providerState.selectedProvider.value.id)"
           >
             编辑
-          </button>
-          <button
-            type="button"
+          </ElButton>
+          <ElButton
+            type="primary"
+            native-type="button"
             aria-label="使用所选 Provider"
             :disabled="
               providerState.busy.value ||
@@ -177,28 +179,32 @@ function updateSelectedPreference(model: string, reasoningEffort: string) {
             @click="providerState.switchTo(providerState.selectedProvider.value.id)"
           >
             使用此 Provider
-          </button>
-          <button
-            type="button"
+          </ElButton>
+          <ElButton
+            type="danger"
+            plain
+            native-type="button"
             aria-label="删除所选 Provider"
             :disabled="providerState.busy.value || providerState.selectedProvider.value.isActive"
             @click="requestDelete(providerState.selectedProvider.value.id)"
           >
             删除
-          </button>
+          </ElButton>
         </div>
         <aside
           v-if="providerState.currentAuthImportAvailable.value && providerState.activeProvider.value"
           class="import-key-callout"
         >
           <p>检测到当前 auth.json 中存在尚未保存到当前 Provider 的 API Key。</p>
-          <button
-            type="button"
+          <ElButton
+            type="warning"
+            plain
+            native-type="button"
             aria-label="导入当前 auth.json 密钥"
             @click="confirmImportCurrentKey = true"
           >
             导入当前密钥
-          </button>
+          </ElButton>
         </aside>
       </article>
       <div v-else class="detail-placeholder">

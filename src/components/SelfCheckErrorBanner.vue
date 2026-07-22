@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ElAlert, ElButton } from 'element-plus'
+
 defineProps<{
   errorCount: number
 }>()
@@ -10,18 +12,22 @@ const emit = defineEmits<{
 
 <template>
   <section class="self-check-error-banner" aria-label="系统自检错误提示" role="alert">
-    <div class="self-check-error-copy">
-      <span class="self-check-error-icon" aria-hidden="true">!</span>
-      <strong>系统自检发现 {{ errorCount }} 个错误项，请及时处理。</strong>
-    </div>
-    <button
-      type="button"
+    <ElAlert
+      class="self-check-error-copy"
+      type="error"
+      :title="`系统自检发现 ${errorCount} 个错误项，请及时处理。`"
+      :closable="false"
+      show-icon
+    />
+    <ElButton
+      native-type="button"
+      type="danger"
       class="self-check-error-action"
       aria-label="查看自检详情"
       @click="emit('viewDetails')"
     >
       查看自检详情
-    </button>
+    </ElButton>
   </section>
 </template>
 
@@ -38,34 +44,13 @@ const emit = defineEmits<{
 }
 
 .self-check-error-copy {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-}
-
-.self-check-error-icon {
-  display: inline-grid;
-  flex: 0 0 auto;
-  width: 1.6rem;
-  height: 1.6rem;
-  place-items: center;
-  border: 2px solid currentColor;
-  border-radius: 50%;
-  font-weight: 800;
+  flex: 1;
+  padding: 0;
+  background: transparent;
 }
 
 .self-check-error-action {
   flex: 0 0 auto;
-  border-color: var(--danger-button-background);
-  color: var(--on-danger);
-  background: var(--danger-button-background);
-}
-
-.self-check-error-action:hover:not(:disabled) {
-  border-color: var(--danger-button-background);
-  color: var(--on-danger);
-  background: var(--danger-button-background);
-  filter: brightness(0.92);
 }
 
 @media (max-width: 720px) {

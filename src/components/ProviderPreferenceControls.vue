@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ElSegmented } from 'element-plus'
+import { ElButton, ElSegmented } from 'element-plus'
 import type { ModelCatalogItem, ProviderProfile } from '../types/provider'
 
 const props = defineProps<{
@@ -71,7 +71,9 @@ function selectReasoningEffort(value: string | number | boolean) {
     </template>
     <div v-else class="preference-missing" role="note">
       <p>模型偏好未配置，完成配置前不能应用此 Provider。</p>
-      <button type="button" :disabled="busy" @click="emit('configure')">编辑并配置模型</button>
+      <ElButton type="primary" plain native-type="button" :disabled="busy" @click="emit('configure')">
+        编辑并配置模型
+      </ElButton>
     </div>
   </section>
 </template>
