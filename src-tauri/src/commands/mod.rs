@@ -1,4 +1,5 @@
 pub mod backup_commands;
+pub mod provider_availability_commands;
 pub mod provider_commands;
 pub mod self_check_commands;
 pub mod settings_commands;
@@ -220,5 +221,39 @@ mod tests {
         assert_eq!(result.error.unwrap().code, "INVALID_BACKUP_NAME");
         assert!(!json.contains("outside"));
         assert!(!json.contains("CodexRelay"));
+    }
+
+    #[tokio::test]
+    async fn provider_availability_commands_validate_request_ids_without_writing_files() {
+        let (_directory, state) = create_state();
+        let before_config = fs::read(&state.paths.config_file).unwrap();
+        let before_auth = fs::read(&state.paths.auth_file).unwrap();
+
+        let api = provider_availability_commands::test_provider_api_inner(
+            &state,
+            "provider-a".into(),
+            "not-a-uuid".into(),
+        )
+        .await;
+        let codex = provider_availability_commands::test_provider_codex_compatibility_inner(
+            &state,
+            "provider-a".into(),
+            "not-a-uuid".into(),
+        )
+        .await;
+        let cancel =
+            provider_availability_commands::cancel_provider_test_inner(&state, "not-a-uuid".into());
+
+        for result in [
+            serde_json::to_string(&api).unwrap(),
+            serde_json::to_string(&codex).unwrap(),
+            serde_json::to_string(&cancel).unwrap(),
+        ] {
+            assert!(result.contains("INVALID_PROVIDER_TEST_REQUEST_ID"));
+            assert!(!result.contains("test-key-a-not-real"));
+            assert!(!result.contains("CodexRelay"));
+        }
+        assert_eq!(fs::read(&state.paths.config_file).unwrap(), before_config);
+        assert_eq!(fs::read(&state.paths.auth_file).unwrap(), before_auth);
     }
 }

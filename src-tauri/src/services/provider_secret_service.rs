@@ -87,6 +87,23 @@ impl ProviderSecretService {
         }
     }
 
+    /// 只读加载 Provider 密钥；测试和诊断边界不得因为缺少文件而创建或备份文件。
+    pub fn load_read_only(&self) -> Result<ProviderSecretStore, AppError> {
+        match fs::read(&self.path) {
+            Ok(bytes) => parse_store(&bytes).map_err(|error| {
+                AppError::new(
+                    error.code(),
+                    "无法解析 providers.json。",
+                    error.internal_detail().to_owned(),
+                )
+            }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(ProviderSecretStore::default())
+            }
+            Err(error) => Err(AppError::from(error)),
+        }
+    }
+
     pub fn is_configured(&self, provider_id: &str) -> Result<bool, AppError> {
         Ok(self
             .load_or_create()?

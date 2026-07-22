@@ -7,6 +7,7 @@ Codex Relay 是一款面向 Windows 10/11 的轻量桌面工具，用于管理�
 - 读取并管理 `config.toml` 中已有的 `[model_providers.<id>]`。
 - 新增、编辑、删除 Provider，保留无关 TOML 注释、未知字段和功能开关。
 - 为每个 Provider 单独保存 API Key，并快速切换当前 Provider。
+- 在 Provider 详情显式运行 API 可用性测试或 Codex 兼容性测试，分别验证最小 Responses 请求和一次正常 Codex 回合。
 - 切换时以同一事务更新 `config.toml` 与 `auth.json`，失败时验证回滚结果。
 - 关键自检与后台扩展自检，包括配置、密钥一致性、Codex CLI、开机启动、备份和外部修改。
 - 系统托盘切换、单实例、Windows 通知、窗口位置恢复和关闭到托盘。
@@ -56,6 +57,8 @@ AGENTS.md                    每轮必须加载的最高优先级规则
 Release 构建完成后，运行 `src-tauri/target/release/bundle/nsis/` 下实际生成的 `.exe` 安装器。安装模式是所有用户（per-machine），需要管理员权限。首次安装时，如果 `D:` 是固定磁盘，默认目录为 `D:\Program Files\Codex Relay`；否则使用与构建目标架构匹配的系统 Program Files 目录，当前交付的 x64 安装包通常回退到 `C:\Program Files\Codex Relay`。后续 per-machine 版本升级优先沿用上次目录，安装界面也允许用户修改目录。开始菜单项位于“Codex Relay”目录。若电脑上安装过旧的 current-user 版本，请先从 Windows“已安装的应用”卸载旧版，再运行新的 per-machine 安装器，避免 AppData 与 Program Files 中同时保留两套程序；卸载不会删除 Codex 配置和应用数据。
 
 首次启动且 `config.toml` 不存在或没有 Provider 时，会出现引导页。可打开配置目录、新增第一个 Provider、稍后设置或退出。应用不会自动创建带虚假地址的 Provider。
+
+Provider 可用性测试不会在启动、自检、列表刷新或文件监控时自动运行；只有用户在 Provider 详情点击测试按钮后，应用才会访问目标模型网络。测试不修改当前 `config.toml`、`auth.json`、Provider 选择或模型偏好。
 
 ## 开发
 
@@ -236,6 +239,14 @@ Codex Provider 配置的主要数据源。Codex Relay 只局部修改目标 Prov
 
 Codex CLI 缺失或超时属于警告，不阻止 Provider 管理；配置损坏、密钥不一致等会显示错误。
 
+## Provider 可用性与 Codex 兼容性测试
+
+Provider 详情提供两种彼此独立的显式测试，结果只保存在本次前端会话内；Provider 文件指纹发生变化后，旧结果会失效，不写入 Provider DTO、应用数据、日志或通知。
+
+- **API 可用性测试**：通过 Relay 网络边界向当前 Provider 发送一次无工具、非流式、最多 16 个输出 token 的最小 Responses 请求，确认 Base URL、Bearer 认证、当前偏好模型和 Responses 完成格式。它通常只产生少量 token 费用，不代表 Codex CLI 一定兼容。
+- **Codex 兼容性测试**：高级入口会先要求确认，然后在独立临时状态中启动受安全门禁的本机 Codex，向 Provider 发送一次正常 Codex 回合。它可能消耗更多 token、等待更久；不会修改当前 `config.toml` 或 `auth.json`。不支持的 Codex 版本、managed requirements 或工具能力漂移会在联系真实 Provider 前停止。
+- 两种测试都要求当前 Provider 已配置有效密钥和模型偏好；测试期间只允许一个 Provider 测试，界面可取消正在运行的测试。测试结果不会展示 Provider 原始响应正文，也不会记录密钥、命令行或临时路径。
+
 ## 托盘、窗口与退出
 
 - 托盘尽早创建，Provider 变化后立即重建菜单。
@@ -291,7 +302,7 @@ NSIS 卸载器移除应用程序和快捷方式，但没有自定义卸载钩子
 
 - 程序仅支持 Windows 10/11；安装器为所有用户（per-machine），但 Provider、Codex 配置、应用数据和开机启动均按当前登录用户管理。
 - Wire API 当前只支持 `responses`。
-- 不调用模型接口验证 Base URL 或 API Key 是否可用。
+- 启动、自检、Provider 列表刷新和文件监控不调用模型接口验证 Base URL 或 API Key；只有用户显式启动上述 Provider 测试时，才会向目标 Provider 发送一次模型请求。
 - API Key 和备份不加密，不适合共享计算机或高安全场景。
 - 没有强制更新、自动下载、自动安装、自动回滚、云同步、团队权限或远程管理。
 - 开发构建与发布构建都依赖本机 WebView2 与 Tauri/Rust 工具链。

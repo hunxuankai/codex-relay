@@ -1,7 +1,10 @@
 use codex_relay_lib::error::AppError;
 use codex_relay_lib::infrastructure::path_service::{PathMode, resolve_paths};
 use codex_relay_lib::models::provider::CreateProviderInput;
+use codex_relay_lib::models::provider_availability::ProviderTestStatus;
+use codex_relay_lib::services::provider_availability_service::ProviderAvailabilityService;
 use codex_relay_lib::services::provider_service::ProviderService;
+use codex_relay_lib::services::settings_service::SettingsService;
 use codex_relay_lib::services::transaction_service::{
     FileOps, ManagedFileKind, StdFileOps, WritePhase,
 };
@@ -9,6 +12,8 @@ use serial_test::serial;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -224,6 +229,100 @@ async fn audited_provider_and_backup_workflow_ignores_default_path_sentinels() {
             .iter()
             .all(|path| !path.starts_with(&real_app_data_sentinel))
     );
+    assert_eq!(snapshot_tree(&sentinel_profile), sentinel_profile_before);
+    assert_eq!(snapshot_tree(&sentinel_local), sentinel_local_before);
+}
+
+#[tokio::test]
+#[serial]
+async fn provider_availability_api_keeps_default_path_sentinels_unchanged() {
+    let directory = tempfile::tempdir().unwrap();
+    let codex = directory.path().join("codex");
+    let app_data = directory.path().join("app-data");
+    let sentinel_profile = directory.path().join("sentinel-profile");
+    let sentinel_local = directory.path().join("sentinel-local");
+    let real_codex_sentinel = sentinel_profile.join(".codex");
+    let real_app_data_sentinel = sentinel_local.join("CodexRelay");
+    fs::create_dir_all(&real_codex_sentinel).unwrap();
+    fs::create_dir_all(&real_app_data_sentinel).unwrap();
+    fs::write(real_codex_sentinel.join("config.toml"), "sentinel-config").unwrap();
+    fs::write(real_codex_sentinel.join("auth.json"), "sentinel-auth").unwrap();
+    fs::write(
+        real_app_data_sentinel.join("providers.json"),
+        "sentinel-providers",
+    )
+    .unwrap();
+    let sentinel_profile_before = snapshot_tree(&sentinel_profile);
+    let sentinel_local_before = snapshot_tree(&sentinel_local);
+    let _guard = EnvGuard::set(&[
+        ("CODEX_RELAY_CODEX_HOME", Some(&codex)),
+        ("CODEX_RELAY_APP_DATA_DIR", Some(&app_data)),
+        ("CODEX_HOME", None),
+        ("USERPROFILE", Some(&sentinel_profile)),
+        ("LOCALAPPDATA", Some(&sentinel_local)),
+    ]);
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        loop {
+            let read = stream.read(&mut buffer).unwrap();
+            request.extend_from_slice(&buffer[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let body = r#"{"id":"response","status":"completed","output":[]}"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .unwrap();
+    });
+
+    let paths = resolve_paths(PathMode::Test).unwrap();
+    fs::create_dir_all(&paths.codex_home).unwrap();
+    fs::create_dir_all(&paths.app_data_dir).unwrap();
+    fs::write(
+        &paths.config_file,
+        format!(
+            "model_provider = \"provider-a\"\n\n[model_providers.provider-a]\nname = \"Provider A\"\nbase_url = \"http://{address}/v1\"\nwire_api = \"responses\"\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        &paths.auth_file,
+        "{\"OPENAI_API_KEY\":\"test-key-a-not-real\"}\n",
+    )
+    .unwrap();
+    fs::write(
+        &paths.providers_file,
+        "{\"version\":1,\"providers\":{\"provider-a\":{\"apiKey\":\"test-key-a-not-real\"}}}\n",
+    )
+    .unwrap();
+    fs::write(
+        &paths.provider_preferences_file,
+        "{\"version\":1,\"providers\":{\"provider-a\":{\"models\":[\"gpt-5.6-sol\"],\"selectedModel\":\"gpt-5.6-sol\",\"reasoningEfforts\":{\"gpt-5.6-sol\":\"medium\"}}}}\n",
+    )
+    .unwrap();
+
+    let availability = ProviderAvailabilityService::new(
+        ProviderService::new(paths.clone(), "0.1.0"),
+        SettingsService::new(paths),
+        "0.1.0",
+    );
+    let result = availability
+        .test_api("provider-a", uuid::Uuid::new_v4())
+        .await
+        .unwrap();
+    server.join().unwrap();
+
+    assert_eq!(result.status, ProviderTestStatus::Passed);
     assert_eq!(snapshot_tree(&sentinel_profile), sentinel_profile_before);
     assert_eq!(snapshot_tree(&sentinel_local), sentinel_local_before);
 }

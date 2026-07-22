@@ -42,3 +42,65 @@ fixture 只能使用明确标识的 `test-key-*-not-real`。专用密钥编辑�
 - 路径安全集成测试必须建立默认路径哨兵并比较测试前后递归快照。
 - 密钥扫描排除依赖和编译产物后仍需复核每个 `OPENAI_API_KEY`、Authorization、Bearer 命中。
 - `git ls-files` 不得包含真实 `auth.json`、`providers.json`、备份或开发数据密钥文件。
+
+## Provider 测试隔离契约
+
+### 1. 范围/触发条件
+
+用户显式点击测试时才允许短暂接触目标 Provider；所有自动生命周期路径仍保持离线。Codex 高级
+测试必须先通过版本、managed requirements、临时路径、工具集合和进程门禁。
+
+### 2. 签名
+
+API/Codex command 只接收 Provider ID 与 UUID request ID。密钥由 Rust 的只读 Provider 解析边界
+取得，绝不作为 IPC 参数、前端状态或 command 返回字段。
+
+### 3. 请求/响应/环境契约
+
+- 测试环境必须使用 `tempfile`/`AppPaths::for_test`，或成对的 `CODEX_RELAY_CODEX_HOME` 与
+  `CODEX_RELAY_APP_DATA_DIR` 覆盖；缺一即失败，不回退生产路径。
+- Codex 子进程环境先清空，再加入白名单、临时 Home/SQLite/workdir 和每次运行唯一的假 key 环境变量。
+- 真实 key 只可在 Rust gateway 的上游 Authorization Header 短暂存在；不得落盘或进入 argv/stdout/stderr。
+- Provider 目标解析和 API 代理读取必须采用只读加载；缺失的 `providers.json`/`settings.json` 不得
+  因测试而自动创建，损坏文件也不得为了测试自动生成备份。
+
+### 4. 验证与错误矩阵
+
+| 违规 | 结果 |
+|---|---|
+| 测试路径缺覆盖或指向真实用户目录 | `TEST_PATH_OVERRIDE_REQUIRED` / `UNSAFE_TEST_PATH`，立即停止 |
+| 临时根不在系统 temp 或命中受保护根 | `CODEX_PREFLIGHT_FAILED` |
+| key 出现在公开 DTO、日志、快照或命令行 | fail closed，并将泄漏视为测试失败 |
+| 清理前路径验证失败或目录仍存在 | `CODEX_CLEANUP_FAILED`，不得声称已清理 |
+
+### 5. 良好/基线/错误用例
+
+- 良好：默认目录放置哨兵，测试全部在独立 temp 根完成，前后快照字节和存在状态完全一致。
+- 良好：测试所用临时应用数据缺少密钥/设置文件时，测试前后仍保持缺失状态。
+- 基线：fixture 使用 `test-key-provider-a-not-real` 等明确假 key。
+- 错误：为方便调试读取 `%USERPROFILE%\\.codex\\auth.json`、复制真实 Home 或把用户提供的 key
+  放进实验 fixture。
+
+### 6. 必需测试
+
+运行 `path_safety`、Codex invocation 环境白名单、argv/Debug/JSONL 脱敏、gateway Header 注入和
+清理失败测试；每项都断言真实默认路径哨兵不变，并扫描 Git/任务材料没有真实 key。
+
+### 7. 错误与正确做法
+
+#### 错误
+
+```rust
+let home = dirs::home_dir().unwrap().join(".codex");
+run_codex(home);
+```
+
+#### 正确
+
+```rust
+let layout = CodexTempLayout::new()?;
+let invocation = build_invocation(..., layout.home(), layout.sqlite_home(), ...)?;
+```
+
+即使测试最终失败，也必须终止整个 Windows 进程树并验证临时目录清理；`kill_on_drop` 或
+`taskkill` 不能替代 Job Object 安全门禁。

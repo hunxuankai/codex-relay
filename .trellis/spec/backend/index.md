@@ -20,4 +20,5 @@
 - [Rust 约定](rust-guidelines.md)
 - [服务边界](service-boundaries.md)
 - [错误与日志](error-and-logging.md)
+- [Provider 可用性与 Codex 兼容性测试](provider-availability-testing.md)
 - [备份文件查看契约](backup-file-access.md)

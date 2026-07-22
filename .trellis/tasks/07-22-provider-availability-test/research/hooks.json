@@ -1,0 +1,19 @@
+{
+  "description": "Temporary deny-all hook for the Provider compatibility probe.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File deny_tool_hook.ps1",
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -File deny_tool_hook.ps1",
+            "timeout": 5,
+            "statusMessage": "Blocking probe tool call"
+          }
+        ]
+      }
+    ]
+  }
+}

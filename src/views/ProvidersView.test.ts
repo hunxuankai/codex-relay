@@ -2,10 +2,15 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick, ref, shallowRef } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProviderProfile } from '../types/provider'
+import type { ProviderAvailabilityResult, ProviderTestKind } from '../types/providerAvailability'
 import ProvidersView from './ProvidersView.vue'
 
 const mockUseProviders = vi.hoisted(() => vi.fn())
 vi.mock('../composables/useProviders', () => ({ useProviders: mockUseProviders }))
+const mockUseProviderAvailability = vi.hoisted(() => vi.fn())
+vi.mock('../composables/useProviderAvailability', () => ({
+  useProviderAvailability: mockUseProviderAvailability,
+}))
 
 const fingerprints = {
   config: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'config' },
@@ -83,9 +88,33 @@ function controller() {
   }
 }
 
+function availabilityController() {
+  const results = shallowRef<Record<string, Partial<Record<ProviderTestKind, ProviderAvailabilityResult>>>>({})
+  const busy = shallowRef(false)
+  const runningKind = shallowRef<ProviderTestKind | null>(null)
+  const runningProviderId = shallowRef<string | null>(null)
+  const cancelling = shallowRef(false)
+  const error = shallowRef<{ code: string; message: string } | null>(null)
+  return {
+    results,
+    busy,
+    runningKind,
+    runningProviderId,
+    cancelling,
+    error,
+    resultFor: vi.fn((providerId: string, kind: ProviderTestKind) => results.value[providerId]?.[kind] ?? null),
+    testApi: vi.fn(),
+    testCodex: vi.fn(),
+    cancel: vi.fn(),
+    invalidateAll: vi.fn(),
+  }
+}
+
 describe('ProvidersView', () => {
   beforeEach(() => {
     mockUseProviders.mockReset()
+    mockUseProviderAvailability.mockReset()
+    mockUseProviderAvailability.mockReturnValue(availabilityController())
   })
 
   it('submits create and edit flows through the composable', async () => {
@@ -201,5 +230,56 @@ describe('ProvidersView', () => {
     state.error.value = { code: 'EXTERNAL_MODIFICATION', message: '配置已被外部修改，请重新加载。' }
     await nextTick()
     expect(wrapper.text()).toContain('配置已被外部修改，请重新加载。')
+  })
+
+  it('starts API testing directly but requires confirmation before starting Codex testing', async () => {
+    const state = controller()
+    const availability = availabilityController()
+    mockUseProviders.mockReturnValue(state)
+    mockUseProviderAvailability.mockReturnValue(availability)
+    const wrapper = mount(ProvidersView, { attachTo: document.body })
+
+    await wrapper.get('[aria-label="测试 Provider A 的 API 可用性"]').trigger('click')
+    expect(availability.testApi).toHaveBeenCalledWith('provider-a')
+
+    await wrapper.get('[aria-label="运行 Provider A 的 Codex 兼容性测试"]').trigger('click')
+    expect(availability.testCodex).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('启动本机 Codex')
+    expect(wrapper.text()).toContain('token 消耗')
+
+    await wrapper.get('[aria-label="确认操作"]').trigger('click')
+    expect(availability.testCodex).toHaveBeenCalledWith('provider-a')
+  })
+
+  it('shares the availability busy state with Provider mutations while keeping selection available', () => {
+    const state = controller()
+    const availability = availabilityController()
+    availability.busy.value = true
+    availability.runningKind.value = 'api'
+    availability.runningProviderId.value = 'provider-a'
+    mockUseProviders.mockReturnValue(state)
+    mockUseProviderAvailability.mockReturnValue(availability)
+    const wrapper = mount(ProvidersView)
+
+    expect(wrapper.get('[aria-label="编辑所选 Provider"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[aria-label="编辑 Provider A"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[aria-label="取消 Provider A 的 API 可用性测试"]').exists()).toBe(true)
+    expect(wrapper.get('[aria-label="选择 Provider A"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('invalidates session test results when the Provider fingerprint changes', async () => {
+    const state = controller()
+    const availability = availabilityController()
+    mockUseProviders.mockReturnValue(state)
+    mockUseProviderAvailability.mockReturnValue(availability)
+    mount(ProvidersView)
+
+    state.fingerprints.value = {
+      ...fingerprints,
+      config: { ...fingerprints.config, sha256: 'changed' },
+    }
+    await nextTick()
+
+    expect(availability.invalidateAll).toHaveBeenCalledOnce()
   })
 })

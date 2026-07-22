@@ -51,6 +51,24 @@ defineEmits<{
       </ol>
     </ElCard>
 
+    <ElCard class="info-card" shadow="never" aria-labelledby="availability-title">
+      <h2 id="availability-title">Provider 可用性测试</h2>
+      <p class="section-intro">
+        应用启动、自检、Provider 列表刷新和文件监控不会访问 Provider 模型网络；只有用户显式点击测试时才访问 Provider 模型网络。
+      </p>
+      <ul class="availability-list">
+        <li>
+          <strong>API 可用性测试</strong>：发送一次无工具、非流式、最多 16 个输出 token 的最小 Responses 请求，
+          用于确认地址、认证、模型和响应格式，通常只产生少量 token 费用。
+        </li>
+        <li>
+          <strong>Codex 兼容性测试</strong>：启动本机 Codex 并发送一次正常 Codex 回合，
+          会比 API 测试消耗更多 token 并等待更久；测试不会修改当前 config.toml 或 auth.json。
+        </li>
+        <li>测试结果只保存在本次会话内；Provider 配置发生变化后，旧结果会失效，也不会写入日志或应用数据。</li>
+      </ul>
+    </ElCard>
+
     <ElCard class="info-card" shadow="never" aria-labelledby="modified-title">
       <h2 id="modified-title">会修改哪些内容</h2>
       <div class="content-grid">
@@ -103,7 +121,7 @@ defineEmits<{
       <h2 id="security-title">数据与安全</h2>
       <ul>
         <li><code>providers.json</code>、<code>auth.json</code> 和配置备份可能包含明文 API Key。</li>
-        <li>本程序不会调用模型接口验证 Base URL 或 API Key；自动更新检查失败时静默处理，也不会自动下载或安装。</li>
+        <li>除用户显式启动 Provider 可用性或 Codex 兼容性测试外，本程序不会调用模型接口验证 Base URL 或 API Key；自动更新检查失败时静默处理，也不会自动下载或安装。</li>
         <li>从界面清空密钥只会修改本机文件，不会在 Provider 平台吊销远端凭据。</li>
         <li>卸载程序不会删除 Codex 配置、Codex Relay 应用数据、API Key、日志或备份。</li>
       </ul>
@@ -116,7 +134,8 @@ defineEmits<{
 .content-grid,
 .content-section,
 .workflow-list,
-.info-list {
+.info-list,
+.availability-list {
   display: grid;
   gap: 1rem;
 }
@@ -131,6 +150,7 @@ defineEmits<{
 .info-card h2,
 .content-section h3,
 .content-section p,
+.section-intro,
 .info-list,
 .info-list dd {
   margin: 0;
@@ -145,6 +165,11 @@ defineEmits<{
 
 .summary {
   max-width: 52rem;
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+.section-intro {
   color: var(--text-secondary);
   line-height: 1.65;
 }
@@ -203,7 +228,8 @@ defineEmits<{
 
 .content-section ul,
 .warning-card ul,
-.workflow-list {
+.workflow-list,
+.availability-list {
   margin: 0;
   padding-left: 1.3rem;
 }

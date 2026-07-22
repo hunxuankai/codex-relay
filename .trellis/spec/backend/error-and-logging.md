@@ -30,3 +30,50 @@
 ## 事件与通知
 
 事件只传 DTO、状态、指纹或安全消息。禁止传 `auth.json`、`providers.json` 全文、Authorization Header 或 API Key。测试快照和 Debug 输出适用同一规则。
+
+## Provider 测试错误与日志契约
+
+### 范围与触发
+
+仅适用于用户显式触发的 API 可用性测试和 Codex 兼容性测试；启动、自检和文件监控不得产生
+Provider 测试错误或网络日志。
+
+### 公开签名与契约
+
+后端返回 `ProviderAvailabilityResult` 的稳定 `status/code/message`，command 失败只表示无法
+建立安全测试上下文。公开结果不得带原始 HTTP 正文、SSE、JSONL、argv、环境变量、临时路径或堆栈。
+
+### 验证与错误矩阵
+
+- `CODEX_CLI_MISSING` 只表示 PATH 中没有可解析的 Codex 可执行文件。
+- `CODEX_VERSION_UNSUPPORTED` 只表示 CLI 已找到但版本不在实验允许列表。
+- `CODEX_TOOL_CALL_BLOCKED`、`CODEX_JSONL_INVALID`、`CODEX_PROCESS_FAILED` 和
+  `CODEX_CLEANUP_FAILED` 必须分别保留安全边界、协议、进程和清理语义。
+- 取消返回 `cancelled`；不能把用户取消改写成普通超时或泛化失败。
+
+### 良好/基线/错误用例
+
+- 良好：日志只记录测试类型、Provider ID、稳定 code、耗时和 HTTP 状态/版本。
+- 基线：远端 401/429/5xx 只记录分类，不记录响应正文。
+- 错误：将 `Debug` 的 `ProviderAvailabilityTarget`、Authorization 或 child stderr 原样写入日志。
+
+### 必需测试
+
+单元测试断言每个错误映射的 code/message；序列化、Debug、日志捕获和前端 DTO 断言不包含
+`test-key`、Bearer 值、URL 查询 token、正文或临时路径。CLI 缺失回归必须与版本漂移回归分别断言。
+
+### 错误与正确做法
+
+#### 错误
+
+```rust
+tracing::warn!(error = ?error, "Codex test failed");
+```
+
+#### 正确
+
+```rust
+tracing::warn!(code = "CODEX_CLI_MISSING", "Codex 兼容性测试不可用");
+```
+
+底层错误只可在脱敏、最小化且不含路径/秘密的内部诊断中使用；面向用户的消息必须来自稳定分类表。

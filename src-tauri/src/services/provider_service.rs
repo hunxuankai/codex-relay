@@ -23,6 +23,7 @@ use crate::services::provider_secret_service::{
 use crate::services::transaction_service::{
     FileChange, FileChanges, FileOps, StdFileOps, TransactionRequest, TransactionService,
 };
+use std::fmt;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -38,6 +39,26 @@ pub struct ProviderService {
     secret_service: ProviderSecretService,
     preference_service: ProviderPreferenceService,
     auth_service: AuthService,
+}
+
+#[derive(Clone)]
+pub(crate) struct ProviderAvailabilityTarget {
+    pub(crate) provider_id: String,
+    pub(crate) base_url: String,
+    pub(crate) model: String,
+    pub(crate) api_key: String,
+}
+
+impl fmt::Debug for ProviderAvailabilityTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProviderAvailabilityTarget")
+            .field("provider_id", &self.provider_id)
+            .field("base_url", &self.base_url)
+            .field("model", &self.model)
+            .field("api_key_configured", &!self.api_key.is_empty())
+            .finish()
+    }
 }
 
 impl ProviderService {
@@ -111,6 +132,48 @@ impl ProviderService {
             return Err(provider_not_found(&provider_id));
         }
         Ok(configured_key(&disk.store, &provider_id))
+    }
+
+    pub(crate) fn resolve_availability_target(
+        &self,
+        provider_id: &str,
+    ) -> Result<ProviderAvailabilityTarget, AppError> {
+        let provider_id = config_service::validate_provider_id(provider_id)?;
+        let disk = self.read_consistent_state_read_only(AuthReadMode::Skip)?;
+        let provider = disk
+            .provider_configs
+            .iter()
+            .find(|provider| provider.id == provider_id)
+            .ok_or_else(|| provider_not_found(&provider_id))?;
+        let validated = config_service::validate_provider_config(provider)?;
+        let api_key = configured_key(&disk.store, &provider_id).ok_or_else(|| {
+            AppError::new(
+                "PROVIDER_TEST_KEY_MISSING",
+                "该 Provider 尚未配置 API Key，无法测试。",
+                format!("availability target has no key: {provider_id}"),
+            )
+        })?;
+        let model = disk
+            .preference_store
+            .providers
+            .get(&provider_id)
+            .map(|preference| preference.selected_model.trim())
+            .filter(|model| !model.is_empty())
+            .ok_or_else(|| {
+                AppError::new(
+                    "PROVIDER_TEST_MODEL_MISSING",
+                    "该 Provider 尚未配置偏好模型，无法测试。",
+                    format!("availability target has no selected model: {provider_id}"),
+                )
+            })?
+            .to_owned();
+
+        Ok(ProviderAvailabilityTarget {
+            provider_id,
+            base_url: validated.base_url,
+            model,
+            api_key,
+        })
     }
 
     pub async fn create_provider(
@@ -557,12 +620,30 @@ impl ProviderService {
     }
 
     fn read_consistent_state(&self, auth_mode: AuthReadMode) -> Result<DiskState, AppError> {
+        self.read_consistent_state_with_secret_mode(auth_mode, SecretReadMode::Create)
+    }
+
+    fn read_consistent_state_read_only(
+        &self,
+        auth_mode: AuthReadMode,
+    ) -> Result<DiskState, AppError> {
+        self.read_consistent_state_with_secret_mode(auth_mode, SecretReadMode::ReadOnly)
+    }
+
+    fn read_consistent_state_with_secret_mode(
+        &self,
+        auth_mode: AuthReadMode,
+        secret_mode: SecretReadMode,
+    ) -> Result<DiskState, AppError> {
         for _ in 0..CONSISTENT_READ_ATTEMPTS {
             let before = self.current_fingerprints()?;
             let config_source = read_optional_utf8(&self.paths.config_file)?.unwrap_or_default();
             let document = config_service::parse_document(&config_source)?;
             let provider_configs = config_service::list_provider_configs(&document)?;
-            let store = self.secret_service.load_or_create()?;
+            let store = match secret_mode {
+                SecretReadMode::Create => self.secret_service.load_or_create()?,
+                SecretReadMode::ReadOnly => self.secret_service.load_read_only()?,
+            };
             let preference_store = self.preference_service.load()?;
             let auth_key = match auth_mode {
                 AuthReadMode::Skip => None,
@@ -639,6 +720,12 @@ enum AuthReadMode {
     Skip,
     Lenient,
     Strict,
+}
+
+#[derive(Clone, Copy)]
+enum SecretReadMode {
+    Create,
+    ReadOnly,
 }
 
 struct DiskState {
@@ -968,6 +1055,74 @@ mod tests {
         assert!(!json.contains("test-key-a-not-real"));
         assert!(!json.contains("test-key-b-not-real"));
         assert!(!json.contains("\"apiKey\":"));
+    }
+
+    #[test]
+    fn availability_target_uses_saved_key_and_selected_model_without_public_serialization() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths, "0.1.0");
+
+        let target = service.resolve_availability_target("provider-a").unwrap();
+
+        assert_eq!(target.provider_id, "provider-a");
+        assert_eq!(target.base_url, "https://provider-a.example.com/v1");
+        assert_eq!(target.model, "gpt-5.6-sol");
+        assert_eq!(target.api_key, "test-key-a-not-real");
+        assert!(!format!("{target:?}").contains("test-key-a-not-real"));
+    }
+
+    #[test]
+    fn availability_target_rejects_missing_key_before_network_work() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_EMPTY);
+        let service = ProviderService::new(paths, "0.1.0");
+
+        let error = service
+            .resolve_availability_target("provider-a")
+            .unwrap_err();
+
+        assert_eq!(error.code(), "PROVIDER_TEST_KEY_MISSING");
+        assert!(!error.to_string().contains("test-key"));
+    }
+
+    #[test]
+    fn availability_target_does_not_create_a_missing_secret_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        fs::write(&paths.config_file, MULTIPLE).unwrap();
+        fs::write(&paths.auth_file, AUTH_A).unwrap();
+        fs::write(&paths.provider_preferences_file, PREFERENCES_MULTIPLE).unwrap();
+        assert!(!paths.providers_file.exists());
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+
+        let error = service
+            .resolve_availability_target("provider-a")
+            .unwrap_err();
+
+        assert_eq!(error.code(), "PROVIDER_TEST_KEY_MISSING");
+        assert!(!paths.providers_file.exists());
+    }
+
+    #[test]
+    fn availability_target_rejects_missing_model_preference_before_network_work() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        fs::write(
+            &paths.provider_preferences_file,
+            "{\n  \"version\": 1,\n  \"providers\": {}\n}\n",
+        )
+        .unwrap();
+        let service = ProviderService::new(paths, "0.1.0");
+
+        let error = service
+            .resolve_availability_target("provider-a")
+            .unwrap_err();
+
+        assert_eq!(error.code(), "PROVIDER_TEST_MODEL_MISSING");
     }
 
     #[tokio::test]

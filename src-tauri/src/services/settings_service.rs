@@ -49,6 +49,22 @@ impl SettingsService {
         self.load_or_create_unlocked()
     }
 
+    /// 只读加载设置；Provider 可用性测试不得因设置文件缺失而写入应用数据。
+    pub fn load_read_only(&self) -> Result<Settings, AppError> {
+        let _guard = self.lock_updates()?;
+        match fs::read(&self.paths.settings_file) {
+            Ok(bytes) => serde_json::from_slice::<Settings>(&bytes).map_err(|error| {
+                AppError::new(
+                    "INVALID_SETTINGS_JSON",
+                    "无法解析 settings.json。",
+                    error.to_string(),
+                )
+            }),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(Settings::default()),
+            Err(error) => Err(AppError::from(error)),
+        }
+    }
+
     pub fn save(&self, settings: &Settings) -> Result<(), AppError> {
         let _guard = self.lock_updates()?;
         self.save_unlocked(settings)

@@ -5,6 +5,7 @@ import { check, type DownloadEvent } from '@tauri-apps/plugin-updater'
 import type { BackupFileName, BackupSummary } from '../types/backup'
 import type { CommandResult } from '../types/command'
 import type { HealthReport } from '../types/health'
+import type { ProviderAvailabilityResult } from '../types/providerAvailability'
 import type {
   CreateProviderInput,
   FileSetFingerprint,
@@ -89,6 +90,24 @@ export function switchProvider(providerId: string): Promise<SwitchOutcome> {
 
 export function importCurrentAuthKey(providerId: string): Promise<ProviderMutationOutcome> {
   return call('import_current_auth_key', { providerId })
+}
+
+export function testProviderApi(
+  providerId: string,
+  requestId: string,
+): Promise<ProviderAvailabilityResult> {
+  return call('test_provider_api', { providerId, requestId })
+}
+
+export function testProviderCodexCompatibility(
+  providerId: string,
+  requestId: string,
+): Promise<ProviderAvailabilityResult> {
+  return call('test_provider_codex_compatibility', { providerId, requestId })
+}
+
+export function cancelProviderTest(requestId: string): Promise<boolean> {
+  return call('cancel_provider_test', { requestId })
 }
 
 export function getSettings(): Promise<SettingsState> {

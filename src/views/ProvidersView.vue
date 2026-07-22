@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { computed, shallowRef } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import { ElButton } from 'element-plus'
 import AppNotification from '../components/AppNotification.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import ProviderEditor from '../components/ProviderEditor.vue'
+import ProviderAvailabilityPanel from '../components/ProviderAvailabilityPanel.vue'
 import ProviderList from '../components/ProviderList.vue'
 import ProviderPreferenceControls from '../components/ProviderPreferenceControls.vue'
 import ProviderStatus from '../components/ProviderStatus.vue'
+import { useProviderAvailability } from '../composables/useProviderAvailability'
 import { useProviders } from '../composables/useProviders'
 import type { CreateProviderInput, UpdateProviderInput } from '../types/provider'
+import type { ProviderTestKind } from '../types/providerAvailability'
 
 const props = withDefaults(defineProps<{ startCreating?: boolean }>(), {
   startCreating: false,
@@ -19,10 +22,14 @@ const emit = defineEmits<{
 }>()
 
 const providerState = useProviders()
+const availabilityState = useProviderAvailability()
 const editorMode = shallowRef<'create' | 'edit' | null>(props.startCreating ? 'create' : null)
 const editingProviderId = shallowRef<string | null>(null)
 const deleteProviderId = shallowRef<string | null>(null)
 const confirmImportCurrentKey = shallowRef(false)
+const confirmCodexProviderId = shallowRef<string | null>(null)
+
+const interactionBusy = computed(() => providerState.busy.value || availabilityState.busy.value)
 
 const editingProvider = computed(
   () =>
@@ -90,6 +97,63 @@ function updateSelectedPreference(model: string, reasoningEffort: string) {
   if (!providerId) return
   void providerState.updatePreference(providerId, model, reasoningEffort)
 }
+
+const selectedApiResult = computed(() => {
+  const providerId = providerState.selectedProvider.value?.id
+  return providerId ? availabilityState.resultFor(providerId, 'api') : null
+})
+
+const selectedCodexResult = computed(() => {
+  const providerId = providerState.selectedProvider.value?.id
+  return providerId ? availabilityState.resultFor(providerId, 'codex') : null
+})
+
+const selectedRunningKind = computed<ProviderTestKind | null>(() => {
+  const providerId = providerState.selectedProvider.value?.id
+  if (!providerId || availabilityState.runningProviderId.value !== providerId) return null
+  return availabilityState.runningKind.value
+})
+
+const availabilityDisabledReason = computed(() => {
+  const selectedId = providerState.selectedProvider.value?.id
+  if (providerState.busy.value) return 'Provider 配置操作进行中，暂时不能开始测试。'
+  if (
+    availabilityState.busy.value &&
+    availabilityState.runningProviderId.value !== selectedId
+  ) {
+    return '另一个 Provider 的测试正在运行。'
+  }
+  return null
+})
+
+function startApiTest() {
+  const providerId = providerState.selectedProvider.value?.id
+  if (providerId) void availabilityState.testApi(providerId)
+}
+
+function requestCodexTest() {
+  const providerId = providerState.selectedProvider.value?.id
+  if (providerId) confirmCodexProviderId.value = providerId
+}
+
+async function confirmCodexTest() {
+  const providerId = confirmCodexProviderId.value
+  confirmCodexProviderId.value = null
+  if (!providerId || !providerState.providers.value.some((provider) => provider.id === providerId)) return
+  await availabilityState.testCodex(providerId)
+}
+
+function cancelAvailabilityTest() {
+  void availabilityState.cancel()
+}
+
+const fingerprintKey = computed(() => JSON.stringify(providerState.fingerprints.value))
+let initialFingerprintKey = fingerprintKey.value
+watch(fingerprintKey, (next) => {
+  if (next === initialFingerprintKey) return
+  initialFingerprintKey = next
+  availabilityState.invalidateAll()
+})
 </script>
 
 <template>
@@ -98,7 +162,7 @@ function updateSelectedPreference(model: string, reasoningEffort: string) {
       class="providers-column"
       :providers="providerState.providers.value"
       :selected-provider-id="providerState.selectedProviderId.value"
-      :busy="providerState.busy.value"
+      :busy="interactionBusy"
       @create="openCreate"
       @select="providerState.selectProvider"
       @edit="openEdit"
@@ -115,6 +179,10 @@ function updateSelectedPreference(model: string, reasoningEffort: string) {
         :message="providerState.error.value?.message ?? null"
         level="error"
       />
+      <AppNotification
+        :message="availabilityState.error.value?.message ?? null"
+        level="error"
+      />
 
       <ProviderEditor
         v-if="editorMode && providerState.fingerprints.value"
@@ -123,7 +191,7 @@ function updateSelectedPreference(model: string, reasoningEffort: string) {
         :provider="editingProvider"
         :fingerprints="providerState.fingerprints.value"
         :existing-ids="providerState.providers.value.map((provider) => provider.id)"
-        :busy="providerState.busy.value"
+        :busy="interactionBusy"
         :model-catalog="providerState.modelCatalog.value"
         @submit="submitEditor"
         @cancel="cancelEditor"
@@ -152,15 +220,27 @@ function updateSelectedPreference(model: string, reasoningEffort: string) {
         <ProviderPreferenceControls
           :provider="providerState.selectedProvider.value"
           :model-catalog="providerState.modelCatalog.value"
-          :busy="providerState.busy.value"
+          :busy="interactionBusy"
           @select="updateSelectedPreference"
           @configure="openEdit(providerState.selectedProvider.value.id)"
+        />
+        <ProviderAvailabilityPanel
+          :provider="providerState.selectedProvider.value"
+          :api-result="selectedApiResult"
+          :codex-result="selectedCodexResult"
+          :running-kind="selectedRunningKind"
+          :disabled="interactionBusy"
+          :disabled-reason="availabilityDisabledReason"
+          :cancelling="availabilityState.cancelling.value"
+          @test-api="startApiTest"
+          @request-codex-test="requestCodexTest"
+          @cancel="cancelAvailabilityTest"
         />
         <div class="detail-actions">
           <ElButton
             native-type="button"
             aria-label="编辑所选 Provider"
-            :disabled="providerState.busy.value"
+            :disabled="interactionBusy"
             @click="openEdit(providerState.selectedProvider.value.id)"
           >
             编辑
@@ -170,7 +250,7 @@ function updateSelectedPreference(model: string, reasoningEffort: string) {
             native-type="button"
             aria-label="使用所选 Provider"
             :disabled="
-              providerState.busy.value ||
+              interactionBusy ||
               providerState.selectedProvider.value.isActive ||
               !providerState.selectedProvider.value.isValid ||
               !providerState.selectedProvider.value.apiKeyConfigured ||
@@ -185,7 +265,7 @@ function updateSelectedPreference(model: string, reasoningEffort: string) {
             plain
             native-type="button"
             aria-label="删除所选 Provider"
-            :disabled="providerState.busy.value || providerState.selectedProvider.value.isActive"
+            :disabled="interactionBusy || providerState.selectedProvider.value.isActive"
             @click="requestDelete(providerState.selectedProvider.value.id)"
           >
             删除
@@ -201,6 +281,7 @@ function updateSelectedPreference(model: string, reasoningEffort: string) {
             plain
             native-type="button"
             aria-label="导入当前 auth.json 密钥"
+            :disabled="interactionBusy"
             @click="confirmImportCurrentKey = true"
           >
             导入当前密钥
@@ -229,6 +310,15 @@ function updateSelectedPreference(model: string, reasoningEffort: string) {
       confirm-label="确认导入"
       @confirm="importCurrentKey"
       @cancel="confirmImportCurrentKey = false"
+    />
+    <ConfirmDialog
+      :open="Boolean(confirmCodexProviderId)"
+      title="确认运行 Codex 兼容性测试"
+      message="这会在本机启动 Codex 并向 Provider 发送一次正常 Codex 回合，可能产生高于 API 测试的 token 消耗；不会修改当前 config.toml 或 auth.json。是否继续？"
+      confirm-label="继续测试"
+      tone="neutral"
+      @confirm="confirmCodexTest"
+      @cancel="confirmCodexProviderId = null"
     />
   </main>
 </template>

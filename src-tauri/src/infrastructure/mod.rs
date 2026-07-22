@@ -1,4 +1,10 @@
 pub mod atomic_file;
+pub mod codex_gateway;
+pub mod codex_jsonl;
+pub mod codex_preflight;
+pub mod codex_process;
+pub mod codex_runner;
 pub mod file_fingerprint;
 pub mod path_service;
+pub mod provider_http;
 pub mod safe_log;

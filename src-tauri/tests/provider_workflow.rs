@@ -28,6 +28,21 @@ const INITIAL_PROVIDERS: &str = r#"{
   }
 }
 "#;
+const INITIAL_PREFERENCES: &str = r#"{
+  "version": 1,
+  "providers": {
+    "provider-a": {
+      "models": [
+        "gpt-5.6-sol"
+      ],
+      "selectedModel": "gpt-5.6-sol",
+      "reasoningEfforts": {
+        "gpt-5.6-sol": "medium"
+      }
+    }
+  }
+}
+"#;
 
 fn setup() -> (tempfile::TempDir, AppPaths, ProviderService) {
     let directory = tempfile::tempdir().unwrap();
@@ -41,6 +56,7 @@ fn setup() -> (tempfile::TempDir, AppPaths, ProviderService) {
     fs::write(&paths.config_file, INITIAL_CONFIG).unwrap();
     fs::write(&paths.auth_file, INITIAL_AUTH).unwrap();
     fs::write(&paths.providers_file, INITIAL_PROVIDERS).unwrap();
+    fs::write(&paths.provider_preferences_file, INITIAL_PREFERENCES).unwrap();
     let service = ProviderService::new(paths.clone(), "0.1.0");
     (directory, paths, service)
 }
@@ -51,6 +67,7 @@ async fn provider_workflow_preserves_unknown_config_and_restores_original_bytes(
     let original_config = fs::read(&paths.config_file).unwrap();
     let original_auth = fs::read(&paths.auth_file).unwrap();
     let original_providers = fs::read(&paths.providers_file).unwrap();
+    let original_preferences = fs::read(&paths.provider_preferences_file).unwrap();
 
     let state = service.list_providers().unwrap();
     service
@@ -118,4 +135,8 @@ async fn provider_workflow_preserves_unknown_config_and_restores_original_bytes(
     assert_eq!(fs::read(&paths.config_file).unwrap(), original_config);
     assert_eq!(fs::read(&paths.auth_file).unwrap(), original_auth);
     assert_eq!(fs::read(&paths.providers_file).unwrap(), original_providers);
+    assert_eq!(
+        fs::read(&paths.provider_preferences_file).unwrap(),
+        original_preferences
+    );
 }

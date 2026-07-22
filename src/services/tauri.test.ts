@@ -5,6 +5,7 @@ import { check } from '@tauri-apps/plugin-updater'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackupSummary } from '../types/backup'
 import type { HealthReport } from '../types/health'
+import type { ProviderAvailabilityResult } from '../types/providerAvailability'
 import type {
   CreateProviderInput,
   ProviderListState,
@@ -18,6 +19,7 @@ import {
   createProvider,
   deleteProvider,
   checkForUpdate,
+  cancelProviderTest,
   exitApplication,
   getProviderApiKey,
   getSettings,
@@ -34,6 +36,8 @@ import {
   saveSettings,
   setAutostart,
   switchProvider,
+  testProviderApi,
+  testProviderCodexCompatibility,
   testUpdateProxy,
   updateProvider,
 } from './tauri'
@@ -97,6 +101,19 @@ const health: HealthReport = {
 
 const backups: BackupSummary[] = []
 
+const availabilityResult: ProviderAvailabilityResult = {
+  providerId: 'provider-a',
+  kind: 'api',
+  status: 'passed',
+  code: 'API_TEST_PASSED',
+  message: 'API 可用性测试通过。',
+  model: 'gpt-5.6-sol',
+  durationMs: 10,
+  testedAt: '2026-07-23T00:00:00Z',
+  httpStatus: 200,
+  codexVersion: null,
+}
+
 function success<T>(data: T) {
   return { success: true, data }
 }
@@ -118,6 +135,9 @@ describe('Tauri service boundary', () => {
       .mockResolvedValueOnce(success(mutation))
       .mockResolvedValueOnce(success(switched))
       .mockResolvedValueOnce(success(mutation))
+      .mockResolvedValueOnce(success(availabilityResult))
+      .mockResolvedValueOnce(success({ ...availabilityResult, kind: 'codex' }))
+      .mockResolvedValueOnce(success(true))
       .mockResolvedValueOnce(success(settingsState))
       .mockResolvedValueOnce(success(settingsState))
       .mockResolvedValueOnce(success(settingsState))
@@ -157,6 +177,9 @@ describe('Tauri service boundary', () => {
     await deleteProvider('provider-a', fingerprints)
     await switchProvider('provider-a')
     await importCurrentAuthKey('provider-a')
+    await testProviderApi('provider-a', 'request-api')
+    await testProviderCodexCompatibility('provider-a', 'request-codex')
+    await cancelProviderTest('request-codex')
     await getSettings()
     await saveSettings(settings)
     await setAutostart(true)
@@ -176,6 +199,9 @@ describe('Tauri service boundary', () => {
       ['delete_provider', { providerId: 'provider-a', expectedFiles: fingerprints }],
       ['switch_provider', { providerId: 'provider-a' }],
       ['import_current_auth_key', { providerId: 'provider-a' }],
+      ['test_provider_api', { providerId: 'provider-a', requestId: 'request-api' }],
+      ['test_provider_codex_compatibility', { providerId: 'provider-a', requestId: 'request-codex' }],
+      ['cancel_provider_test', { requestId: 'request-codex' }],
       ['get_settings'],
       ['save_settings', { settings }],
       ['set_autostart', { enabled: true }],
