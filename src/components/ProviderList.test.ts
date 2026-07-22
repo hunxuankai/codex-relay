@@ -44,6 +44,7 @@ describe('ProviderList', () => {
     expect(wrapper.text()).toContain('https://provider-a.example.test/v1')
     expect(wrapper.text()).toContain('responses')
     expect(wrapper.text()).toContain('model-a')
+    expect(wrapper.text()).toContain('未指定（切换时保留现有模型）')
     expect(wrapper.text()).toContain('当前')
     expect(wrapper.text()).toContain('Base URL 无效。')
     expect(wrapper.text()).toContain('未配置密钥')

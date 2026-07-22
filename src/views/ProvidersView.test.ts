@@ -147,6 +147,7 @@ describe('ProvidersView', () => {
     expect(detail.text()).toContain('provider-a')
     expect(detail.text()).toContain('https://provider-a.example.test/v1')
     expect(detail.text()).toContain('responses')
+    expect(detail.text()).toContain('未指定（切换时保留现有模型）')
     expect(detail.text()).toContain('密钥已配置')
     expect(detail.find('[aria-label="编辑所选 Provider"]').exists()).toBe(true)
   })

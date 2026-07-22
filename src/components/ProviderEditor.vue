@@ -224,7 +224,16 @@ async function submit() {
 
       <label class="field">
         <span>默认模型（可选）</span>
-        <input v-model="draft.model" name="model" :disabled="busy" autocomplete="off" />
+        <input
+          v-model="draft.model"
+          name="model"
+          :disabled="busy"
+          aria-describedby="model-hint"
+          autocomplete="off"
+        />
+        <span id="model-hint" class="field-hint">
+          留空时，切换到此 Provider 不会修改 Codex 当前的模型设置。
+        </span>
       </label>
 
       <div class="field">
@@ -296,6 +305,12 @@ async function submit() {
 }
 
 .field-error {
+  font-size: 0.82rem;
+  font-weight: 400;
+}
+
+.field-hint {
+  color: var(--text-secondary);
   font-size: 0.82rem;
   font-weight: 400;
 }

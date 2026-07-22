@@ -64,7 +64,7 @@ const emit = defineEmits<{
             </div>
             <div>
               <dt>默认模型</dt>
-              <dd>{{ provider.model || '跟随 Codex 当前设置' }}</dd>
+              <dd>{{ provider.model || '未指定（切换时保留现有模型）' }}</dd>
             </div>
           </dl>
           <p v-if="provider.validationMessage" class="validation-message">

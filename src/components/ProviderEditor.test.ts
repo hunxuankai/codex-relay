@@ -92,6 +92,8 @@ describe('ProviderEditor', () => {
     expect(wrapper.get('[name="provider-id"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[name="wire-api"]').attributes('disabled')).toBeDefined()
     expect((wrapper.get('[name="wire-api"]').element as HTMLInputElement).value).toBe('responses')
+    expect(wrapper.get('[name="model"]').attributes('aria-describedby')).toBe('model-hint')
+    expect(wrapper.text()).toContain('留空时，切换到此 Provider 不会修改 Codex 当前的模型设置。')
     expect(wrapper.text()).toContain('当前 Provider')
     expect(wrapper.find('[name="sync-if-active"]').exists()).toBe(false)
     await wrapper.get('[name="model"]').setValue('   ')
