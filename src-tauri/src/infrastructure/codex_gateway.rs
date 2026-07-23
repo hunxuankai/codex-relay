@@ -3,6 +3,7 @@ use crate::infrastructure::codex_preflight::{
     validate_preflight_request,
 };
 use crate::infrastructure::provider_http::responses_endpoint;
+use crate::infrastructure::rustls_provider::ensure_ring_crypto_provider;
 use crate::services::provider_service::ProviderAvailabilityTarget;
 use reqwest::{Client, Proxy, redirect::Policy};
 use serde_json::Value;
@@ -67,6 +68,7 @@ impl CodexCompatibilityGateway {
         target: ProviderAvailabilityTarget,
         proxy: Option<&str>,
     ) -> Result<Self, GatewayError> {
+        ensure_ring_crypto_provider().map_err(|_| GatewayError::UpstreamNetwork)?;
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .map_err(|_| GatewayError::Io)?;
@@ -252,6 +254,7 @@ async fn handle_gateway_connection(
         .finish()
         .map_err(|_| GatewayError::UpstreamInvalid)?;
     stream.flush().await.map_err(|_| GatewayError::Io)?;
+    let _ = stream.shutdown().await;
     Ok(GatewayOutcome::Passed)
 }
 
@@ -349,7 +352,10 @@ async fn write_generic_response(
     stream
         .write_all(response.as_bytes())
         .await
-        .map_err(|_| GatewayError::Io)
+        .map_err(|_| GatewayError::Io)?;
+    stream.flush().await.map_err(|_| GatewayError::Io)?;
+    let _ = stream.shutdown().await;
+    Ok(())
 }
 
 fn status_line(status: u16) -> &'static str {
@@ -500,6 +506,7 @@ mod tests {
         )
         .unwrap();
         stream.write_all(body).unwrap();
+        stream.flush().unwrap();
         let mut response = String::new();
         stream.read_to_string(&mut response).unwrap();
         response

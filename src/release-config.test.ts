@@ -122,7 +122,8 @@ describe('Windows release configuration', () => {
   })
 
   it('uses the Windows npm command shim when safe development launches Tauri', () => {
-    expect(prepareDevData).toContain('& npm.cmd run dev')
+    expect(prepareDevData).toContain("$devArguments = @('run', 'dev')")
+    expect(prepareDevData).toContain('& npm.cmd @devArguments')
     expect(prepareDevData).not.toMatch(/&\s+npm\s+run\s+dev/)
   })
 

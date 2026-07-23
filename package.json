@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tauri dev",
     "dev:safe": "powershell -ExecutionPolicy Bypass -File scripts/prepare-dev-data.ps1",
+    "dev:safe:no-watch": "powershell -ExecutionPolicy Bypass -File scripts/prepare-dev-data.ps1 -NoRustWatch",
     "dev:frontend": "vite",
     "build": "tauri build",
     "build:release": "tauri build --config src-tauri/tauri.updater.conf.json",
@@ -15,9 +16,19 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.app.json",
     "test": "vitest run",
     "test:trellis": "python -m unittest discover -s .trellis/scripts/tests -p \"test_*.py\"",
+    "test:rust-dev-guard": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/rust-dev-scripts.tests.ps1",
+    "test:rust-deps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/rust-dependency-graph.tests.ps1",
+    "check:rust-dev-env": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-rust-dev-environment.ps1",
+    "check:rust:deps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-rust-dependency-graph.ps1",
+    "pretest:rust:lib": "npm run check:rust-dev-env",
+    "test:rust:lib": "cargo test --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target --lib",
+    "pretest:rust:path-safety": "npm run check:rust-dev-env",
+    "test:rust:path-safety": "cargo test --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target --test path_safety",
+    "pretest:rust:provider-workflow": "npm run check:rust-dev-env",
+    "test:rust:provider-workflow": "cargo test --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target --test provider_workflow",
     "test:watch": "vitest",
     "check:frontend": "npm run typecheck && npm run test",
-    "check:rust": "cargo fmt --check --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml",
+    "check:rust": "npm run check:rust:deps && cargo fmt --check --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml",
     "check": "npm run test:trellis && npm run check:frontend && npm run check:rust"
   },
   "dependencies": {

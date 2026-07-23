@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::fmt;
 use std::io::{ErrorKind, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -167,7 +167,10 @@ impl CodexPreflightServer {
             while !thread_shutdown.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        let outcome = handle_connection(&mut stream, &expectation);
+                        let outcome = handle_tcp_connection(&mut stream, &expectation);
+                        if matches!(outcome, Err(CodexPreflightFailure::Io)) {
+                            continue;
+                        }
                         let _ = sender.send(outcome);
                         return;
                     }
@@ -187,11 +190,6 @@ impl CodexPreflightServer {
             result,
             thread: Some(thread),
         })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn base_url(&self) -> &str {
-        &self.base_url
     }
 
     pub(crate) fn provider_base_url(&self) -> String {
@@ -226,7 +224,7 @@ impl Drop for CodexPreflightServer {
     }
 }
 
-fn handle_connection(
+fn handle_tcp_connection(
     stream: &mut TcpStream,
     expectation: &PreflightExpectation,
 ) -> Result<CodexPreflightReport, CodexPreflightFailure> {
@@ -236,6 +234,15 @@ fn handle_connection(
     stream
         .set_write_timeout(Some(Duration::from_secs(2)))
         .map_err(|_| CodexPreflightFailure::Io)?;
+    let outcome = handle_connection(stream, expectation);
+    let _ = stream.shutdown(Shutdown::Write);
+    outcome
+}
+
+fn handle_connection<Stream: Read + Write>(
+    stream: &mut Stream,
+    expectation: &PreflightExpectation,
+) -> Result<CodexPreflightReport, CodexPreflightFailure> {
     let parsed = read_http_request(stream).and_then(|request| {
         validate_preflight_request(
             &request.method,
@@ -245,17 +252,22 @@ fn handle_connection(
             expectation,
         )
     });
-    match &parsed {
-        Ok(_) => write_response(stream, "200 OK", "text/event-stream", preflight_sse_body()),
-        Err(_) => write_response(
-            stream,
-            "400 Bad Request",
-            "application/json",
-            r#"{"error":"preflight rejected"}"#,
-        ),
+    match parsed {
+        Ok(report) => {
+            let _ = write_response(stream, "200 OK", "text/event-stream", preflight_sse_body());
+            Ok(report)
+        }
+        Err(CodexPreflightFailure::Io) => Err(CodexPreflightFailure::Io),
+        Err(failure) => {
+            let _ = write_response(
+                stream,
+                "400 Bad Request",
+                "application/json",
+                r#"{"error":"preflight rejected"}"#,
+            );
+            Err(failure)
+        }
     }
-    .map_err(|_| CodexPreflightFailure::Io)?;
-    parsed
 }
 
 struct ParsedHttpRequest {
@@ -265,7 +277,7 @@ struct ParsedHttpRequest {
     body: Vec<u8>,
 }
 
-fn read_http_request(stream: &mut TcpStream) -> Result<ParsedHttpRequest, CodexPreflightFailure> {
+fn read_http_request(stream: &mut impl Read) -> Result<ParsedHttpRequest, CodexPreflightFailure> {
     let mut request = Vec::new();
     let mut buffer = [0_u8; 4096];
     let header_end = loop {
@@ -347,7 +359,7 @@ fn preflight_sse_body() -> &'static str {
 }
 
 fn write_response(
-    stream: &mut TcpStream,
+    stream: &mut impl Write,
     status: &str,
     content_type: &str,
     body: &str,
@@ -364,9 +376,50 @@ fn write_response(
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::io::{Read, Write};
-    use std::net::TcpStream;
-    use std::time::Duration;
+    use std::io::Cursor;
+
+    struct TestStream {
+        request: Cursor<Vec<u8>>,
+        response: Vec<u8>,
+    }
+
+    impl Read for TestStream {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            self.request.read(buffer)
+        }
+    }
+
+    impl Write for TestStream {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            self.response.extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct FailingReadStream {
+        response: Vec<u8>,
+    }
+
+    impl Read for FailingReadStream {
+        fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from(ErrorKind::ConnectionAborted))
+        }
+    }
+
+    impl Write for FailingReadStream {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            self.response.extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     fn valid_body() -> Vec<u8> {
         serde_json::to_vec(&json!({
@@ -494,26 +547,61 @@ mod tests {
     }
 
     #[test]
-    fn loopback_server_captures_one_request_and_returns_minimal_sse() {
-        let server = CodexPreflightServer::start(PreflightExpectation::new("gpt-5.6-sol")).unwrap();
-        let endpoint = server.base_url().trim_start_matches("http://");
-        let mut stream = TcpStream::connect(endpoint).unwrap();
+    fn connection_handler_captures_one_request_and_returns_minimal_sse() {
         let body = valid_body();
-        write!(
-            stream,
-            "POST /v1/responses HTTP/1.1\r\nHost: {endpoint}\r\nAuthorization: Bearer {PREFLIGHT_API_KEY}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        let mut request = format!(
+            "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {PREFLIGHT_API_KEY}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
         )
-        .unwrap();
-        stream.write_all(&body).unwrap();
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
+        .into_bytes();
+        request.extend_from_slice(&body);
+        let mut stream = TestStream {
+            request: Cursor::new(request),
+            response: Vec::new(),
+        };
 
-        let report = server.wait(Duration::from_secs(2)).unwrap();
+        let report =
+            handle_connection(&mut stream, &PreflightExpectation::new("gpt-5.6-sol")).unwrap();
+        let response = String::from_utf8(stream.response).unwrap();
 
         assert!(response.starts_with("HTTP/1.1 200 OK"));
         assert!(response.contains("event: response.created"));
         assert!(response.contains("event: response.completed"));
         assert_eq!(report.tool_names, vec!["update_plan", "view_image"]);
+    }
+
+    #[test]
+    fn transport_io_is_not_rewritten_as_bad_request() {
+        let mut stream = FailingReadStream {
+            response: Vec::new(),
+        };
+
+        let failure =
+            handle_connection(&mut stream, &PreflightExpectation::new("gpt-5.6-sol")).unwrap_err();
+
+        assert_eq!(failure, CodexPreflightFailure::Io);
+        assert!(stream.response.is_empty());
+    }
+
+    #[test]
+    fn complete_invalid_request_remains_fail_closed_with_bad_request() {
+        let body = valid_body();
+        let mut request = format!(
+            "GET /v1/responses HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {PREFLIGHT_API_KEY}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        request.extend_from_slice(&body);
+        let mut stream = TestStream {
+            request: Cursor::new(request),
+            response: Vec::new(),
+        };
+
+        let failure =
+            handle_connection(&mut stream, &PreflightExpectation::new("gpt-5.6-sol")).unwrap_err();
+        let response = String::from_utf8(stream.response).unwrap();
+
+        assert_eq!(failure, CodexPreflightFailure::Method);
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request"));
     }
 }

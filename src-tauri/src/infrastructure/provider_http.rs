@@ -1,3 +1,4 @@
+use crate::infrastructure::rustls_provider::ensure_ring_crypto_provider;
 use crate::services::provider_service::ProviderAvailabilityTarget;
 use reqwest::{Client, Proxy, StatusCode, redirect::Policy};
 use serde_json::Value;
@@ -40,6 +41,7 @@ pub(crate) async fn probe_api(
         return Err(ApiProbeError::Cancelled);
     }
     let endpoint = responses_endpoint(&target.base_url)?;
+    ensure_ring_crypto_provider().map_err(|_| ApiProbeError::RequestBuild)?;
     let mut builder = Client::builder()
         .redirect(Policy::none())
         .no_proxy()

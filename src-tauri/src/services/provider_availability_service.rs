@@ -961,11 +961,34 @@ mod tests {
                 }
                 let base_url = base_url.ok_or(CodexProcessError::ProcessStart)?;
                 let key = key.ok_or(CodexProcessError::ProcessStart)?;
-                let status =
-                    tokio::task::spawn_blocking(move || send_fake_codex_request(&base_url, &key))
-                        .await
-                        .map_err(|_| CodexProcessError::ProcessStart)?
-                        .map_err(|_| CodexProcessError::ProcessStart)?;
+                crate::infrastructure::rustls_provider::ensure_ring_crypto_provider()
+                    .map_err(|_| CodexProcessError::ProcessStart)?;
+                let body = serde_json::to_vec(&serde_json::json!({
+                    "model": "gpt-5.6-sol",
+                    "input": [],
+                    "tools": [
+                        {"type":"function","name":"update_plan"},
+                        {"type":"function","name":"view_image"}
+                    ],
+                    "stream": true
+                }))
+                .map_err(|_| CodexProcessError::ProcessStart)?;
+                let client = reqwest::Client::builder()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .no_proxy()
+                    .build()
+                    .map_err(|_| CodexProcessError::ProcessStart)?;
+                let mut attempt = 0;
+                let status = loop {
+                    match send_scripted_codex_request(&client, &base_url, &key, &body).await {
+                        Ok(status) => break status,
+                        Err(_error) if attempt < 2 => {
+                            attempt += 1;
+                            tokio::time::sleep(Duration::from_millis(5)).await;
+                        }
+                        Err(error) => return Err(error),
+                    }
+                };
                 if status == 200 {
                     Ok(crate::infrastructure::codex_process::CodexProcessOutput {
                         exit_code: Some(0),
@@ -983,41 +1006,26 @@ mod tests {
         }
     }
 
-    fn send_fake_codex_request(base_url: &str, key: &str) -> Result<u16, std::io::Error> {
-        let url = url::Url::parse(base_url).map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid fake endpoint")
-        })?;
-        let host = url.host_str().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing fake host")
-        })?;
-        let port = url.port_or_known_default().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing fake port")
-        })?;
-        let mut stream = std::net::TcpStream::connect((host, port))?;
-        let body = serde_json::to_vec(&serde_json::json!({
-            "model": "gpt-5.6-sol",
-            "input": [],
-            "tools": [
-                {"type":"function","name":"update_plan"},
-                {"type":"function","name":"view_image"}
-            ],
-            "stream": true
-        }))
-        .unwrap();
-        let path = format!("{}{}", url.path().trim_end_matches('/'), "/responses");
-        write!(
-            stream,
-            "POST {path} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {key}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        )?;
-        stream.write_all(&body)?;
-        let mut response = Vec::new();
-        stream.read_to_end(&mut response)?;
-        let status = String::from_utf8_lossy(&response)
-            .split_whitespace()
-            .nth(1)
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(0);
+    async fn send_scripted_codex_request(
+        client: &reqwest::Client,
+        base_url: &str,
+        key: &str,
+        body: &[u8],
+    ) -> Result<u16, CodexProcessError> {
+        let response = client
+            .post(format!("{}/responses", base_url.trim_end_matches('/')))
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .header(reqwest::header::CONNECTION, "close")
+            .bearer_auth(key)
+            .body(body.to_vec())
+            .send()
+            .await
+            .map_err(|_| CodexProcessError::ProcessStart)?;
+        let status = response.status().as_u16();
+        response
+            .bytes()
+            .await
+            .map_err(|_| CodexProcessError::OutputRead)?;
         Ok(status)
     }
 
@@ -1270,7 +1278,13 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.status, ProviderTestStatus::Passed);
+        assert_eq!(
+            result.status,
+            ProviderTestStatus::Passed,
+            "unexpected Codex result code {}; backend requests {}",
+            result.code,
+            backend.requests.load(Ordering::SeqCst)
+        );
         assert_eq!(result.code, "CODEX_COMPATIBILITY_PASSED");
         assert_eq!(result.codex_version.as_deref(), Some("0.144.4"));
         assert_eq!(fs::read(&paths.config_file).unwrap(), before_config);
@@ -1414,8 +1428,14 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(
+            result.code,
+            "CODEX_TOOL_CALL_BLOCKED",
+            "unexpected status {:?}; backend requests {}",
+            result.status,
+            backend.requests.load(Ordering::SeqCst)
+        );
         assert_eq!(result.status, ProviderTestStatus::Failed);
-        assert_eq!(result.code, "CODEX_TOOL_CALL_BLOCKED");
         upstream.join().unwrap();
     }
 }

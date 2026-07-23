@@ -1,5 +1,7 @@
 param(
-  [switch]$PrepareOnly
+  [switch]$PrepareOnly,
+  [switch]$NoRustWatch,
+  [switch]$DryRun
 )
 
 $ErrorActionPreference = 'Stop'
@@ -68,7 +70,18 @@ $env:CODEX_RELAY_APP_DATA_DIR = $appData
 Write-Host "Safe Codex directory: $codexHome"
 Write-Host "Safe application data: $appData"
 
+$devArguments = @('run', 'dev')
+if ($NoRustWatch) {
+  $devArguments += '--'
+  $devArguments += '--no-watch'
+}
+
+if ($DryRun) {
+  Write-Host "Dev command: npm.cmd $($devArguments -join ' ')"
+  exit 0
+}
+
 if (-not $PrepareOnly) {
-  & npm.cmd run dev
+  & npm.cmd @devArguments
   exit $LASTEXITCODE
 }

@@ -82,6 +82,17 @@ npm run dev:safe
 
 `dev:safe` 会在仓库的 `dev-data` 下写入明确的假配置和假密钥 `test-key-provider-a-not-real`、`test-key-b-not-real`，设置 `CODEX_RELAY_CODEX_HOME`、`CODEX_RELAY_APP_DATA_DIR` 后再启动 Tauri。用户始终通过 `npm run dev:safe` 进入；脚本内部使用 `npm.cmd run dev`，避免 Windows PowerShell 把 `& npm run dev` 错误解析为 `pm`。安全模式不会读取或修改真实 `%USERPROFILE%\.codex` 或 `%LOCALAPPDATA%\CodexRelay`。
 
+进行 Rust TDD、同时又需要保持窗口与前端开发服务器运行时，使用安全无 watcher 模式：
+
+```powershell
+npm run dev:safe:no-watch
+```
+
+该入口复用相同的假数据和成对路径覆盖，但通过 `tauri dev --no-watch` 禁止 Rust 源码自动重编译，
+避免每次修改同时触发 Tauri dev 与手动 Cargo 两套构建。Rust 行为变化不会自动进入正在运行的
+应用；需要人工观察最新后端行为时，请主动重启该安全开发进程。纯前端修改优先使用
+`npm run dev:frontend`。
+
 不要在没有路径覆盖的情况下直接运行 `npm run dev`，因为普通开发入口不会自动隔离真实 Codex 配置。只有当前终端已经同时设置两个 Relay 覆盖变量时，才可以手动启动：
 
 ```powershell
@@ -119,13 +130,31 @@ trellis mem context <session-id>
 
 ## 测试与检查
 
+Rust 行为切片优先使用固定 `src-tauri/target` 的快速入口：
+
+```powershell
+npm run test:rust:lib -- provider_http
+npm run test:rust:path-safety
+npm run test:rust:provider-workflow
+```
+
+这些命令会在 Cargo 启动前检查是否存在未带 `--no-watch` 的 Tauri dev；发现冲突时停止并提示改用
+安全无 watcher 或纯前端入口。不要为每个任务创建随机 `CARGO_TARGET_DIR`，也不要把删除
+`src-tauri/target` 当作日常提速手段。
+
+快速入口只缩短红—绿循环，不能替代完整门禁：
+
 ```powershell
 npm run typecheck
 npm run test
+npm run check:rust:deps
 npm run check:frontend
 npm run check:rust
 npm run check
 ```
+
+`check:rust:deps` 断言 Rustls 使用显式 `ring` provider 且依赖图没有重复的 `aws-lc-sys`；
+`check:rust` 还会运行 fmt、Clippy、全部 Rust 单元与集成测试。
 
 Rust 单元与集成测试使用 `tempfile`，并通过 `AppPaths::for_test` 或测试模式双覆盖构造路径。`path_safety` 会在安全临时目录中建立默认路径哨兵，证明 Provider/备份工作流不触及默认用户目录。
 
