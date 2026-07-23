@@ -46,6 +46,12 @@ pub fn cancel_provider_test(
   Rust 监控 gateway 才向目标 Provider 注入真实密钥。
 - Codex 预检和真实运行都要求工具集合精确为 `update_plan`、`view_image`；任何工具/Hook/MCP/
   plugin/web/权限事件或未知 JSONL 均不得放行。
+- preflight 回环服务器必须区分传输失败与完整请求验证失败：读取阶段的 `Io` 直接关闭该连接并
+  继续等待，不得伪装成 HTTP 400；只有已完整解析但方法、端点、认证、模型、形状或工具集合
+  不匹配时才返回 400 并 fail closed。
+- preflight 通过需要两份独立证据同时成立：服务器得到的请求验证报告，以及 Codex 子进程的
+  成功 JSONL 输出。响应写入/半关闭的本机收尾错误不得覆盖已经得到的验证报告；若 Codex 未
+  收到完整 SSE，其进程输出验证仍会失败。
 - 状态固定为 `passed`、`failed`、`unsupported`、`cancelled`。结果不得包含原始请求/响应、命令行、
   环境变量、临时路径、堆栈或密钥。
 
@@ -59,6 +65,8 @@ pub fn cancel_provider_test(
 | 找不到 Codex CLI | `unsupported` | `CODEX_CLI_MISSING` |
 | CLI 版本不在精确允许列表 | `unsupported` | `CODEX_VERSION_UNSUPPORTED` |
 | managed requirements、临时路径、工具预检或严格配置门禁失败 | `unsupported` | `CODEX_*_UNSUPPORTED` / `CODEX_PREFLIGHT_FAILED` |
+| preflight 连接读取发生瞬时 `Io` | 不返回 400；继续等待下一连接，最终仍受原超时约束 |
+| preflight 完整请求不符合安全契约 | 返回 400，并映射 `CODEX_PREFLIGHT_FAILED` |
 | Codex 工具调用、未知 JSONL、远端协议/退出异常 | `failed` | `CODEX_TOOL_CALL_BLOCKED` / `CODEX_JSONL_INVALID` / `CODEX_PROCESS_FAILED` |
 | 超时或进程树无法终止 | `failed` | `CODEX_TIMEOUT` / `CODEX_PROCESS_TREE_FAILED` |
 | 用户取消 | `cancelled` | `PROVIDER_TEST_CANCELLED` |
@@ -79,6 +87,8 @@ CLI 缺失和版本漂移必须保持不同 code；不能用“版本不支持�
 - Rust 单元：DTO 序列化、目标解析、API 请求构造/响应上限/错误分类、单活动取消、版本与 CLI 缺失分类。
 - Rust 回环集成：预检核对 Provider/模型/Bearer 假密钥/工具集合；真实 gateway 只注入目标测试密钥，工具 SSE 到达 Codex 前被阻断。
 - Windows 进程专项：Job Object 加入、父子树终止、1 MiB stdout/stderr 上限、超时/取消、清理前路径校验和清理失败。
+- preflight 协议单元测试使用内存 `Read + Write`，断言传输 `Io` 不产生 400、完整非法请求仍产生
+  400；服务集成测试保留真实 TCP，并分别覆盖正常 gateway 与工具调用阻断。
 - `path_safety`：默认 `.codex` 与 `CodexRelay` 哨兵递归快照前后一致；测试只使用 `AppPaths::for_test` 和回环边界。
 - Vitest：API/Codex 结果独立、确认门禁、取消、指纹失效、禁用原因、aria-label 和窄窗口布局。
 
@@ -98,6 +108,22 @@ match error {
     CodexRunnerError::ExecutableUnavailable => "CODEX_CLI_MISSING",
     CodexRunnerError::UnsupportedVersion => "CODEX_VERSION_UNSUPPORTED",
     _ => /* 其他稳定安全分类 */,
+}
+```
+
+传输层 `Io` 不能改写成协议拒绝：
+
+```rust
+match parsed_request {
+    Err(CodexPreflightFailure::Io) => Err(CodexPreflightFailure::Io),
+    Err(validation_failure) => {
+        let _ = write_bad_request(stream);
+        Err(validation_failure)
+    }
+    Ok(report) => {
+        let _ = write_preflight_sse(stream);
+        Ok(report)
+    }
 }
 ```
 

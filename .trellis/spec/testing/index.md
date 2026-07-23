@@ -3,6 +3,8 @@
 ## 开发前检查
 
 - 新功能、缺陷修复、路径或文件写入：读取 [tdd-and-isolation.md](tdd-and-isolation.md)。
+- Rust/Tauri 开发反馈、Cargo target、watcher 或 TLS 依赖图：读取
+  [rust-build-feedback.md](rust-build-feedback.md)。
 - 准备提交、构建或完成声明：读取 [verification.md](verification.md)。
 
 ## 质量检查
@@ -15,4 +17,5 @@
 ## 文件
 
 - [TDD 与路径隔离](tdd-and-isolation.md)
+- [Rust 开发编译反馈](rust-build-feedback.md)
 - [验证与完成证据](verification.md)
