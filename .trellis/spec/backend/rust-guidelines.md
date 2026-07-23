@@ -2,13 +2,19 @@
 
 ## 模块与职责
 
-- `src-tauri/src/models/`：前后端共享语义、DTO 和事务/健康/设置数据。
-- `commands/`：Tauri 适配，不承载文件写入或业务流程。
-- `services/`：业务规则与服务组合。
-- `infrastructure/`：路径、原子文件、指纹和脱敏日志等可复用机制。
-- `app_state.rs`：共享服务、写入守卫和跨命令状态。
+- `src-tauri/crates/codex-relay-core/src/models/`：前后端共享语义、DTO 和事务/健康/设置数据。
+- `src-tauri/crates/codex-relay-core/src/services/`：Provider、设置、事务、备份等平台无关业务规则。
+- `src-tauri/crates/codex-relay-core/src/infrastructure/`：路径、原子文件、指纹、Provider 网络和
+  Codex 安全运行边界，以及在 core 内完成的错误详情脱敏。
+- `src-tauri/src/commands/`：Tauri 适配，不承载文件写入或业务流程。
+- `src-tauri/src/services/` 与 `src-tauri/src/infrastructure/`：只保留自检、文件 watcher、开机启动、
+  日志初始化/保留等桌面应用生命周期职责，并复用 core 模块。
+- `src-tauri/src/app_state.rs`：共享 core/桌面服务、写入守卫和跨命令状态。
 
 保持现有小模块职责，不为单个改动创建第二套路径、日志或事务实现。
+
+`codex-relay-core` 不得依赖 `tauri` 或 `tauri-plugin-*`。Tauri 应用可以依赖并 re-export core；
+Provider 快速测试必须直接选择 core package，完整检查则覆盖整个 Cargo workspace。
 
 ## 序列化契约
 

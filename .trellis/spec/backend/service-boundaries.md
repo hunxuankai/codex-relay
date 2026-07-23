@@ -1,11 +1,22 @@
 # 服务边界
 
+## Crate 边界
+
+- `codex-relay-core` 拥有 Provider、设置、事务、备份、配置/密钥存储及其网络/路径基础设施。
+- Tauri 根 crate 只拥有 command、AppState、tray/window/plugin 组合，以及与桌面生命周期直接相关的
+  autostart、file watch、自检和日志适配。
+- `TauriAutostartBackend` 在根 crate 实现 core-neutral `AutostartBackend`；不得把 `AppHandle` 或
+  Tauri plugin 类型传入 core。
+- 根 crate re-export core 的稳定模块路径以保持 command/测试调用兼容；不得复制 Provider、事务、
+  路径或日志脱敏逻辑形成第二套实现。
+
 ## 基础设施
 
 - `path_service`：解析生产/测试根目录，并在测试模式拒绝真实用户目录。
 - `atomic_file`：同目录临时文件、flush、解析验证、替换和写后读取；不包含 Provider 规则。
 - `file_fingerprint`：用存在状态、长度、修改时间和 SHA-256 表示编辑基线。
-- `safe_log`：滚动日志、保留数量和秘密脱敏。
+- core `safe_log`：只能在 core 内读取 `AppError` 内部详情并完成秘密脱敏/安全日志格式化。
+- 根 crate `safe_log`：滚动日志初始化与保留数量；复用 core 脱敏函数，不公开原始错误详情。
 
 ## 领域服务
 
