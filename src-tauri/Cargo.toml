@@ -1,3 +1,7 @@
+[workspace]
+members = ["crates/codex-relay-core"]
+resolver = "3"
+
 [package]
 name = "codex-relay"
 version = "0.1.2"
@@ -13,47 +17,21 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
+codex-relay-core = { path = "crates/codex-relay-core" }
 tauri = { version = "2.11.5", features = ["tray-icon"] }
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-single-instance = "2.4.3"
+tauri-plugin-updater = "2.10.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.150"
-toml_edit = "0.25.13"
-tokio = { version = "1.53.0", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
-reqwest = { version = "0.13.4", default-features = false, features = [
-    "charset",
-    "http2",
-    "json",
-    "rustls-no-provider",
-    "system-proxy",
-] }
-rustls = { version = "0.23.42", default-features = false, features = [
-    "ring",
-    "std",
-    "tls12",
-] }
-tempfile = "3.27.0"
-url = "2.5.8"
-uuid = { version = "1.24.0", features = ["v4", "serde"] }
+tokio = { version = "1.53.0", features = ["macros", "rt-multi-thread", "time"] }
 chrono = { version = "0.4.45", features = ["serde"] }
-sha2 = "0.11.0"
 notify = "8.2.0"
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
-thiserror = "2.0.19"
-regex = "1.12.2"
-tauri-plugin-updater = "2.10.1"
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = [
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_System_Diagnostics_ToolHelp",
-    "Win32_System_JobObjects",
-    "Win32_System_Threading",
-] }
+uuid = { version = "1.24.0", features = ["v4"] }
 
 [dev-dependencies]
-serial_test = "3.5.0"
+tempfile = "3.27.0"

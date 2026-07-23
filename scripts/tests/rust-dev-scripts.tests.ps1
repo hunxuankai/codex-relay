@@ -134,9 +134,20 @@ Assert-Contains $noWatchDev.Output 'dev-data\codex' 'The safe no-watch command s
 Assert-Contains $noWatchDev.Output 'dev-data\app-data' 'The safe no-watch command should keep the isolated app-data path.'
 
 $packageJson = Get-Content -Raw (Join-Path $workspace 'package.json') | ConvertFrom-Json
+$rootCargoManifestPath = Join-Path $workspace 'src-tauri/Cargo.toml'
+$coreCargoManifestPath = Join-Path $workspace 'src-tauri/crates/codex-relay-core/Cargo.toml'
 Assert-Equal $packageJson.scripts.'dev:safe:no-watch' 'powershell -ExecutionPolicy Bypass -File scripts/prepare-dev-data.ps1 -NoRustWatch' 'The package script should reuse the safe data preparation entry point.'
-Assert-Contains $packageJson.scripts.'test:rust:lib' '--target-dir src-tauri/target --lib' 'The fast lib test should use the stable repository target directory.'
-Assert-Contains $packageJson.scripts.'test:rust:path-safety' '--target-dir src-tauri/target --test path_safety' 'The path-safety test should use the stable repository target directory.'
-Assert-Contains $packageJson.scripts.'test:rust:provider-workflow' '--target-dir src-tauri/target --test provider_workflow' 'The provider workflow test should use the stable repository target directory.'
+Assert-Contains $packageJson.scripts.'test:rust:lib' '--target-dir src-tauri/target -p codex-relay-core --lib' 'The fast lib test should compile and link only the core package in the stable target directory.'
+Assert-Contains $packageJson.scripts.'test:rust:path-safety' '--target-dir src-tauri/target -p codex-relay-core --test path_safety' 'The path-safety test should compile and link only the core package.'
+Assert-Contains $packageJson.scripts.'test:rust:provider-workflow' '--target-dir src-tauri/target -p codex-relay-core --test provider_workflow' 'The provider workflow test should compile and link only the core package.'
+Assert-Contains $packageJson.scripts.'check:rust' 'cargo fmt --all --check --manifest-path src-tauri/Cargo.toml' 'The full Rust check should format every workspace package.'
+Assert-Contains $packageJson.scripts.'check:rust' 'cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets --all-features' 'The full Rust check should lint every workspace package and target.'
+Assert-Contains $packageJson.scripts.'check:rust' 'cargo test --manifest-path src-tauri/Cargo.toml --workspace' 'The full Rust check should run tests for every workspace package.'
+Assert-Equal (Test-Path -LiteralPath $coreCargoManifestPath -PathType Leaf) $true 'The codex-relay-core manifest should exist.'
+$rootCargoManifest = Get-Content -Raw -LiteralPath $rootCargoManifestPath
+$coreCargoManifest = Get-Content -Raw -LiteralPath $coreCargoManifestPath
+Assert-Contains $rootCargoManifest '[workspace]' 'The Tauri manifest should own the Cargo workspace.'
+Assert-Contains $rootCargoManifest '"crates/codex-relay-core"' 'The Cargo workspace should include codex-relay-core.'
+Assert-NotContains $coreCargoManifest 'tauri' 'The core manifest should not directly depend on Tauri.'
 
-Write-Host 'rust-dev-scripts: 6 tests passed'
+Write-Host 'rust-dev-scripts: 12 tests passed'

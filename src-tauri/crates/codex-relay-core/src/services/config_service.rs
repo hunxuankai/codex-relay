@@ -276,9 +276,10 @@ fn provider_not_found(id: &str) -> AppError {
 mod tests {
     use super::*;
 
-    const MULTIPLE: &str = include_str!("../../../fixtures/config-multiple-providers.toml");
-    const WITH_COMMENTS: &str = include_str!("../../../fixtures/config-with-comments.toml");
-    const WITH_UNKNOWN: &str = include_str!("../../../fixtures/config-with-unknown-fields.toml");
+    const MULTIPLE: &str = include_str!("../../../../../fixtures/config-multiple-providers.toml");
+    const WITH_COMMENTS: &str = include_str!("../../../../../fixtures/config-with-comments.toml");
+    const WITH_UNKNOWN: &str =
+        include_str!("../../../../../fixtures/config-with-unknown-fields.toml");
 
     fn valid_input(id: &str) -> ProviderInput {
         ProviderInput {

@@ -2,26 +2,27 @@
 
 use crate::app_state::AppState;
 use crate::infrastructure::path_service::{PathMode, resolve_paths};
-use crate::infrastructure::rustls_provider::ensure_ring_crypto_provider;
 use crate::infrastructure::safe_log::init_logging;
-use crate::services::autostart_service::{AutostartService, TauriAutostartBackend};
+use crate::services::autostart_service::AutostartService;
 use crate::services::file_watch_service::FileWatchService;
 use crate::services::self_check_service::SystemCodexCommandProbe;
+use crate::tauri_autostart_backend::TauriAutostartBackend;
 use crate::tray::TauriFileWatchSink;
+use codex_relay_core::initialize_tls_provider;
 use std::sync::Arc;
 use tauri::Manager;
 
 pub mod app_state;
 pub mod commands;
-pub mod error;
+pub use codex_relay_core::{error, models};
 pub mod infrastructure;
-pub mod models;
 pub mod services;
+pub mod tauri_autostart_backend;
 pub mod tray;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    ensure_ring_crypto_provider().expect("failed to install the rustls ring crypto provider");
+    initialize_tls_provider().expect("failed to install the rustls ring crypto provider");
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(
             |app, _arguments, _cwd| {

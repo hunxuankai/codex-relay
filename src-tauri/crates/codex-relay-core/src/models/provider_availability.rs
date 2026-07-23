@@ -1,4 +1,25 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+#[derive(Clone)]
+pub(crate) struct ProviderAvailabilityTarget {
+    pub(crate) provider_id: String,
+    pub(crate) base_url: String,
+    pub(crate) model: String,
+    pub(crate) api_key: String,
+}
+
+impl fmt::Debug for ProviderAvailabilityTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProviderAvailabilityTarget")
+            .field("provider_id", &self.provider_id)
+            .field("base_url", &self.base_url)
+            .field("model", &self.model)
+            .field("api_key_configured", &!self.api_key.is_empty())
+            .finish()
+    }
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -58,5 +79,20 @@ mod tests {
         assert!(json.contains(r#""durationMs":42"#));
         assert!(!json.contains("apiKey"));
         assert!(!format!("{result:?}").contains("test-key-a-not-real"));
+    }
+
+    #[test]
+    fn availability_target_debug_reports_key_presence_without_exposing_it() {
+        let target = ProviderAvailabilityTarget {
+            provider_id: "provider-a".into(),
+            base_url: "https://provider.example.test/v1".into(),
+            model: "gpt-5.6-sol".into(),
+            api_key: "test-key-target-not-real".into(),
+        };
+
+        let debug = format!("{target:?}");
+
+        assert!(debug.contains("api_key_configured: true"));
+        assert!(!debug.contains("test-key-target-not-real"));
     }
 }

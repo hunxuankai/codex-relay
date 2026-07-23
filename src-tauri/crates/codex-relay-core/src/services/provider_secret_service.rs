@@ -307,7 +307,7 @@ mod tests {
     fn damaged_store_is_backed_up_and_never_overwritten() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("providers.json");
-        let invalid = include_str!("../../../fixtures/providers-invalid.json");
+        let invalid = include_str!("../../../../../fixtures/providers-invalid.json");
         fs::write(&path, invalid).unwrap();
         let service = ProviderSecretService::new(path.clone());
 

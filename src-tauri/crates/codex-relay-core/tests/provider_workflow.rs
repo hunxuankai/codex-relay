@@ -1,6 +1,6 @@
-use codex_relay_lib::infrastructure::path_service::AppPaths;
-use codex_relay_lib::models::provider::{ApiKeyChange, CreateProviderInput, UpdateProviderInput};
-use codex_relay_lib::services::provider_service::ProviderService;
+use codex_relay_core::infrastructure::path_service::AppPaths;
+use codex_relay_core::models::provider::{ApiKeyChange, CreateProviderInput, UpdateProviderInput};
+use codex_relay_core::services::provider_service::ProviderService;
 use serde_json::Value;
 use std::fs;
 

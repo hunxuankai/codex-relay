@@ -1,4 +1,4 @@
-use crate::services::provider_service::ProviderAvailabilityTarget;
+use crate::models::provider_availability::ProviderAvailabilityTarget;
 use serde_json::{Value, json};
 use std::ffi::OsString;
 use std::fmt;
@@ -501,7 +501,7 @@ fn toml_string(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::provider_service::ProviderAvailabilityTarget;
+    use crate::models::provider_availability::ProviderAvailabilityTarget;
     use std::path::Path;
 
     #[test]

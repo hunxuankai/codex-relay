@@ -684,9 +684,10 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    const CONFIG_A: &[u8] = include_bytes!("../../../fixtures/config-multiple-providers.toml");
-    const AUTH_A: &[u8] = include_bytes!("../../../fixtures/auth-api-key.json");
-    const PROVIDERS: &[u8] = include_bytes!("../../../fixtures/providers-multiple.json");
+    const CONFIG_A: &[u8] =
+        include_bytes!("../../../../../fixtures/config-multiple-providers.toml");
+    const AUTH_A: &[u8] = include_bytes!("../../../../../fixtures/auth-api-key.json");
+    const PROVIDERS: &[u8] = include_bytes!("../../../../../fixtures/providers-multiple.json");
     const CONFIG_B: &[u8] = br#"model_provider = "provider-b"
 
 [model_providers.provider-a]

@@ -19,7 +19,7 @@ use crate::infrastructure::codex_runner::{
 };
 use crate::infrastructure::provider_http::{self, ApiProbeError};
 use crate::models::provider_availability::{
-    ProviderAvailabilityResult, ProviderTestKind, ProviderTestStatus,
+    ProviderAvailabilityResult, ProviderAvailabilityTarget, ProviderTestKind, ProviderTestStatus,
 };
 use crate::services::provider_service::ProviderService;
 use crate::services::settings_service::SettingsService;
@@ -348,7 +348,7 @@ impl ProviderAvailabilityService {
 
     async fn execute_codex(
         &self,
-        target: &crate::services::provider_service::ProviderAvailabilityTarget,
+        target: &ProviderAvailabilityTarget,
         version: &CodexRuntimeVersion,
         layout: &CodexTempLayout,
         cancel: watch::Receiver<bool>,
@@ -659,7 +659,7 @@ fn codex_jsonl_outcome(error: CodexJsonlFailure) -> CodexExecutionOutcome {
 }
 
 fn result_from_codex_runner_error(
-    target: &crate::services::provider_service::ProviderAvailabilityTarget,
+    target: &ProviderAvailabilityTarget,
     started: Instant,
     error: CodexRunnerError,
     codex_version: Option<String>,
@@ -673,7 +673,7 @@ fn result_from_codex_runner_error(
 }
 
 fn result_from_codex_execution(
-    target: &crate::services::provider_service::ProviderAvailabilityTarget,
+    target: &ProviderAvailabilityTarget,
     started: Instant,
     codex_version: Option<String>,
     execution: CodexExecutionOutcome,
@@ -707,7 +707,7 @@ fn result_from_codex_execution(
 }
 
 fn result_from_api_error(
-    target: &crate::services::provider_service::ProviderAvailabilityTarget,
+    target: &ProviderAvailabilityTarget,
     started: Instant,
     error: ApiProbeError,
 ) -> ProviderAvailabilityResult {

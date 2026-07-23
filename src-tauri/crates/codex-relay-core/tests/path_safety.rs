@@ -1,11 +1,11 @@
-use codex_relay_lib::error::AppError;
-use codex_relay_lib::infrastructure::path_service::{PathMode, resolve_paths};
-use codex_relay_lib::models::provider::CreateProviderInput;
-use codex_relay_lib::models::provider_availability::ProviderTestStatus;
-use codex_relay_lib::services::provider_availability_service::ProviderAvailabilityService;
-use codex_relay_lib::services::provider_service::ProviderService;
-use codex_relay_lib::services::settings_service::SettingsService;
-use codex_relay_lib::services::transaction_service::{
+use codex_relay_core::error::AppError;
+use codex_relay_core::infrastructure::path_service::{PathMode, resolve_paths};
+use codex_relay_core::models::provider::CreateProviderInput;
+use codex_relay_core::models::provider_availability::ProviderTestStatus;
+use codex_relay_core::services::provider_availability_service::ProviderAvailabilityService;
+use codex_relay_core::services::provider_service::ProviderService;
+use codex_relay_core::services::settings_service::SettingsService;
+use codex_relay_core::services::transaction_service::{
     FileOps, ManagedFileKind, StdFileOps, WritePhase,
 };
 use serial_test::serial;

@@ -4,7 +4,7 @@ use crate::infrastructure::codex_preflight::{
 };
 use crate::infrastructure::provider_http::responses_endpoint;
 use crate::infrastructure::rustls_provider::ensure_ring_crypto_provider;
-use crate::services::provider_service::ProviderAvailabilityTarget;
+use crate::models::provider_availability::ProviderAvailabilityTarget;
 use reqwest::{Client, Proxy, redirect::Policy};
 use serde_json::Value;
 use std::fmt;
@@ -469,7 +469,7 @@ fn is_tool_event_type(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::provider_service::ProviderAvailabilityTarget;
+    use crate::models::provider_availability::ProviderAvailabilityTarget;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;

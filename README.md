@@ -29,8 +29,11 @@ Codex Relay 是一款面向 Windows 10/11 的轻量桌面工具，用于管理�
 
 ```text
 src/                         Vue 界面、类型、composables 与 Tauri 命令边界
-src-tauri/src/               Rust 服务、事务、路径、自检、托盘与命令适配
-src-tauri/tests/             临时目录集成测试与真实路径安全门禁
+src-tauri/src/               Tauri 入口、命令、托盘与桌面生命周期适配
+src-tauri/crates/codex-relay-core/src/
+                             Provider、模型、事务、路径与网络核心逻辑
+src-tauri/crates/codex-relay-core/tests/
+                             临时目录集成测试与真实路径安全门禁
 src-tauri/icons/             Tauri/Windows 图标
 src-tauri/installer/         自定义 NSIS 安装模板
 fixtures/                    仅含假密钥的测试样例
@@ -130,7 +133,7 @@ trellis mem context <session-id>
 
 ## 测试与检查
 
-Rust 行为切片优先使用固定 `src-tauri/target` 的快速入口：
+Rust Provider 行为切片优先使用固定 `src-tauri/target` 的快速入口：
 
 ```powershell
 npm run test:rust:lib -- provider_http
@@ -139,7 +142,8 @@ npm run test:rust:provider-workflow
 ```
 
 这些命令会在 Cargo 启动前检查是否存在未带 `--no-watch` 的 Tauri dev；发现冲突时停止并提示改用
-安全无 watcher 或纯前端入口。不要为每个任务创建随机 `CARGO_TARGET_DIR`，也不要把删除
+安全无 watcher 或纯前端入口。三个入口都显式选择 `codex-relay-core`，因此 Provider、事务和路径
+专项不会编译或链接 Tauri 应用 crate。不要为每个任务创建随机 `CARGO_TARGET_DIR`，也不要把删除
 `src-tauri/target` 当作日常提速手段。
 
 快速入口只缩短红—绿循环，不能替代完整门禁：
@@ -153,8 +157,9 @@ npm run check:rust
 npm run check
 ```
 
-`check:rust:deps` 断言 Rustls 使用显式 `ring` provider 且依赖图没有重复的 `aws-lc-sys`；
-`check:rust` 还会运行 fmt、Clippy、全部 Rust 单元与集成测试。
+`check:rust:deps` 断言 Rustls 使用显式 `ring` provider、依赖图没有重复的 `aws-lc-sys`，并且
+`codex-relay-core` 的真实依赖树不包含 Tauri；`check:rust` 以 workspace 范围运行 fmt、Clippy、
+core 与 Tauri 应用的全部 Rust 单元和集成测试。
 
 Rust 单元与集成测试使用 `tempfile`，并通过 `AppPaths::for_test` 或测试模式双覆盖构造路径。`path_safety` 会在安全临时目录中建立默认路径哨兵，证明 Provider/备份工作流不触及默认用户目录。
 

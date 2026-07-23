@@ -1,12 +1,9 @@
-pub mod auth_service;
 pub mod autostart_service;
-pub mod backup_service;
-pub mod config_service;
 pub mod file_watch_service;
-pub mod provider_availability_service;
-pub mod provider_preference_service;
-pub mod provider_secret_service;
-pub mod provider_service;
 pub mod self_check_service;
-pub mod settings_service;
-pub mod transaction_service;
+
+pub use codex_relay_core::services::{
+    auth_service, backup_service, config_service, provider_availability_service,
+    provider_preference_service, provider_secret_service, provider_service, settings_service,
+    transaction_service,
+};

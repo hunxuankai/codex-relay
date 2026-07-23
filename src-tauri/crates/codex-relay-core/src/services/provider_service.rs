@@ -7,6 +7,7 @@ use crate::models::provider::{
     ProviderMutationOutcome, ProviderProfile, SwitchOutcome, UpdateProviderInput,
     UpdateProviderPreferenceInput, WireApi,
 };
+use crate::models::provider_availability::ProviderAvailabilityTarget;
 use crate::models::transaction::TransactionOperation;
 use crate::services::auth_service::{AuthService, render_auth_json};
 use crate::services::backup_service::BackupService;
@@ -23,7 +24,6 @@ use crate::services::provider_secret_service::{
 use crate::services::transaction_service::{
     FileChange, FileChanges, FileOps, StdFileOps, TransactionRequest, TransactionService,
 };
-use std::fmt;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -39,26 +39,6 @@ pub struct ProviderService {
     secret_service: ProviderSecretService,
     preference_service: ProviderPreferenceService,
     auth_service: AuthService,
-}
-
-#[derive(Clone)]
-pub(crate) struct ProviderAvailabilityTarget {
-    pub(crate) provider_id: String,
-    pub(crate) base_url: String,
-    pub(crate) model: String,
-    pub(crate) api_key: String,
-}
-
-impl fmt::Debug for ProviderAvailabilityTarget {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ProviderAvailabilityTarget")
-            .field("provider_id", &self.provider_id)
-            .field("base_url", &self.base_url)
-            .field("model", &self.model)
-            .field("api_key_configured", &!self.api_key.is_empty())
-            .finish()
-    }
 }
 
 impl ProviderService {
@@ -999,14 +979,16 @@ mod tests {
     use std::fs;
     use std::sync::Arc;
 
-    const MULTIPLE: &str = include_str!("../../../fixtures/config-multiple-providers.toml");
-    const WITH_COMMENTS: &str = include_str!("../../../fixtures/config-with-comments.toml");
-    const WITH_UNKNOWN: &str = include_str!("../../../fixtures/config-with-unknown-fields.toml");
-    const AUTH_A: &str = include_str!("../../../fixtures/auth-api-key.json");
-    const PROVIDERS_MULTIPLE: &str = include_str!("../../../fixtures/providers-multiple.json");
-    const PROVIDERS_EMPTY: &str = include_str!("../../../fixtures/providers-empty.json");
+    const MULTIPLE: &str = include_str!("../../../../../fixtures/config-multiple-providers.toml");
+    const WITH_COMMENTS: &str = include_str!("../../../../../fixtures/config-with-comments.toml");
+    const WITH_UNKNOWN: &str =
+        include_str!("../../../../../fixtures/config-with-unknown-fields.toml");
+    const AUTH_A: &str = include_str!("../../../../../fixtures/auth-api-key.json");
+    const PROVIDERS_MULTIPLE: &str =
+        include_str!("../../../../../fixtures/providers-multiple.json");
+    const PROVIDERS_EMPTY: &str = include_str!("../../../../../fixtures/providers-empty.json");
     const PREFERENCES_MULTIPLE: &str =
-        include_str!("../../../fixtures/provider-preferences-multiple.json");
+        include_str!("../../../../../fixtures/provider-preferences-multiple.json");
 
     fn create_paths(directory: &tempfile::TempDir) -> AppPaths {
         let codex = directory.path().join("codex");

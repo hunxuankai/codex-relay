@@ -142,7 +142,7 @@ mod tests {
     fn invalid_auth_json_returns_safe_error_and_is_not_changed() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("auth.json");
-        let invalid = include_str!("../../../fixtures/auth-invalid.json");
+        let invalid = include_str!("../../../../../fixtures/auth-invalid.json");
         fs::write(&path, invalid).unwrap();
         let service = AuthService::new(path.clone());
 

@@ -5,7 +5,8 @@ $checkScript = Join-Path $workspace 'scripts/check-rust-dependency-graph.ps1'
 
 function Invoke-DependencyCheck {
   param(
-    [string]$TreeOutput
+    [string]$TreeOutput,
+    [string]$CoreTreeOutput
   )
 
   $encodedTree = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($TreeOutput))
@@ -18,6 +19,13 @@ function Invoke-DependencyCheck {
     '-EncodedTreeOutput',
     $encodedTree
   )
+  if ($PSBoundParameters.ContainsKey('CoreTreeOutput')) {
+    $encodedCoreTree = [Convert]::ToBase64String(
+      [Text.Encoding]::UTF8.GetBytes($CoreTreeOutput)
+    )
+    $arguments += '-EncodedCoreTreeOutput'
+    $arguments += $encodedCoreTree
+  }
 
   $previousErrorActionPreference = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
@@ -76,4 +84,22 @@ rustls v0.23.42 [ring,std,tls12]
 '@
 Assert-Equal $ringOnly.ExitCode 0 'A ring-only Rustls dependency graph should pass.'
 
-Write-Host 'rust-dependency-graph: 3 tests passed'
+$coreWithTauri = Invoke-DependencyCheck -TreeOutput @'
+rustls v0.23.42 [ring,std,tls12]
+'@ -CoreTreeOutput @'
+codex-relay-core v0.1.2
+tauri v2.11.5
+'@
+Assert-Equal $coreWithTauri.ExitCode 4 'A core dependency graph containing Tauri should fail.'
+Assert-Contains $coreWithTauri.Output 'codex-relay-core' 'The failure should identify the core boundary.'
+
+$coreWithoutTauri = Invoke-DependencyCheck -TreeOutput @'
+rustls v0.23.42 [ring,std,tls12]
+'@ -CoreTreeOutput @'
+codex-relay-core v0.1.2
+reqwest v0.13.4
+rustls v0.23.42
+'@
+Assert-Equal $coreWithoutTauri.ExitCode 0 'A Tauri-free core dependency graph should pass.'
+
+Write-Host 'rust-dependency-graph: 5 tests passed'

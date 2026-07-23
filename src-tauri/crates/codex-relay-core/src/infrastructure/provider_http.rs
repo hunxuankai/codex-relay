@@ -1,5 +1,5 @@
 use crate::infrastructure::rustls_provider::ensure_ring_crypto_provider;
-use crate::services::provider_service::ProviderAvailabilityTarget;
+use crate::models::provider_availability::ProviderAvailabilityTarget;
 use reqwest::{Client, Proxy, StatusCode, redirect::Policy};
 use serde_json::Value;
 use std::time::Duration;
