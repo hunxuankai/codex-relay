@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 const styles = readFileSync('src/style.css', 'utf8')
 const app = readFileSync('src/App.vue', 'utf8')
 const confirmDialog = readFileSync('src/components/ConfirmDialog.vue', 'utf8')
+const providerList = readFileSync('src/components/ProviderList.vue', 'utf8')
 const selfCheckErrorBanner = readFileSync('src/components/SelfCheckErrorBanner.vue', 'utf8')
 
 function collectVueSources(directory: string): Array<{ path: string; source: string }> {
@@ -97,5 +98,9 @@ describe('global Windows visual system', () => {
 
   it('keeps the top notification borders inset from the window edges', () => {
     expect(app).toMatch(/\.app-notification-slot\s*{[\s\S]*?margin-inline:\s*1\.25rem/)
+  })
+
+  it('keeps Provider list tracks packed at the top of its pane', () => {
+    expect(providerList).toMatch(/\.provider-list\s*{[^}]*align-content:\s*start/)
   })
 })

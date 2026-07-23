@@ -122,6 +122,7 @@ const emit = defineEmits<{
 <style scoped>
 .provider-list {
   display: grid;
+  align-content: start;
   gap: 1rem;
 }
 
