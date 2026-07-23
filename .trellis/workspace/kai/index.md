@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **活动文件**：`journal-1.md`
-- **会话总数**：17
+- **会话总数**：18
 - **最近活动**：2026-07-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | 文件 | 行数 | 状态 |
 |------|-------|--------|
-| `journal-1.md` | ~584 | 活动 |
+| `journal-1.md` | ~617 | 活动 |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | 日期 | 标题 | 提交 | 分支 |
 |---|------|-------|---------|--------|
+| 18 | 2026-07-23 | Provider 多命名地址与密钥 | `72f7c83` | `master` |
 | 17 | 2026-07-23 | 拆分 codex-relay-core 缩短 Provider 编译反馈 | `5393ceb`, `eaee269` | `master` |
 | 16 | 2026-07-23 | 优化 Rust 开发编译反馈 | `15b39a3`, `635c6ca` | `master` |
 | 15 | 2026-07-23 | Provider 可用性与 Codex 兼容性测试 | `39ac07d` | `master` |
