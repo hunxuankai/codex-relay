@@ -5,7 +5,7 @@ import ApiKeyInput from './ApiKeyInput.vue'
 describe('ApiKeyInput', () => {
   it('uses password mode by default and toggles visibility', async () => {
     const wrapper = mount(ApiKeyInput, {
-      props: { modelValue: 'test-key-not-real', configured: false },
+    props: { modelValue: 'test-key-provider-not-real' },
     })
     const input = wrapper.get('input')
 
@@ -16,16 +16,12 @@ describe('ApiKeyInput', () => {
     expect(input.attributes('type')).toBe('password')
   })
 
-  it('requires explicit confirmation before clearing a configured key', async () => {
+  it('does not expose the removed clear-existing-key workflow', () => {
     const wrapper = mount(ApiKeyInput, {
-      props: { modelValue: '', configured: true },
+      props: { modelValue: '', configured: true } as never,
     })
 
-    await wrapper.get('[aria-label="清空 API Key"]').trigger('click')
-    expect(wrapper.text()).toContain('确认清空')
-    expect(wrapper.emitted('clear')).toBeUndefined()
-
-    await wrapper.get('[aria-label="确认清空 API Key"]').trigger('click')
-    expect(wrapper.emitted('clear')).toHaveLength(1)
+    expect(wrapper.find('[aria-label="清空 API Key"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('确认清空')
   })
 })

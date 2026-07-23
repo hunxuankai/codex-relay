@@ -9,7 +9,7 @@
 ## 真实性规则
 
 - 只有所有触及文件恢复并逐字节/存在状态验证成功，消息才可说“原配置已恢复”。
-- 回滚不完整必须返回 `TRANSACTION_ROLLBACK_INCOMPLETE`，保留事务标记并引导备份恢复。
+- 回滚不完整必须返回 `ROLLBACK_INCOMPLETE`，保留事务标记并引导备份恢复。
 - 恢复文件成功但后续 Provider/自检刷新失败时，分别报告“恢复完成”和“状态刷新未完全成功”。
 - Codex CLI 缺失或超时是 warning，不阻止 Provider 管理。
 

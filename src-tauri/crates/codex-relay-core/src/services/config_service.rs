@@ -106,15 +106,7 @@ pub fn validate_provider_input(input: &ProviderInput) -> Result<ValidatedProvide
         ));
     }
 
-    let raw_base_url = input.base_url.trim();
-    if raw_base_url.is_empty() || raw_base_url.len() > MAX_BASE_URL_LEN {
-        return Err(invalid_base_url("base URL is empty or too long"));
-    }
-    let parsed_url = Url::parse(raw_base_url)
-        .map_err(|error| invalid_base_url(&format!("URL parse failed: {error}")))?;
-    if !matches!(parsed_url.scheme(), "http" | "https") || parsed_url.host_str().is_none() {
-        return Err(invalid_base_url("base URL is not HTTP(S) or has no host"));
-    }
+    let base_url = normalize_base_url(&input.base_url)?;
 
     let wire_api = input.wire_api.trim();
     if wire_api != "responses" {
@@ -128,9 +120,22 @@ pub fn validate_provider_input(input: &ProviderInput) -> Result<ValidatedProvide
     Ok(ValidatedProviderInput {
         id,
         name: name.to_owned(),
-        base_url: parsed_url.to_string(),
+        base_url,
         wire_api: wire_api.to_owned(),
     })
+}
+
+pub fn normalize_base_url(base_url: &str) -> Result<String, AppError> {
+    let raw_base_url = base_url.trim();
+    if raw_base_url.is_empty() || raw_base_url.len() > MAX_BASE_URL_LEN {
+        return Err(invalid_base_url("base URL is empty or too long"));
+    }
+    let parsed_url = Url::parse(raw_base_url)
+        .map_err(|error| invalid_base_url(&format!("URL parse failed: {error}")))?;
+    if !matches!(parsed_url.scheme(), "http" | "https") || parsed_url.host_str().is_none() {
+        return Err(invalid_base_url("base URL is not HTTP(S) or has no host"));
+    }
+    Ok(parsed_url.to_string())
 }
 
 pub fn validate_provider_config(
@@ -178,6 +183,19 @@ pub fn update_provider(
     let mut document = parse_document(source)?;
     let provider = provider_table_mut(&mut document, &id)?;
     set_provider_fields(provider, input);
+    Ok(document.to_string())
+}
+
+pub fn set_provider_base_url(
+    source: &str,
+    provider_id: &str,
+    base_url: &str,
+) -> Result<String, AppError> {
+    let provider_id = validate_provider_id(provider_id)?;
+    let base_url = normalize_base_url(base_url)?;
+    let mut document = parse_document(source)?;
+    let provider = provider_table_mut(&mut document, &provider_id)?;
+    provider.insert("base_url", value(base_url));
     Ok(document.to_string())
 }
 

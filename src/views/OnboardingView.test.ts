@@ -28,7 +28,7 @@ describe('OnboardingView', () => {
     }
   })
 
-  it('imports the current auth.json key only after confirmation', async () => {
+  it('imports the current auth.json key only after naming it', async () => {
     const wrapper = mount(OnboardingView, {
       attachTo: document.body,
       props: {
@@ -42,11 +42,14 @@ describe('OnboardingView', () => {
 
     await wrapper.get('[aria-label="保存当前 auth.json 密钥"]').trigger('click')
     expect(wrapper.text()).toContain('是否将其保存到当前 Provider')
-    await wrapper.get('[aria-label="取消确认"]').trigger('click')
+    await wrapper.get('[aria-label="确认导入当前密钥"]').trigger('click')
+    expect(wrapper.text()).toContain('密钥名称为必填项')
+    await wrapper.get('[aria-label="取消导入当前密钥"]').trigger('click')
     expect(wrapper.emitted('importCurrentKey')).toBeUndefined()
 
     await wrapper.get('[aria-label="保存当前 auth.json 密钥"]').trigger('click')
-    await wrapper.get('[aria-label="确认操作"]').trigger('click')
-    expect(wrapper.emitted('importCurrentKey')).toHaveLength(1)
+    await wrapper.get('[name="import-api-key-name"]').setValue('从 Codex 导入')
+    await wrapper.get('[aria-label="确认导入当前密钥"]').trigger('click')
+    expect(wrapper.emitted('importCurrentKey')).toEqual([['从 Codex 导入']])
   })
 })

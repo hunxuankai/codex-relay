@@ -1,11 +1,23 @@
 use crate::error::AppError;
+use crate::services::config_service::{normalize_base_url, validate_provider_id};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use uuid::Uuid;
 
-const PROVIDER_PREFERENCE_VERSION: u32 = 1;
+const PROVIDER_PREFERENCE_VERSION: u32 = 2;
+const MAX_BASE_URL_ENTRY_NAME_LEN: usize = 100;
+const LEGACY_DEFAULT_ENTRY_ID: &str = "legacy-default";
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NamedBaseUrl {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ModelCatalogEntry {
@@ -54,6 +66,69 @@ pub fn model_catalog() -> &'static [ModelCatalogEntry] {
     MODEL_CATALOG
 }
 
+pub fn normalize_named_base_urls(
+    entries: Vec<NamedBaseUrl>,
+) -> Result<Vec<NamedBaseUrl>, AppError> {
+    if entries.is_empty() {
+        return Err(AppError::new(
+            "PROVIDER_BASE_URLS_REQUIRED",
+            "Provider 必须至少保留一个 Base URL。",
+            "provider Base URL collection is empty",
+        ));
+    }
+
+    let mut ids = BTreeSet::new();
+    let mut names = BTreeSet::new();
+    let mut values = BTreeSet::new();
+    let mut normalized = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let id = entry.id.trim();
+        if id.is_empty()
+            || (id != LEGACY_DEFAULT_ENTRY_ID && Uuid::parse_str(id).is_err())
+            || !ids.insert(id.to_owned())
+        {
+            return Err(AppError::new(
+                "INVALID_BASE_URL_ID",
+                "Base URL 条目标识无效。",
+                "provider Base URL entry id is empty, duplicated, or malformed",
+            ));
+        }
+
+        let name = entry.name.trim();
+        if name.is_empty() || name.chars().count() > MAX_BASE_URL_ENTRY_NAME_LEN {
+            return Err(AppError::new(
+                "INVALID_BASE_URL_NAME",
+                "Base URL 名称不能为空且长度不能超过 100 个字符。",
+                "provider Base URL entry name is empty or too long",
+            ));
+        }
+        if !names.insert(name.to_lowercase()) {
+            return Err(AppError::new(
+                "DUPLICATE_BASE_URL_NAME",
+                "同一个 Provider 中的 Base URL 名称不能重复。",
+                "provider Base URL entry names are duplicated",
+            ));
+        }
+
+        let url = normalize_base_url(&entry.url)?;
+        if !values.insert(url.clone()) {
+            return Err(AppError::new(
+                "DUPLICATE_BASE_URL_VALUE",
+                "同一个 Provider 中不能重复保存相同的 Base URL。",
+                "provider Base URL entry values are duplicated",
+            ));
+        }
+
+        normalized.push(NamedBaseUrl {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            url,
+        });
+    }
+
+    Ok(normalized)
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderPreference {
@@ -63,9 +138,34 @@ pub struct ProviderPreference {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderPrivatePreference {
+    pub base_urls: Vec<NamedBaseUrl>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_preference: Option<ProviderPreference>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProviderPreferenceStore {
     pub version: u32,
-    pub providers: BTreeMap<String, ProviderPreference>,
+    pub providers: BTreeMap<String, ProviderPrivatePreference>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LoadedProviderPreferenceStore {
+    pub store: ProviderPreferenceStore,
+    pub needs_upgrade: bool,
+}
+
+#[derive(Deserialize)]
+struct StoreVersion {
+    version: u32,
+}
+
+#[derive(Deserialize)]
+struct LegacyProviderPreferenceStore {
+    version: u32,
+    providers: BTreeMap<String, ProviderPreference>,
 }
 
 impl Default for ProviderPreferenceStore {
@@ -142,6 +242,38 @@ impl ProviderPreference {
     }
 }
 
+impl ProviderPrivatePreference {
+    pub fn with_initial_base_url(
+        base_url_name: &str,
+        base_url: &str,
+        model_preference: Option<ProviderPreference>,
+    ) -> Result<Self, AppError> {
+        let base_urls = normalize_named_base_urls(vec![NamedBaseUrl {
+            id: Uuid::new_v4().to_string(),
+            name: base_url_name.into(),
+            url: base_url.into(),
+        }])?;
+        if let Some(preference) = &model_preference {
+            validate_preference(preference)?;
+        }
+        Ok(Self {
+            base_urls,
+            model_preference,
+        })
+    }
+
+    pub fn hydrate_legacy_base_url(&mut self, base_url: &str) -> Result<(), AppError> {
+        if self.base_urls.is_empty() {
+            self.base_urls = normalize_named_base_urls(vec![NamedBaseUrl {
+                id: LEGACY_DEFAULT_ENTRY_ID.into(),
+                name: "默认地址".into(),
+                url: base_url.into(),
+            }])?;
+        }
+        Ok(())
+    }
+}
+
 pub fn validate_preference(preference: &ProviderPreference) -> Result<(), AppError> {
     if preference.models.is_empty() {
         return Err(AppError::new(
@@ -202,25 +334,86 @@ fn unknown_model(model: &str) -> AppError {
 }
 
 pub fn serialize_store(store: &ProviderPreferenceStore) -> Result<Vec<u8>, AppError> {
-    validate_store(store)?;
-    let mut json = serde_json::to_string_pretty(store).map_err(AppError::from)?;
+    let normalized = normalize_store(store.clone())?;
+    let mut json = serde_json::to_string_pretty(&normalized).map_err(AppError::from)?;
     json.push('\n');
     Ok(json.into_bytes())
 }
 
-pub fn parse_store(bytes: &[u8]) -> Result<ProviderPreferenceStore, AppError> {
-    let store = serde_json::from_slice::<ProviderPreferenceStore>(bytes).map_err(|error| {
+pub fn parse_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, AppError> {
+    let version = serde_json::from_slice::<StoreVersion>(bytes).map_err(|error| {
         AppError::new(
             "INVALID_PROVIDER_PREFERENCES",
             "无法解析 provider-preferences.json。",
             error.to_string(),
         )
     })?;
-    validate_store(&store)?;
-    Ok(store)
+
+    match version.version {
+        1 => parse_legacy_store(bytes),
+        PROVIDER_PREFERENCE_VERSION => {
+            let store =
+                serde_json::from_slice::<ProviderPreferenceStore>(bytes).map_err(|error| {
+                    AppError::new(
+                        "INVALID_PROVIDER_PREFERENCES",
+                        "无法解析 provider-preferences.json。",
+                        error.to_string(),
+                    )
+                })?;
+            Ok(LoadedProviderPreferenceStore {
+                store: normalize_store(store)?,
+                needs_upgrade: false,
+            })
+        }
+        unsupported => Err(AppError::new(
+            "INVALID_PROVIDER_PREFERENCES",
+            "provider-preferences.json 的版本不受支持。",
+            format!("unsupported provider preference version: {unsupported}"),
+        )),
+    }
 }
 
-fn validate_store(store: &ProviderPreferenceStore) -> Result<(), AppError> {
+fn parse_legacy_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, AppError> {
+    let legacy =
+        serde_json::from_slice::<LegacyProviderPreferenceStore>(bytes).map_err(|error| {
+            AppError::new(
+                "INVALID_PROVIDER_PREFERENCES",
+                "无法解析 provider-preferences.json。",
+                error.to_string(),
+            )
+        })?;
+    if legacy.version != 1 {
+        return Err(AppError::new(
+            "INVALID_PROVIDER_PREFERENCES",
+            "provider-preferences.json 的版本不受支持。",
+            format!("legacy provider preference version is {}", legacy.version),
+        ));
+    }
+
+    let mut providers = BTreeMap::new();
+    for (provider_id, preference) in legacy.providers {
+        validate_provider_store_id(&provider_id)?;
+        validate_preference(&preference)?;
+        providers.insert(
+            provider_id,
+            ProviderPrivatePreference {
+                base_urls: Vec::new(),
+                model_preference: Some(preference),
+            },
+        );
+    }
+    Ok(LoadedProviderPreferenceStore {
+        store: ProviderPreferenceStore {
+            version: PROVIDER_PREFERENCE_VERSION,
+            providers,
+        },
+        needs_upgrade: true,
+    })
+}
+
+fn normalize_store(
+    mut store: ProviderPreferenceStore,
+) -> Result<ProviderPreferenceStore, AppError> {
     if store.version != PROVIDER_PREFERENCE_VERSION {
         return Err(AppError::new(
             "INVALID_PROVIDER_PREFERENCES",
@@ -228,8 +421,26 @@ fn validate_store(store: &ProviderPreferenceStore) -> Result<(), AppError> {
             format!("unsupported provider preference version: {}", store.version),
         ));
     }
-    for preference in store.providers.values() {
-        validate_preference(preference)?;
+    for (provider_id, preference) in &mut store.providers {
+        validate_provider_store_id(provider_id)?;
+        if !preference.base_urls.is_empty() {
+            preference.base_urls =
+                normalize_named_base_urls(std::mem::take(&mut preference.base_urls))?;
+        }
+        if let Some(model_preference) = &preference.model_preference {
+            validate_preference(model_preference)?;
+        }
+    }
+    Ok(store)
+}
+
+fn validate_provider_store_id(provider_id: &str) -> Result<(), AppError> {
+    if validate_provider_id(provider_id)? != provider_id {
+        return Err(AppError::new(
+            "INVALID_PROVIDER_PREFERENCES",
+            "provider-preferences.json 包含无效的 Provider ID。",
+            format!("provider preference id is not normalized: {provider_id:?}"),
+        ));
     }
     Ok(())
 }
@@ -249,10 +460,17 @@ impl ProviderPreferenceService {
     }
 
     pub fn load(&self) -> Result<ProviderPreferenceStore, AppError> {
+        Ok(self.load_versioned()?.store)
+    }
+
+    pub fn load_versioned(&self) -> Result<LoadedProviderPreferenceStore, AppError> {
         let bytes = match fs::read(&self.path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == ErrorKind::NotFound => {
-                return Ok(ProviderPreferenceStore::default());
+                return Ok(LoadedProviderPreferenceStore {
+                    store: ProviderPreferenceStore::default(),
+                    needs_upgrade: false,
+                });
             }
             Err(error) => return Err(AppError::from(error)),
         };
@@ -335,15 +553,21 @@ mod tests {
         let mut store = ProviderPreferenceStore::default();
         store.providers.insert(
             "provider-a".into(),
-            ProviderPreference::from_models(&["gpt-5.6-sol".into()]).unwrap(),
+            ProviderPrivatePreference::with_initial_base_url(
+                "默认地址",
+                "https://provider-a.example.test/v1",
+                Some(ProviderPreference::from_models(&["gpt-5.6-sol".into()]).unwrap()),
+            )
+            .unwrap(),
         );
 
         let bytes = serialize_store(&store).unwrap();
         let parsed = parse_store(&bytes).unwrap();
 
-        assert_eq!(parsed, store);
+        assert_eq!(parsed.store, store);
+        assert!(!parsed.needs_upgrade);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("\"version\": 1"));
+        assert!(text.contains("\"version\": 2"));
         assert!(text.ends_with('\n'));
     }
 
@@ -401,5 +625,143 @@ mod tests {
         assert_eq!(preference.selected_model, "gpt-5.6-sol");
         assert_eq!(preference.reasoning_efforts["gpt-5.6-sol"], "high");
         assert_eq!(preference.reasoning_efforts["gpt-5.4-mini"], "low");
+    }
+
+    #[test]
+    fn named_base_urls_are_normalized_unique_and_keep_insertion_order() {
+        let first_id = "65c7650d-d20d-4dca-b445-8aa47fcbe92c";
+        let second_id = "f8e62dc2-46df-4234-92d5-7d318d879ff7";
+        let normalized = normalize_named_base_urls(vec![
+            NamedBaseUrl {
+                id: first_id.into(),
+                name: "  主用地址  ".into(),
+                url: " https://provider-a.example.test/v1 ".into(),
+            },
+            NamedBaseUrl {
+                id: second_id.into(),
+                name: "备用地址".into(),
+                url: "https://provider-b.example.test/v1".into(),
+            },
+        ])
+        .unwrap();
+
+        assert_eq!(normalized[0].id, first_id);
+        assert_eq!(normalized[0].name, "主用地址");
+        assert_eq!(normalized[0].url, "https://provider-a.example.test/v1");
+        assert_eq!(normalized[1].id, second_id);
+
+        let duplicate_name = normalize_named_base_urls(vec![
+            normalized[0].clone(),
+            NamedBaseUrl {
+                id: second_id.into(),
+                name: "主用地址".into(),
+                url: "https://provider-c.example.test/v1".into(),
+            },
+        ])
+        .unwrap_err();
+        assert_eq!(duplicate_name.code(), "DUPLICATE_BASE_URL_NAME");
+
+        let duplicate_value = normalize_named_base_urls(vec![
+            normalized[0].clone(),
+            NamedBaseUrl {
+                id: second_id.into(),
+                name: "其他地址".into(),
+                url: "https://provider-a.example.test/v1".into(),
+            },
+        ])
+        .unwrap_err();
+        assert_eq!(duplicate_value.code(), "DUPLICATE_BASE_URL_VALUE");
+    }
+
+    #[test]
+    fn preference_store_v1_is_loaded_for_upgrade_and_v2_round_trips() {
+        let legacy = br#"{
+  "version": 1,
+  "providers": {
+    "provider-a": {
+      "models": ["gpt-5.6-sol"],
+      "selectedModel": "gpt-5.6-sol",
+      "reasoningEfforts": { "gpt-5.6-sol": "high" }
+    }
+  }
+}
+"#;
+
+        let loaded = parse_store(legacy).unwrap();
+
+        assert!(loaded.needs_upgrade);
+        assert_eq!(loaded.store.version, 2);
+        let migrated = &loaded.store.providers["provider-a"];
+        assert!(migrated.base_urls.is_empty());
+        assert_eq!(
+            migrated
+                .model_preference
+                .as_ref()
+                .map(|preference| preference.selected_model.as_str()),
+            Some("gpt-5.6-sol")
+        );
+
+        let mut store = ProviderPreferenceStore::default();
+        store.providers.insert(
+            "provider-a".into(),
+            ProviderPrivatePreference {
+                base_urls: normalize_named_base_urls(vec![NamedBaseUrl {
+                    id: "65c7650d-d20d-4dca-b445-8aa47fcbe92c".into(),
+                    name: "主用地址".into(),
+                    url: "https://provider-a.example.test/v1".into(),
+                }])
+                .unwrap(),
+                model_preference: Some(
+                    ProviderPreference::from_models(&["gpt-5.6-sol".into()]).unwrap(),
+                ),
+            },
+        );
+
+        let bytes = serialize_store(&store).unwrap();
+        let reparsed = parse_store(&bytes).unwrap();
+
+        assert!(!reparsed.needs_upgrade);
+        assert_eq!(reparsed.store, store);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("\"version\": 2"));
+        assert!(text.contains("\"baseUrls\""));
+        assert!(text.contains("\"modelPreference\""));
+        assert!(text.ends_with('\n'));
+    }
+
+    #[test]
+    fn legacy_load_is_read_only_and_unknown_or_malformed_versions_fail_closed() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("provider-preferences.json");
+        let legacy = br#"{
+  "version": 1,
+  "providers": {
+    "provider-a": {
+      "models": ["gpt-5.6-sol"],
+      "selectedModel": "gpt-5.6-sol",
+      "reasoningEfforts": { "gpt-5.6-sol": "medium" }
+    }
+  }
+}
+"#;
+        fs::write(&path, legacy).unwrap();
+        let service = ProviderPreferenceService::new(path.clone());
+
+        let loaded = service.load_versioned().unwrap();
+
+        assert!(loaded.needs_upgrade);
+        assert_eq!(fs::read(&path).unwrap(), legacy);
+
+        let unknown = br#"{"version":3,"providers":{}}"#;
+        fs::write(&path, unknown).unwrap();
+        let unknown_error = service.load_versioned().unwrap_err();
+        assert_eq!(unknown_error.code(), "INVALID_PROVIDER_PREFERENCES");
+        assert_eq!(fs::read(&path).unwrap(), unknown);
+
+        let malformed = br#"{"version":2,"providers":"broken"}"#;
+        fs::write(&path, malformed).unwrap();
+        let malformed_error = service.load_versioned().unwrap_err();
+        assert_eq!(malformed_error.code(), "INVALID_PROVIDER_PREFERENCES");
+        assert_eq!(fs::read(&path).unwrap(), malformed);
     }
 }

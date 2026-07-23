@@ -11,11 +11,11 @@ defineProps<{
   <div class="provider-status" aria-label="Provider 状态">
     <ElTag v-if="provider.isActive" type="success" effect="plain" round>当前</ElTag>
     <ElTag
-      :type="provider.apiKeyConfigured ? 'success' : 'warning'"
+      :type="provider.configurationComplete ? 'success' : 'warning'"
       effect="plain"
       round
     >
-      {{ provider.apiKeyConfigured ? '密钥已配置' : '未配置密钥' }}
+      {{ provider.configurationComplete ? '配置完整' : '配置不完整' }}
     </ElTag>
     <ElTag v-if="!provider.isValid" type="danger" effect="plain" round>配置无效</ElTag>
   </div>

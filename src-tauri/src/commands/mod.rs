@@ -120,9 +120,11 @@ mod tests {
         let input = CreateProviderInput {
             id: "invalid.id".into(),
             name: "Provider".into(),
+            base_url_name: "主用地址".into(),
             base_url: "https://example.com/v1".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.6-sol".into()],
+            api_key_name: "主用密钥".into(),
             api_key: "test-key-command-not-real".into(),
             activate_after_save: false,
             expected_files: current.fingerprints,

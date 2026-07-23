@@ -246,6 +246,11 @@ fn operation_name(operation: TransactionOperation) -> &'static str {
         TransactionOperation::RestoreBackup => "restore_backup",
         TransactionOperation::SyncCurrentProvider => "sync_current_provider",
         TransactionOperation::UpdateProviderPreference => "update_provider_preference",
+        TransactionOperation::SaveProviderBaseUrls => "save_provider_base_urls",
+        TransactionOperation::SelectProviderBaseUrl => "select_provider_base_url",
+        TransactionOperation::SaveProviderApiKeys => "save_provider_api_keys",
+        TransactionOperation::SelectProviderApiKey => "select_provider_api_key",
+        TransactionOperation::ImportCurrentApiKey => "import_current_api_key",
     }
 }
 
@@ -373,6 +378,30 @@ mod tests {
             provider_id: Some("provider-a".into()),
             started_at: created_at.into(),
         }
+    }
+
+    #[test]
+    fn provider_multi_credential_operations_have_stable_backup_names() {
+        assert_eq!(
+            operation_name(TransactionOperation::SaveProviderBaseUrls),
+            "save_provider_base_urls"
+        );
+        assert_eq!(
+            operation_name(TransactionOperation::SelectProviderBaseUrl),
+            "select_provider_base_url"
+        );
+        assert_eq!(
+            operation_name(TransactionOperation::SaveProviderApiKeys),
+            "save_provider_api_keys"
+        );
+        assert_eq!(
+            operation_name(TransactionOperation::SelectProviderApiKey),
+            "select_provider_api_key"
+        );
+        assert_eq!(
+            operation_name(TransactionOperation::ImportCurrentApiKey),
+            "import_current_api_key"
+        );
     }
 
     #[test]

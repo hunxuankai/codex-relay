@@ -22,6 +22,18 @@ return {
 - 操作状态区分 loading、busy、error 和最近成功消息；切换期间禁用所有 Provider 切换入口。
 - 当前 Provider、密钥配置状态和健康结果来自后端 DTO，不由组件猜测。
 
+## Provider 命名地址与密钥状态契约
+
+- `useProviders` 持有普通脱敏 Provider 真相，负责 Base URL 批量保存、URL/密钥独立选择、
+  命名导入和 mutation 后权威刷新；不得加入完整密钥字段。
+- `useProviderApiKeyManager` 只在管理对话框生命周期内持有完整密钥，暴露只读状态和
+  `load`、`replaceEntries`、`save`、`clear` 动作。
+- `load`、`save` 使用请求序列；关闭、scope dispose 或新请求使旧响应失效，晚响应不得重新填充密钥。
+- API Key 对话框默认明文展示，不设置单独“查看”步骤；统一隐藏/显示只改变显示方式，复制反馈不得包含值。
+- URL 与 Key 分段选择分别发出显式事件；当前项名称必须有可见文本，选中状态不能只靠颜色。
+
+完整跨层契约见 [Provider 多命名地址与密钥契约](../project/provider-multi-credentials.md)。
+
 ## 事件处理
 
 - `providers-changed`：刷新 Provider 数据和选中状态。

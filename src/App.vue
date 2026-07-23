@@ -100,9 +100,9 @@ async function configureLater() {
   activeView.value = 'providers'
 }
 
-async function importCurrentKey() {
+async function importCurrentKey(name: string) {
   const providerId = providerState.activeProvider.value?.id
-  if (providerId) await providerState.importCurrentKey(providerId)
+  if (providerId) await providerState.importCurrentKey(providerId, name)
 }
 
 async function handleProviderCreated() {

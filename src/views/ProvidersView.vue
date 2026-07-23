@@ -3,14 +3,25 @@ import { computed, shallowRef, watch } from 'vue'
 import { ElButton } from 'element-plus'
 import AppNotification from '../components/AppNotification.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import ImportCurrentApiKeyDialog from '../components/ImportCurrentApiKeyDialog.vue'
+import ProviderApiKeyManagerDialog from '../components/ProviderApiKeyManagerDialog.vue'
 import ProviderEditor from '../components/ProviderEditor.vue'
 import ProviderAvailabilityPanel from '../components/ProviderAvailabilityPanel.vue'
+import ProviderBaseUrlManagerDialog from '../components/ProviderBaseUrlManagerDialog.vue'
+import ProviderCredentialControls from '../components/ProviderCredentialControls.vue'
+import ProviderEndpointControls from '../components/ProviderEndpointControls.vue'
 import ProviderList from '../components/ProviderList.vue'
 import ProviderPreferenceControls from '../components/ProviderPreferenceControls.vue'
 import ProviderStatus from '../components/ProviderStatus.vue'
+import { useProviderApiKeyManager } from '../composables/useProviderApiKeyManager'
 import { useProviderAvailability } from '../composables/useProviderAvailability'
 import { useProviders } from '../composables/useProviders'
-import type { CreateProviderInput, UpdateProviderInput } from '../types/provider'
+import { RelayCommandError } from '../services/tauri'
+import type {
+  CreateProviderInput,
+  ProviderBaseUrlDraft,
+  UpdateProviderInput,
+} from '../types/provider'
 import type { ProviderTestKind } from '../types/providerAvailability'
 
 const props = withDefaults(defineProps<{ startCreating?: boolean }>(), {
@@ -23,13 +34,30 @@ const emit = defineEmits<{
 
 const providerState = useProviders()
 const availabilityState = useProviderAvailability()
+const apiKeyManager = useProviderApiKeyManager({
+  onSaved: async () => {
+    if (!(await providerState.refresh())) {
+      throw new RelayCommandError(
+        'PROVIDER_REFRESH_FAILED',
+        'API Key 已保存，但 Provider 状态刷新失败，请重新加载。',
+      )
+    }
+  },
+})
 const editorMode = shallowRef<'create' | 'edit' | null>(props.startCreating ? 'create' : null)
 const editingProviderId = shallowRef<string | null>(null)
 const deleteProviderId = shallowRef<string | null>(null)
 const confirmImportCurrentKey = shallowRef(false)
 const confirmCodexProviderId = shallowRef<string | null>(null)
+const baseUrlManagerProviderId = shallowRef<string | null>(null)
+const apiKeyManagerProviderId = shallowRef<string | null>(null)
 
-const interactionBusy = computed(() => providerState.busy.value || availabilityState.busy.value)
+const interactionBusy = computed(() =>
+  providerState.busy.value ||
+  availabilityState.busy.value ||
+  apiKeyManager.loading.value ||
+  apiKeyManager.busy.value,
+)
 
 const editingProvider = computed(
   () =>
@@ -40,6 +68,16 @@ const deleteProvider = computed(
   () =>
     providerState.providers.value.find((provider) => provider.id === deleteProviderId.value) ??
     null,
+)
+const baseUrlManagerProvider = computed(
+  () => providerState.providers.value.find(
+    (provider) => provider.id === baseUrlManagerProviderId.value,
+  ) ?? null,
+)
+const apiKeyManagerProvider = computed(
+  () => providerState.providers.value.find(
+    (provider) => provider.id === apiKeyManagerProviderId.value,
+  ) ?? null,
 )
 
 function openCreate() {
@@ -85,11 +123,36 @@ async function confirmDelete() {
   deleteProviderId.value = null
 }
 
-async function importCurrentKey() {
+async function importCurrentKey(name: string) {
   const providerId = providerState.activeProvider.value?.id
   if (!providerId) return
-  await providerState.importCurrentKey(providerId)
-  confirmImportCurrentKey.value = false
+  const outcome = await providerState.importCurrentKey(providerId, name)
+  if (outcome) confirmImportCurrentKey.value = false
+}
+
+function openBaseUrlManager(providerId: string) {
+  baseUrlManagerProviderId.value = providerId
+}
+
+async function saveBaseUrls(entries: ProviderBaseUrlDraft[]) {
+  const providerId = baseUrlManagerProviderId.value
+  if (!providerId) return
+  const outcome = await providerState.saveBaseUrls(providerId, entries)
+  if (outcome) baseUrlManagerProviderId.value = null
+}
+
+async function openApiKeyManager(providerId: string) {
+  apiKeyManagerProviderId.value = providerId
+  await apiKeyManager.load(providerId)
+}
+
+function closeApiKeyManager() {
+  apiKeyManagerProviderId.value = null
+  apiKeyManager.clear()
+}
+
+function saveApiKeys() {
+  void apiKeyManager.save()
 }
 
 function updateSelectedPreference(model: string, reasoningEffort: string) {
@@ -154,6 +217,13 @@ watch(fingerprintKey, (next) => {
   initialFingerprintKey = next
   availabilityState.invalidateAll()
 })
+
+watch(baseUrlManagerProvider, (provider) => {
+  if (baseUrlManagerProviderId.value && !provider) baseUrlManagerProviderId.value = null
+})
+watch(apiKeyManagerProvider, (provider) => {
+  if (apiKeyManagerProviderId.value && !provider) closeApiKeyManager()
+})
 </script>
 
 <template>
@@ -210,13 +280,32 @@ watch(fingerprintKey, (next) => {
         </header>
         <dl class="selected-provider-fields">
           <div><dt>Provider ID</dt><dd>{{ providerState.selectedProvider.value.id }}</dd></div>
-          <div><dt>Base URL</dt><dd>{{ providerState.selectedProvider.value.baseUrl }}</dd></div>
           <div><dt>Wire API</dt><dd>{{ providerState.selectedProvider.value.wireApi }}</dd></div>
           <div>
-            <dt>API Key</dt>
-            <dd>{{ providerState.selectedProvider.value.apiKeyConfigured ? '密钥已配置' : '未配置密钥' }}</dd>
+            <dt>配置状态</dt>
+            <dd>
+              {{
+                providerState.selectedProvider.value.configurationComplete
+                  ? '配置完整'
+                  : providerState.selectedProvider.value.disabledReason ?? '配置不完整'
+              }}
+            </dd>
           </div>
         </dl>
+        <div class="provider-switch-controls">
+          <ProviderEndpointControls
+            :provider="providerState.selectedProvider.value"
+            :busy="interactionBusy"
+            @select="providerState.selectBaseUrl(providerState.selectedProvider.value.id, $event)"
+            @manage="openBaseUrlManager(providerState.selectedProvider.value.id)"
+          />
+          <ProviderCredentialControls
+            :provider="providerState.selectedProvider.value"
+            :busy="interactionBusy"
+            @select="providerState.selectApiKey(providerState.selectedProvider.value.id, $event)"
+            @manage="openApiKeyManager(providerState.selectedProvider.value.id)"
+          />
+        </div>
         <ProviderPreferenceControls
           :provider="providerState.selectedProvider.value"
           :model-catalog="providerState.modelCatalog.value"
@@ -253,8 +342,7 @@ watch(fingerprintKey, (next) => {
               interactionBusy ||
               providerState.selectedProvider.value.isActive ||
               !providerState.selectedProvider.value.isValid ||
-              !providerState.selectedProvider.value.apiKeyConfigured ||
-              !providerState.selectedProvider.value.preferenceConfigured
+              !providerState.selectedProvider.value.configurationComplete
             "
             @click="providerState.switchTo(providerState.selectedProvider.value.id)"
           >
@@ -303,13 +391,38 @@ watch(fingerprintKey, (next) => {
       @confirm="confirmDelete"
       @cancel="deleteProviderId = null"
     />
-    <ConfirmDialog
+    <ProviderBaseUrlManagerDialog
+      v-if="baseUrlManagerProvider"
+      :open="Boolean(baseUrlManagerProviderId)"
+      :provider-name="baseUrlManagerProvider.name"
+      :entries="baseUrlManagerProvider.baseUrls"
+      :selected-base-url-id="baseUrlManagerProvider.selectedBaseUrlId"
+      :external-url="baseUrlManagerProvider.baseUrlStatus === 'external' ? baseUrlManagerProvider.baseUrl : null"
+      :busy="providerState.busy.value"
+      @save="saveBaseUrls"
+      @close="baseUrlManagerProviderId = null"
+    />
+    <ProviderApiKeyManagerDialog
+      v-if="apiKeyManagerProvider"
+      :open="Boolean(apiKeyManagerProviderId)"
+      :provider-name="apiKeyManagerProvider.name"
+      :entries="apiKeyManager.entries.value"
+      :selected-api-key-id="apiKeyManager.selectedApiKeyId.value"
+      :api-key-status="apiKeyManager.apiKeyStatus.value"
+      :loading="apiKeyManager.loading.value"
+      :busy="apiKeyManager.busy.value"
+      :error-message="apiKeyManager.error.value?.message ?? null"
+      :success-message="apiKeyManager.successMessage.value"
+      @replace-entries="apiKeyManager.replaceEntries"
+      @save="saveApiKeys"
+      @close="closeApiKeyManager"
+    />
+    <ImportCurrentApiKeyDialog
       :open="confirmImportCurrentKey"
-      title="确认导入当前密钥"
-      message="确定将 auth.json 中当前生效的 API Key 保存到当前 Provider 吗？密钥会继续以明文保存在本机 providers.json 中。"
-      confirm-label="确认导入"
-      @confirm="importCurrentKey"
-      @cancel="confirmImportCurrentKey = false"
+      :provider-name="providerState.activeProvider.value?.name ?? ''"
+      :busy="providerState.busy.value"
+      @import="importCurrentKey"
+      @close="confirmImportCurrentKey = false"
     />
     <ConfirmDialog
       :open="Boolean(confirmCodexProviderId)"
@@ -353,7 +466,8 @@ watch(fingerprintKey, (next) => {
 }
 
 .selected-provider-detail,
-.selected-provider-fields {
+.selected-provider-fields,
+.provider-switch-controls {
   display: grid;
   gap: 1rem;
 }

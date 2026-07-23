@@ -1122,6 +1122,11 @@ mod tests {
         )
         .unwrap();
         fs::write(
+            &paths.auth_file,
+            "{\"OPENAI_API_KEY\":\"test-key-api-not-real\"}\n",
+        )
+        .unwrap();
+        fs::write(
             &paths.provider_preferences_file,
             "{\"version\":1,\"providers\":{\"provider-a\":{\"models\":[\"gpt-5.6-sol\"],\"selectedModel\":\"gpt-5.6-sol\",\"reasoningEfforts\":{\"gpt-5.6-sol\":\"medium\"}}}}\n",
         )
@@ -1206,6 +1211,11 @@ mod tests {
         fs::write(
             &paths.providers_file,
             "{\"version\":1,\"providers\":{\"provider-a\":{\"apiKey\":\"test-key-target-not-real\"}}}\n",
+        )
+        .unwrap();
+        fs::write(
+            &paths.auth_file,
+            "{\"OPENAI_API_KEY\":\"test-key-target-not-real\"}\n",
         )
         .unwrap();
         fs::write(

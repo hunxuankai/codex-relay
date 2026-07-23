@@ -58,9 +58,8 @@ function formatTestedAt(testedAt: string) {
 
 function providerReadinessReason(provider: ProviderProfile) {
   if (!provider.isValid) return 'Provider 配置无效，无法测试。'
-  if (!provider.apiKeyConfigured) return '未配置 API Key，无法测试。'
-  if (provider.preferenceConfigured === false || !provider.selectedModel) {
-    return '未配置模型偏好，无法测试。'
+  if (!provider.configurationComplete) {
+    return provider.disabledReason ?? 'Provider 配置不完整，无法测试。'
   }
   return null
 }

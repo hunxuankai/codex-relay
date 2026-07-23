@@ -23,6 +23,10 @@ describe('AboutView', () => {
     expect(wrapper.text()).toContain('auth.json')
     expect(wrapper.text()).toContain('providers.json')
     expect(wrapper.text()).toContain('provider-preferences.json')
+    expect(wrapper.text()).toContain('多个命名 Base URL')
+    expect(wrapper.text()).toContain('多个命名 API Key')
+    expect(wrapper.text()).toContain('独立切换')
+    expect(wrapper.text()).toContain('打开管理器后默认明文显示')
     expect(wrapper.text()).toContain('settings.json')
     expect(wrapper.text()).toContain('transaction.json')
     expect(wrapper.text()).toContain('Windows 记事本打开所选文件')
@@ -37,6 +41,7 @@ describe('AboutView', () => {
     expect(wrapper.text()).toContain('不会修改当前 config.toml 或 auth.json')
     expect(wrapper.text()).toContain('测试结果只保存在本次会话内')
     expect(wrapper.text()).toContain('卸载')
+    expect(wrapper.text()).not.toContain('从界面清空密钥')
 
     await wrapper.get('[aria-label="打开当前 Codex 配置目录"]').trigger('click')
 

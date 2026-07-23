@@ -3,6 +3,10 @@ import { nextTick, ref, shallowRef } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProviderProfile } from '../types/provider'
 import type { ProviderAvailabilityResult, ProviderTestKind } from '../types/providerAvailability'
+import ProviderApiKeyManagerDialog from '../components/ProviderApiKeyManagerDialog.vue'
+import ProviderBaseUrlManagerDialog from '../components/ProviderBaseUrlManagerDialog.vue'
+import ProviderCredentialControls from '../components/ProviderCredentialControls.vue'
+import ProviderEndpointControls from '../components/ProviderEndpointControls.vue'
 import ProvidersView from './ProvidersView.vue'
 
 const mockUseProviders = vi.hoisted(() => vi.fn())
@@ -10,6 +14,10 @@ vi.mock('../composables/useProviders', () => ({ useProviders: mockUseProviders }
 const mockUseProviderAvailability = vi.hoisted(() => vi.fn())
 vi.mock('../composables/useProviderAvailability', () => ({
   useProviderAvailability: mockUseProviderAvailability,
+}))
+const mockUseProviderApiKeyManager = vi.hoisted(() => vi.fn())
+vi.mock('../composables/useProviderApiKeyManager', () => ({
+  useProviderApiKeyManager: mockUseProviderApiKeyManager,
 }))
 
 const fingerprints = {
@@ -29,12 +37,34 @@ function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
     id: 'provider-a',
     name: 'Provider A',
     baseUrl: 'https://provider-a.example.test/v1',
+    baseUrls: [
+      {
+        id: 'url-primary',
+        name: '主用地址',
+        url: 'https://provider-a.example.test/v1',
+      },
+      {
+        id: 'url-backup',
+        name: '备用地址',
+        url: 'https://backup.example.test/v1',
+      },
+    ],
+    selectedBaseUrlId: 'url-primary',
+    baseUrlStatus: 'managed',
+    apiKeys: [
+      { id: 'key-primary', name: '主用密钥' },
+      { id: 'key-backup', name: '备用密钥' },
+    ],
+    selectedApiKeyId: 'key-primary',
+    apiKeyStatus: 'managed',
     wireApi: 'responses',
     models: ['gpt-5.6-sol'],
     selectedModel: 'gpt-5.6-sol',
     reasoningEfforts: { 'gpt-5.6-sol': 'medium' },
     preferenceConfigured: true,
     apiKeyConfigured: true,
+    configurationComplete: true,
+    disabledReason: null,
     isActive: false,
     isValid: true,
     validationMessage: null,
@@ -77,6 +107,9 @@ function controller() {
     refresh: vi.fn(),
     create,
     update,
+    saveBaseUrls: vi.fn().mockResolvedValue({ providers: [], message: '地址已保存。' }),
+    selectBaseUrl: vi.fn().mockResolvedValue({ providers: [], message: '地址已切换。' }),
+    selectApiKey: vi.fn().mockResolvedValue({ providers: [], message: '密钥已切换。' }),
     remove,
     switchTo,
     importCurrentKey: vi.fn(),
@@ -84,6 +117,31 @@ function controller() {
     selectProvider: vi.fn((id: string) => {
       selectedProviderId.value = id
       selectedProvider.value = providers.value.find((item) => item.id === id) ?? null
+    }),
+  }
+}
+
+function apiKeyManagerController() {
+  const entries = ref([
+    { id: 'key-primary', name: '主用密钥', apiKey: 'test-key-primary-not-real' },
+    { id: 'key-backup', name: '备用密钥', apiKey: 'test-key-backup-not-real' },
+  ])
+  return {
+    providerId: shallowRef<string | null>(null),
+    entries,
+    selectedApiKeyId: shallowRef<string | null>('key-primary'),
+    apiKeyStatus: shallowRef<'managed' | 'external' | 'missing' | null>('managed'),
+    loading: shallowRef(false),
+    busy: shallowRef(false),
+    error: shallowRef<{ code: string; message: string } | null>(null),
+    successMessage: shallowRef<string | null>(null),
+    load: vi.fn().mockResolvedValue(true),
+    replaceEntries: vi.fn((next) => {
+      entries.value = next
+    }),
+    save: vi.fn().mockResolvedValue({ providers: [], message: 'API Key 已保存。' }),
+    clear: vi.fn(() => {
+      entries.value = []
     }),
   }
 }
@@ -114,7 +172,9 @@ describe('ProvidersView', () => {
   beforeEach(() => {
     mockUseProviders.mockReset()
     mockUseProviderAvailability.mockReset()
+    mockUseProviderApiKeyManager.mockReset()
     mockUseProviderAvailability.mockReturnValue(availabilityController())
+    mockUseProviderApiKeyManager.mockReturnValue(apiKeyManagerController())
   })
 
   it('submits create and edit flows through the composable', async () => {
@@ -125,10 +185,12 @@ describe('ProvidersView', () => {
     await wrapper.get('[aria-label="新增 Provider"]').trigger('click')
     await wrapper.get('[name="provider-id"]').setValue('provider-b')
     await wrapper.get('[name="provider-name"]').setValue('Provider B')
+    await wrapper.get('[name="base-url-name"]').setValue('主用地址')
     await wrapper.get('[name="base-url"]').setValue('https://provider-b.example.test/v1')
     wrapper.getComponent({ name: 'ElSelect' }).vm.$emit('update:modelValue', ['gpt-5.6-sol'])
     await nextTick()
-    await wrapper.get('#provider-api-key').setValue('test-key-not-real')
+    await wrapper.get('[name="api-key-name"]').setValue('主用密钥')
+    await wrapper.get('#provider-api-key').setValue('test-key-provider-not-real')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(state.create).toHaveBeenCalledOnce()
@@ -190,8 +252,41 @@ describe('ProvidersView', () => {
     expect(detail.text()).toContain('https://provider-a.example.test/v1')
     expect(detail.text()).toContain('responses')
     expect(detail.text()).toContain('gpt-5.6-sol')
-    expect(detail.text()).toContain('密钥已配置')
+    expect(detail.text()).toContain('当前地址：主用地址')
+    expect(detail.text()).toContain('当前密钥：主用密钥')
     expect(detail.find('[aria-label="编辑所选 Provider"]').exists()).toBe(true)
+  })
+
+  it('independently selects and manages Base URLs and API Keys', async () => {
+    const state = controller()
+    const keyManager = apiKeyManagerController()
+    mockUseProviders.mockReturnValue(state)
+    mockUseProviderApiKeyManager.mockReturnValue(keyManager)
+    const wrapper = mount(ProvidersView)
+
+    wrapper.getComponent(ProviderEndpointControls).vm.$emit('select', 'url-backup')
+    wrapper.getComponent(ProviderCredentialControls).vm.$emit('select', 'key-backup')
+    expect(state.selectBaseUrl).toHaveBeenCalledWith('provider-a', 'url-backup')
+    expect(state.selectApiKey).toHaveBeenCalledWith('provider-a', 'key-backup')
+
+    wrapper.getComponent(ProviderEndpointControls).vm.$emit('manage')
+    await nextTick()
+    wrapper.getComponent(ProviderBaseUrlManagerDialog).vm.$emit('save', [
+      { id: 'url-primary', name: '主用地址', url: 'https://provider-a.example.test/v1' },
+    ])
+    await flushPromises()
+    expect(state.saveBaseUrls).toHaveBeenCalledWith('provider-a', [
+      { id: 'url-primary', name: '主用地址', url: 'https://provider-a.example.test/v1' },
+    ])
+
+    wrapper.getComponent(ProviderCredentialControls).vm.$emit('manage')
+    await flushPromises()
+    expect(keyManager.load).toHaveBeenCalledWith('provider-a')
+    wrapper.getComponent(ProviderApiKeyManagerDialog).vm.$emit('save')
+    await flushPromises()
+    expect(keyManager.save).toHaveBeenCalledOnce()
+    wrapper.getComponent(ProviderApiKeyManagerDialog).vm.$emit('close')
+    expect(keyManager.clear).toHaveBeenCalledOnce()
   })
 
   it('confirms before importing the current auth.json key', async () => {
@@ -206,11 +301,12 @@ describe('ProvidersView', () => {
 
     await wrapper.get('[aria-label="导入当前 auth.json 密钥"]').trigger('click')
     expect(state.importCurrentKey).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('确认导入')
-    await wrapper.get('[aria-label="确认操作"]').trigger('click')
+    expect(wrapper.text()).toContain('导入 Provider A 的当前密钥')
+    await wrapper.get('[name="import-api-key-name"]').setValue('当前密钥')
+    await wrapper.get('[aria-label="确认导入当前密钥"]').trigger('click')
     await flushPromises()
 
-    expect(state.importCurrentKey).toHaveBeenCalledWith('provider-a')
+    expect(state.importCurrentKey).toHaveBeenCalledWith('provider-a', '当前密钥')
   })
 
   it('shows switch success, failure, and external conflict messages', async () => {

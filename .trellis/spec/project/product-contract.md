@@ -8,8 +8,9 @@ Codex Relay 是面向 Windows 10/11、当前登录用户和个人可信计算机
 
 - 读取、创建、编辑、删除和切换 `config.toml` 中的 Provider。
 - 仅支持 `responses` Wire API；Provider ID 创建后不可修改。
-- 在 `providers.json` 保存各 Provider 密钥，在 `auth.json` 保存当前生效密钥。
-- 在 `provider-preferences.json` 保存 Relay 的模型集合、当前偏好和逐模型推理强度；Codex 顶层 `model`、`model_reasoning_effort` 才是当前生效配置。
+- 每个 Provider 可保存多个命名 Base URL 和多个命名 API Key，并在详情页独立选择；两组列表不配对。
+- 在 `providers.json` v2 保存命名密钥集合和密钥预选，在 `auth.json` 保存当前生效密钥。
+- 在 `provider-preferences.json` v2 保存命名 Base URL 集合、模型集合、当前偏好和逐模型推理强度；`config.toml.base_url` 与 Codex 顶层模型字段才是实际生效配置。
 - 使用统一事务提供备份、冲突检测、原子替换、写后验证和失败回滚。
 - 支持关键/扩展自检、文件监控、系统托盘、单实例、当前用户开机启动和 Windows 通知。
 - 支持用户在设置页显式检查公开 GitHub Releases 更新，并在 Tauri 签名校验后启动 NSIS 更新。
@@ -26,10 +27,10 @@ Codex Relay 是面向 Windows 10/11、当前登录用户和个人可信计算机
 
 ## 数据与卸载契约
 
-- `config.toml` 是 Codex 官方 Provider/顶层选择配置真相；`provider-preferences.json` 是 Relay 模型偏好真相；`providers.json` 是每个 Provider 密钥存储；`auth.json` 是当前生效认证。
-- 普通 Provider 列表只暴露 `apiKeyConfigured`，不得返回密钥。
+- `config.toml` 是 Codex 官方 Provider/顶层选择和实际 Base URL 真相；`provider-preferences.json` 是 Relay 命名 URL 与模型偏好真相；`providers.json` 是命名密钥与密钥预选存储；`auth.json` 是当前生效认证。
+- 普通 Provider 列表只暴露命名 URL、密钥名称/状态和配置完整性，不得返回密钥值。完整密钥只在用户显式打开管理器后进入短生命周期前端状态。
 - 卸载器只移除程序和快捷方式，不删除 `.codex`、Codex Relay 应用数据、密钥、日志或备份。
-- 怀疑泄漏时，界面清空本地密钥不等于远端吊销；用户必须在 Provider 平台轮换凭据。
+- 怀疑泄漏时，删除或替换本地命名密钥不等于远端吊销；用户必须在 Provider 平台轮换凭据。
 
 ## 发布契约
 

@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, reactive, useTemplateRef, watch } from 'vue'
 import { ElButton, ElCheckbox, ElInput, ElOption, ElSelect } from 'element-plus'
 import type {
-  ApiKeyChange,
   CreateProviderInput,
   FileSetFingerprint,
   ProviderProfile,
@@ -33,57 +32,48 @@ const emit = defineEmits<{
 const draft = reactive({
   id: '',
   name: '',
+  baseUrlName: '',
   baseUrl: '',
   models: [] as string[],
+  apiKeyName: '',
   apiKey: '',
   activateAfterSave: false,
   syncIfActive: false,
 })
-const errors = reactive({ id: '', name: '', baseUrl: '', models: '', apiKey: '' })
-const apiKeyAction = shallowRef<ApiKeyChange['action']>('unchanged')
+const errors = reactive({
+  id: '',
+  name: '',
+  baseUrlName: '',
+  baseUrl: '',
+  models: '',
+  apiKeyName: '',
+  apiKey: '',
+})
 const form = useTemplateRef<HTMLFormElement>('form')
 const activeFieldsChanged = computed(() => {
   if (props.mode !== 'edit' || !props.provider?.isActive) return false
   return (
-    draft.baseUrl.trim() !== props.provider.baseUrl ||
     draft.name.trim() !== props.provider.name ||
-    JSON.stringify(draft.models) !== JSON.stringify(props.provider.models) ||
-    apiKeyAction.value === 'set' ||
-    apiKeyAction.value === 'clear'
+    JSON.stringify(draft.models) !== JSON.stringify(props.provider.models)
   )
 })
-const canSyncActiveChanges = computed(
-  () => activeFieldsChanged.value && apiKeyAction.value !== 'clear',
-)
-const currentProviderWarning = computed(() =>
-  apiKeyAction.value === 'clear'
-    ? '清除当前 Provider 的 API Key 后无法立即同步；当前 auth.json 不会被改写，Codex 可能继续使用现有生效密钥。'
-    : '这是当前 Provider。修改生效字段后，可以选择立即同步到 Codex。',
-)
+const canSyncActiveChanges = computed(() => activeFieldsChanged.value)
 
 watch(
   () => [props.mode, props.provider] as const,
   () => {
     draft.id = props.provider?.id ?? ''
     draft.name = props.provider?.name ?? ''
-    draft.baseUrl = props.provider?.baseUrl ?? ''
+    draft.baseUrlName = ''
+    draft.baseUrl = ''
     draft.models = [...(props.provider?.models ?? [])]
+    draft.apiKeyName = ''
     draft.apiKey = ''
     draft.activateAfterSave = false
     draft.syncIfActive = false
-    apiKeyAction.value = props.mode === 'create' ? 'set' : 'unchanged'
     clearErrors()
   },
   { immediate: true },
-)
-
-watch(
-  () => draft.apiKey,
-  (value) => {
-    if (props.mode === 'edit') {
-      apiKeyAction.value = value ? 'set' : apiKeyAction.value === 'clear' ? 'clear' : 'unchanged'
-    }
-  },
 )
 
 watch(canSyncActiveChanges, (canSync) => {
@@ -93,8 +83,10 @@ watch(canSyncActiveChanges, (canSync) => {
 function clearErrors() {
   errors.id = ''
   errors.name = ''
+  errors.baseUrlName = ''
   errors.baseUrl = ''
   errors.models = ''
+  errors.apiKeyName = ''
   errors.apiKey = ''
 }
 
@@ -111,26 +103,25 @@ function validate() {
     errors.id = 'Provider ID 已存在。'
   }
   if (!draft.name.trim()) errors.name = '名称为必填项。'
-  if (!draft.baseUrl.trim()) {
-    errors.baseUrl = 'Base URL 为必填项。'
-  } else {
-    try {
-      const url = new URL(draft.baseUrl.trim())
-      if (!['http:', 'https:'].includes(url.protocol)) {
-        errors.baseUrl = 'Base URL 必须使用 HTTP 或 HTTPS。'
+  if (props.mode === 'create') {
+    if (!draft.baseUrlName.trim()) errors.baseUrlName = '地址名称为必填项。'
+    if (!draft.baseUrl.trim()) {
+      errors.baseUrl = 'Base URL 为必填项。'
+    } else {
+      try {
+        const url = new URL(draft.baseUrl.trim())
+        if (!['http:', 'https:'].includes(url.protocol)) {
+          errors.baseUrl = 'Base URL 必须使用 HTTP 或 HTTPS。'
+        }
+      } catch {
+        errors.baseUrl = 'Base URL 必须是有效的网址。'
       }
-    } catch {
-      errors.baseUrl = 'Base URL 必须是有效的网址。'
     }
+    if (!draft.apiKeyName.trim()) errors.apiKeyName = '密钥名称为必填项。'
+    if (!draft.apiKey.trim()) errors.apiKey = 'API Key 为必填项。'
   }
-  if (props.mode === 'create' && !draft.apiKey.trim()) errors.apiKey = 'API Key 为必填项。'
   if (draft.models.length === 0) errors.models = '请至少选择一个可用模型。'
-  return !errors.id && !errors.name && !errors.baseUrl && !errors.models && !errors.apiKey
-}
-
-function handleClearKey() {
-  apiKeyAction.value = 'clear'
-  draft.apiKey = ''
+  return Object.values(errors).every((message) => !message)
 }
 
 async function submit() {
@@ -142,7 +133,6 @@ async function submit() {
   const common = {
     id: draft.id,
     name: draft.name.trim(),
-    baseUrl: draft.baseUrl.trim(),
     wireApi: 'responses',
     models: [...draft.models],
     expectedFiles: props.fingerprints,
@@ -150,17 +140,16 @@ async function submit() {
   if (props.mode === 'create') {
     emit('submit', {
       ...common,
+      baseUrlName: draft.baseUrlName.trim(),
+      baseUrl: draft.baseUrl.trim(),
+      apiKeyName: draft.apiKeyName.trim(),
       apiKey: draft.apiKey.trim(),
       activateAfterSave: draft.activateAfterSave,
     })
     return
   }
-  let apiKeyChange: ApiKeyChange = { action: 'unchanged' }
-  if (apiKeyAction.value === 'set') apiKeyChange = { action: 'set', value: draft.apiKey.trim() }
-  if (apiKeyAction.value === 'clear') apiKeyChange = { action: 'clear' }
   emit('submit', {
     ...common,
-    apiKeyChange,
     syncIfActive: canSyncActiveChanges.value ? draft.syncIfActive : false,
   })
 }
@@ -177,7 +166,7 @@ async function submit() {
     </header>
 
     <p v-if="mode === 'edit' && provider?.isActive" class="current-warning" role="note">
-      {{ currentProviderWarning }}
+      这是当前 Provider。修改名称或模型后，可以选择立即同步当前 Codex 配置。
     </p>
 
     <form ref="form" class="editor-form" novalidate @submit.prevent="submit">
@@ -208,7 +197,22 @@ async function submit() {
         <span v-if="errors.name" id="provider-name-error" class="field-error" role="alert">{{ errors.name }}</span>
       </label>
 
-      <label class="field">
+      <label v-if="mode === 'create'" class="field">
+        <span>地址名称</span>
+        <ElInput
+          v-model="draft.baseUrlName"
+          name="base-url-name"
+          :disabled="busy"
+          :aria-invalid="errors.baseUrlName ? 'true' : undefined"
+          :aria-describedby="errors.baseUrlName ? 'base-url-name-error' : undefined"
+          autocomplete="off"
+        />
+        <span v-if="errors.baseUrlName" id="base-url-name-error" class="field-error" role="alert">
+          {{ errors.baseUrlName }}
+        </span>
+      </label>
+
+      <label v-if="mode === 'create'" class="field">
         <span>Base URL</span>
         <ElInput
           v-model="draft.baseUrl"
@@ -257,14 +261,27 @@ async function submit() {
         </span>
       </div>
 
-      <div class="field">
+      <label v-if="mode === 'create'" class="field">
+        <span>密钥名称</span>
+        <ElInput
+          v-model="draft.apiKeyName"
+          name="api-key-name"
+          :disabled="busy"
+          :aria-invalid="errors.apiKeyName ? 'true' : undefined"
+          :aria-describedby="errors.apiKeyName ? 'api-key-name-error' : undefined"
+          autocomplete="off"
+        />
+        <span v-if="errors.apiKeyName" id="api-key-name-error" class="field-error" role="alert">
+          {{ errors.apiKeyName }}
+        </span>
+      </label>
+
+      <div v-if="mode === 'create'" class="field">
         <ApiKeyInput
           v-model="draft.apiKey"
-          :configured="mode === 'edit' && Boolean(provider?.apiKeyConfigured)"
           :disabled="busy"
           :invalid="Boolean(errors.apiKey)"
           :described-by="errors.apiKey ? 'api-key-error' : undefined"
-          @clear="handleClearKey"
         />
         <span v-if="errors.apiKey" id="api-key-error" class="field-error" role="alert">{{ errors.apiKey }}</span>
       </div>

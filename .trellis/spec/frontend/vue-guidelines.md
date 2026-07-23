@@ -65,17 +65,17 @@ const emit = defineEmits<{ select: [providerId: string] }>()
 
 ```vue
 <!-- 正确：语义颜色由 Element Plus 管理，类名只做布局 -->
-<ElButton class="clear-key-button" type="danger" plain>清空密钥</ElButton>
+<ElButton class="delete-key-button" type="danger" plain>删除密钥</ElButton>
 
 <style scoped>
-.clear-key-button {
+.delete-key-button {
   width: fit-content;
 }
 </style>
 
 <!-- 错误：静态颜色覆盖 hover/active 的语义颜色 -->
 <style scoped>
-.clear-key-button {
+.delete-key-button {
   color: var(--danger);
 }
 </style>
@@ -95,16 +95,16 @@ const emit = defineEmits<{ select: [providerId: string] }>()
 await invoke('switch_provider', { providerId })
 
 // 正确：组件/composable 只使用 typed service
-await tauri.switchProvider(providerId, fingerprint)
+await tauri.switchProvider(providerId)
 ```
 
 ## 表单与密钥
 
 - Provider ID 创建后只读。
-- 名称、HTTP(S) Base URL、固定 `responses`、模型和密钥动作在前端即时校验，Rust 必须再次验证。
-- API Key 默认密码显示；显示/隐藏按钮必须可访问。
-- 编辑时未触碰密钥提交 `unchanged`；明确清空提交 `clear` 并二次确认。
-- 密钥只短暂存在编辑器局部内存，不进入 localStorage、日志、通知、快照或普通 composable 状态。
+- 创建时的地址名称、HTTP(S) Base URL、密钥名称、固定 `responses` 和模型在前端即时校验，Rust 必须再次验证。
+- 常规编辑只修改 Provider 名称、Wire API 和模型，不渲染已保存 URL/Key 修改入口。
+- 创建输入中的 API Key 默认密码显示；专用密钥管理器打开后默认明文显示，并提供统一隐藏/显示与逐项复制。
+- 完整密钥只短暂存在 `useProviderApiKeyManager`，不进入 localStorage、日志、通知、快照或普通 composable 状态；关闭和 scope dispose 必须清空。
 
 ## 测试
 

@@ -72,9 +72,13 @@ pub fn run() {
         .on_window_event(tray::handle_window_event)
         .invoke_handler(tauri::generate_handler![
             commands::provider_commands::list_providers,
-            commands::provider_commands::get_provider_api_key,
+            commands::provider_commands::get_provider_api_keys_for_management,
             commands::provider_commands::create_provider,
             commands::provider_commands::update_provider,
+            commands::provider_commands::save_provider_base_urls,
+            commands::provider_commands::select_provider_base_url,
+            commands::provider_commands::save_provider_api_keys,
+            commands::provider_commands::select_provider_api_key,
             commands::provider_commands::update_provider_preference,
             commands::provider_commands::delete_provider,
             commands::provider_commands::switch_provider,

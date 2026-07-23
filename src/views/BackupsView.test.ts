@@ -63,7 +63,7 @@ describe('BackupsView', () => {
     expect(wrapper.text()).toContain('provider-a')
     expect(wrapper.text()).toContain('switch_provider')
     expect(wrapper.text()).not.toContain('apiKey')
-    expect(wrapper.text()).not.toContain('test-key-not-real')
+    expect(wrapper.text()).not.toContain('test-key-backup-not-real')
   })
 
   it('expands the backup file list and opens a selected file', async () => {

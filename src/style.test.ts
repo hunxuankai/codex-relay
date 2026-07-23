@@ -6,7 +6,6 @@ const styles = readFileSync('src/style.css', 'utf8')
 const app = readFileSync('src/App.vue', 'utf8')
 const confirmDialog = readFileSync('src/components/ConfirmDialog.vue', 'utf8')
 const selfCheckErrorBanner = readFileSync('src/components/SelfCheckErrorBanner.vue', 'utf8')
-const apiKeyInput = readFileSync('src/components/ApiKeyInput.vue', 'utf8')
 
 function collectVueSources(directory: string): Array<{ path: string; source: string }> {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -82,7 +81,6 @@ describe('global Windows visual system', () => {
   })
 
   it('lets Element Plus own semantic state colors across decorated buttons', () => {
-    expect(apiKeyInput).toMatch(/type="danger"\s+plain\s+[\s\S]*class="danger-link"/)
     expect(findDirectButtonColorOverrides()).toEqual([])
   })
 

@@ -6,7 +6,9 @@ Codex Relay 是一款面向 Windows 10/11 的轻量桌面工具，用于管理�
 
 - 读取并管理 `config.toml` 中已有的 `[model_providers.<id>]`。
 - 新增、编辑、删除 Provider，保留无关 TOML 注释、未知字段和功能开关。
-- 为每个 Provider 单独保存 API Key，并快速切换当前 Provider。
+- 为每个 Provider 保存多个命名 Base URL 和多个命名 API Key，在详情页按名称独立切换。
+- Base URL 与 API Key 分别管理；当前 Provider 的选择立即写入 Codex 配置，非当前 Provider 只保存预选。
+- API Key 管理器打开后直接查看全部明文密钥，可统一隐藏/显示并逐项复制；关闭后清空前端密钥状态。
 - 在 Provider 详情显式运行 API 可用性测试或 Codex 兼容性测试，分别验证最小 Responses 请求和一次正常 Codex 回合。
 - 切换时以同一事务更新 `config.toml` 与 `auth.json`，失败时验证回滚结果。
 - 关键自检与后台扩展自检，包括配置、密钥一致性、Codex CLI、开机启动、备份和外部修改。
@@ -217,7 +219,7 @@ Codex 配置目录按以下优先级解析：
 
 ### `config.toml`
 
-Codex Provider 配置的主要数据源。Codex Relay 只局部修改目标 Provider、顶层 `model_provider`、`model`、`model_reasoning_effort` 和 `cli_auth_credentials_store`。Provider 块内不写入 Relay 私有模型偏好；其他 Provider、注释、`[features]` 和未知字段必须保留。
+Codex Provider 配置的主要数据源。每个 Provider 的实际 `base_url` 是当前 Base URL 选择的唯一真相。Codex Relay 只局部修改目标 Provider、顶层 `model_provider`、`model`、`model_reasoning_effort` 和 `cli_auth_credentials_store`。Provider 块内不写入 Relay 私有列表或模型偏好；其他 Provider、注释、`[features]` 和未知字段必须保留。
 
 ### `auth.json`
 
@@ -229,15 +231,15 @@ Codex Provider 配置的主要数据源。Codex Relay 只局部修改目标 Prov
 }
 ```
 
-切换成功后写入目标 Provider 的密钥。普通 Provider 列表、通知和日志都不会返回该明文。
+当前 Provider 切换命名密钥或切换 Provider 成功后写入目标密钥。普通 Provider 列表、通知和日志都不会返回该明文。
 
 ### `providers.json`
 
-位于 `%LOCALAPPDATA%\CodexRelay\providers.json`，按 Provider ID 保存独立 API Key。文件损坏时不会静默覆盖；应用先保存损坏副本，再返回安全错误并引导重新设置密钥。
+位于 `%LOCALAPPDATA%\CodexRelay\providers.json`。版本 2 按 Provider ID 保存有序的多个命名 API Key、稳定条目 ID 和 `selectedApiKeyId`；非当前 Provider 的密钥预选只保存在这里，不会写入当前 `auth.json`。文件损坏时不会静默覆盖；应用先保存损坏副本，再返回安全错误。版本 1 的单密钥格式只读兼容，在下一次成功用户事务后升级。
 
 ### `provider-preferences.json`
 
-位于 `%LOCALAPPDATA%\CodexRelay\provider-preferences.json`，保存每个 Provider 的可用模型、当前偏好模型以及每个模型独立的 `model_reasoning_effort`。模型目录随软件版本发布，不支持在线更新；该文件不是 Codex 官方配置，不会写入 `[model_providers.<id>]`。当前 Provider 的偏好修改会同步顶层 `model` 与 `model_reasoning_effort`，其他 Provider 在应用时生效。
+位于 `%LOCALAPPDATA%\CodexRelay\provider-preferences.json`。版本 2 保存每个 Provider 有序的多个命名 Base URL、稳定条目 ID、可用模型、当前偏好模型以及每个模型独立的 `model_reasoning_effort`。它不保存第二份 URL 选择游标；当前选择由 `config.toml.base_url` 与命名列表匹配得到。模型目录随软件版本发布，不支持在线更新；该文件不是 Codex 官方配置，不会写入 `[model_providers.<id>]`。版本 1 只读兼容，在下一次成功用户事务后升级。
 
 ### 其他应用数据
 
@@ -248,6 +250,8 @@ Codex Provider 配置的主要数据源。Codex Relay 只局部修改目标 Prov
 ## API Key 保存方式与风险
 
 这是面向个人本机使用的简化设计。API Key 以明文存在于 `providers.json`、当前 `auth.json`，并可能出现在事务备份的文件快照中。项目明确不使用 Windows Credential Manager、Keyring、DPAPI、Stronghold 或其他加密密钥库。
+
+普通 Provider DTO 只包含密钥条目 ID、名称与状态。只有用户明确打开“管理与查看 API Key”对话框时，专用命令才会把目标 Provider 的完整密钥集合加载到短生命周期前端状态；对话框默认明文显示，关闭后清空。复制反馈、日志、通知和错误不会包含密钥值。
 
 风险与建议：
 
@@ -261,11 +265,17 @@ Codex Provider 配置的主要数据源。Codex Relay 只局部修改目标 Prov
 
 ## Provider 操作与切换事务
 
-新增和编辑会先校验 ID、名称、HTTP(S) Base URL、固定 `responses` Wire API、模型和密钥规则。Provider ID 创建后不可修改。当前 Provider 的生效字段修改可选择立即同步；清除当前密钥时不能立即同步，现有 `auth.json` 可能继续保留当前生效密钥。
+新增 Provider 时录入一个初始地址名称、HTTP(S) Base URL、一个初始密钥名称和 API Key；两项都成为当前选择。常规编辑只修改名称、固定 `responses` Wire API 和模型集合，不再替换或清空地址/密钥。Provider ID 创建后不可修改。
+
+地址和密钥各自通过管理对话框批量新增、重命名、替换和删除，并在一次事务中统一保存。名称去除首尾空白后必填、同类大小写不敏感唯一，实际值也必须唯一；条目保持添加顺序且没有数量上限。当前选中项必须先切换才能删除，最后一项不能删除。
+
+点击 Base URL 只切换地址，点击 API Key 只切换密钥。当前 Provider 立即同步对应 `config.toml` 或 `auth.json` 并提示重启 Codex；非当前 Provider 只保存预选，不改变全局当前 Provider。应用非当前 Provider 时，其预选地址、密钥、模型和推理强度一起生效。外部未命名地址或密钥只展示状态，显式命名纳管前不能应用或测试。
 
 切换步骤包括：重新读取四个受管文件、验证目标偏好与密钥、检查外部修改指纹、创建统一备份、生成内存结果、写入临时文件、解析验证、替换正式文件、再次验证、刷新托盘与界面。成功提示包含“请重启 Codex 后生效”。
 
-当前 Provider 不能直接删除，必须先切换到其他 Provider。详见 [配置事务安全](.trellis/spec/security/transaction-safety.md)。
+当前 Provider 不能直接删除，必须先切换到其他 Provider。完整数据流与错误矩阵见
+[Provider 多命名地址与密钥契约](.trellis/spec/project/provider-multi-credentials.md)，事务细则见
+[配置事务安全](.trellis/spec/security/transaction-safety.md)。
 
 ## 自检
 
@@ -279,7 +289,7 @@ Provider 详情提供两种彼此独立的显式测试，结果只保存在本�
 
 - **API 可用性测试**：通过 Relay 网络边界向当前 Provider 发送一次无工具、非流式、最多 16 个输出 token 的最小 Responses 请求，确认 Base URL、Bearer 认证、当前偏好模型和 Responses 完成格式。它通常只产生少量 token 费用，不代表 Codex CLI 一定兼容。
 - **Codex 兼容性测试**：高级入口会先要求确认，然后在独立临时状态中启动受安全门禁的本机 Codex，向 Provider 发送一次正常 Codex 回合。它可能消耗更多 token、等待更久；不会修改当前 `config.toml` 或 `auth.json`。不支持的 Codex 版本、managed requirements 或工具能力漂移会在联系真实 Provider 前停止。
-- 两种测试都要求当前 Provider 已配置有效密钥和模型偏好；测试期间只允许一个 Provider 测试，界面可取消正在运行的测试。测试结果不会展示 Provider 原始响应正文，也不会记录密钥、命令行或临时路径。
+- 两种测试都要求目标 Provider 的命名地址、命名密钥和模型偏好配置完整；测试使用各自当前选择，但成功、失败或取消都不会改变选择。测试期间只允许一个 Provider 测试，界面可取消正在运行的测试。测试结果不会展示 Provider 原始响应正文，也不会记录密钥、命令行或临时路径。
 
 ## 托盘、窗口与退出
 
@@ -321,6 +331,10 @@ Tauri 更新包签名用于证明下载资产与客户端内置信任根匹配�
 - `INVALID_CONFIG_TOML`：`config.toml` 无法解析；应用不会修改该文件。
 - `INVALID_PROVIDER_SECRETS`：`providers.json` 损坏；损坏副本已保留。
 - `PROVIDER_API_KEY_MISSING`：目标 Provider 未保存密钥，不能启用。
+- `PROVIDER_BASE_URL_UNMANAGED` / `PROVIDER_TEST_BASE_URL_UNMANAGED`：当前地址尚未保存为命名地址。
+- `PROVIDER_TEST_KEY_UNMANAGED`：当前密钥尚未命名导入，不能运行测试。
+- `SELECTED_BASE_URL_DELETE_FORBIDDEN` / `SELECTED_API_KEY_DELETE_FORBIDDEN`：先切换当前项再删除。
+- `LAST_BASE_URL_DELETE_FORBIDDEN` / `LAST_API_KEY_DELETE_FORBIDDEN`：受管 Provider 必须保留至少一项。
 - `ACTIVE_PROVIDER_DELETE_FORBIDDEN`：先切换到其他 Provider 再删除。
 - `EXTERNAL_MODIFICATION_CONFLICT`：编辑期间文件被其他程序修改；请刷新后重试。
 - `ROLLBACK_INCOMPLETE`：自动恢复未完全成功；立即从备份页恢复。

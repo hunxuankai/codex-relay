@@ -9,8 +9,14 @@ import type { ProviderAvailabilityResult } from '../types/providerAvailability'
 import type {
   CreateProviderInput,
   FileSetFingerprint,
+  ImportCurrentApiKeyInput,
+  ProviderApiKeyManagementState,
   ProviderListState,
   ProviderMutationOutcome,
+  SaveProviderApiKeysInput,
+  SaveProviderBaseUrlsInput,
+  SelectProviderApiKeyInput,
+  SelectProviderBaseUrlInput,
   SwitchOutcome,
   UpdateProviderInput,
   UpdateProviderPreferenceInput,
@@ -59,8 +65,10 @@ export function listProviders(): Promise<ProviderListState> {
   return call('list_providers')
 }
 
-export function getProviderApiKey(providerId: string): Promise<string | null> {
-  return call('get_provider_api_key', { providerId })
+export function getProviderApiKeysForManagement(
+  providerId: string,
+): Promise<ProviderApiKeyManagementState> {
+  return call('get_provider_api_keys_for_management', { providerId })
 }
 
 export function createProvider(input: CreateProviderInput): Promise<ProviderMutationOutcome> {
@@ -69,6 +77,30 @@ export function createProvider(input: CreateProviderInput): Promise<ProviderMuta
 
 export function updateProvider(input: UpdateProviderInput): Promise<ProviderMutationOutcome> {
   return call('update_provider', { input })
+}
+
+export function saveProviderBaseUrls(
+  input: SaveProviderBaseUrlsInput,
+): Promise<ProviderMutationOutcome> {
+  return call('save_provider_base_urls', { input })
+}
+
+export function selectProviderBaseUrl(
+  input: SelectProviderBaseUrlInput,
+): Promise<ProviderMutationOutcome> {
+  return call('select_provider_base_url', { input })
+}
+
+export function saveProviderApiKeys(
+  input: SaveProviderApiKeysInput,
+): Promise<ProviderMutationOutcome> {
+  return call('save_provider_api_keys', { input })
+}
+
+export function selectProviderApiKey(
+  input: SelectProviderApiKeyInput,
+): Promise<ProviderMutationOutcome> {
+  return call('select_provider_api_key', { input })
 }
 
 export function updateProviderPreference(
@@ -88,8 +120,10 @@ export function switchProvider(providerId: string): Promise<SwitchOutcome> {
   return call('switch_provider', { providerId })
 }
 
-export function importCurrentAuthKey(providerId: string): Promise<ProviderMutationOutcome> {
-  return call('import_current_auth_key', { providerId })
+export function importCurrentAuthKey(
+  input: ImportCurrentApiKeyInput,
+): Promise<ProviderMutationOutcome> {
+  return call('import_current_auth_key', { input })
 }
 
 export function testProviderApi(

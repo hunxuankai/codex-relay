@@ -1,5 +1,5 @@
 use codex_relay_core::infrastructure::path_service::AppPaths;
-use codex_relay_core::models::provider::{ApiKeyChange, CreateProviderInput, UpdateProviderInput};
+use codex_relay_core::models::provider::{CreateProviderInput, UpdateProviderInput};
 use codex_relay_core::services::provider_service::ProviderService;
 use serde_json::Value;
 use std::fs;
@@ -74,9 +74,11 @@ async fn provider_workflow_preserves_unknown_config_and_restores_original_bytes(
         .create_provider(CreateProviderInput {
             id: "provider-b".into(),
             name: "Provider B".into(),
+            base_url_name: "主用地址".into(),
             base_url: "https://provider-b.example.test/v1".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.6-sol".into(), "gpt-5.4-mini".into()],
+            api_key_name: "主用密钥".into(),
             api_key: "test-key-b-not-real".into(),
             activate_after_save: false,
             expected_files: state.fingerprints,
@@ -89,10 +91,8 @@ async fn provider_workflow_preserves_unknown_config_and_restores_original_bytes(
         .update_provider(UpdateProviderInput {
             id: "provider-b".into(),
             name: "Provider B Updated".into(),
-            base_url: "https://provider-b.example.test/responses".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.4-mini".into()],
-            api_key_change: ApiKeyChange::Set("test-key-b-updated-not-real".into()),
             sync_if_active: false,
             expected_files: state.fingerprints,
         })
@@ -107,7 +107,7 @@ async fn provider_workflow_preserves_unknown_config_and_restores_original_bytes(
 
     service.switch_provider("provider-b").await.unwrap();
     let auth: Value = serde_json::from_slice(&fs::read(&paths.auth_file).unwrap()).unwrap();
-    assert_eq!(auth["OPENAI_API_KEY"], "test-key-b-updated-not-real");
+    assert_eq!(auth["OPENAI_API_KEY"], "test-key-b-not-real");
 
     let active_delete = service
         .delete_provider("provider-b", service.list_providers().unwrap().fingerprints)

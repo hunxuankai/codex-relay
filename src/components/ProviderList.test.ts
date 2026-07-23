@@ -8,9 +8,20 @@ function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
     id: 'provider-a',
     name: 'Provider A',
     baseUrl: 'https://provider-a.example.test/v1',
+    baseUrls: [{ id: 'url-primary', name: '主用地址', url: 'https://provider-a.example.test/v1' }],
+    selectedBaseUrlId: 'url-primary',
+    baseUrlStatus: 'managed',
+    apiKeys: [{ id: 'key-primary', name: '主用密钥' }],
+    selectedApiKeyId: 'key-primary',
+    apiKeyStatus: 'managed',
     wireApi: 'responses',
-    model: 'model-a',
+    models: ['model-a'],
+    selectedModel: 'model-a',
+    reasoningEfforts: { 'model-a': 'medium' },
+    preferenceConfigured: true,
     apiKeyConfigured: true,
+    configurationComplete: true,
+    disabledReason: null,
     isActive: true,
     isValid: true,
     validationMessage: null,
@@ -27,8 +38,13 @@ describe('ProviderList', () => {
           provider({
             id: 'provider-b',
             name: 'Provider B',
-            model: null,
+            selectedModel: null,
             apiKeyConfigured: false,
+            apiKeys: [],
+            selectedApiKeyId: null,
+            apiKeyStatus: 'missing',
+            configurationComplete: false,
+            disabledReason: '缺少受管 API Key。',
             isActive: false,
             isValid: false,
             validationMessage: 'Base URL 无效。',
@@ -47,7 +63,7 @@ describe('ProviderList', () => {
     expect(wrapper.text()).toContain('未指定（切换时保留现有模型）')
     expect(wrapper.text()).toContain('当前')
     expect(wrapper.text()).toContain('Base URL 无效。')
-    expect(wrapper.text()).toContain('未配置密钥')
+    expect(wrapper.text()).toContain('配置不完整')
   })
 
   it('disables invalid or keyless use and current deletion', () => {
@@ -59,6 +75,11 @@ describe('ProviderList', () => {
             id: 'provider-b',
             name: 'Provider B',
             apiKeyConfigured: false,
+            apiKeys: [],
+            selectedApiKeyId: null,
+            apiKeyStatus: 'missing',
+            configurationComplete: false,
+            disabledReason: '缺少受管 API Key。',
             isActive: false,
           }),
         ],

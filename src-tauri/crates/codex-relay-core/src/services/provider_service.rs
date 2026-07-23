@@ -3,8 +3,11 @@ use crate::infrastructure::file_fingerprint::FileSetFingerprint;
 use crate::infrastructure::path_service::AppPaths;
 use crate::models::backup::{BackupFileName, BackupSummary};
 use crate::models::provider::{
-    ApiKeyChange, CreateProviderInput, ModelCatalogItem, ProviderListState,
-    ProviderMutationOutcome, ProviderProfile, SwitchOutcome, UpdateProviderInput,
+    CreateProviderInput, ImportCurrentApiKeyInput, ModelCatalogItem, ProviderApiKeyManagementEntry,
+    ProviderApiKeyManagementState, ProviderApiKeyStatus, ProviderApiKeySummary,
+    ProviderBaseUrlStatus, ProviderBaseUrlSummary, ProviderListState, ProviderMutationOutcome,
+    ProviderProfile, SaveProviderApiKeysInput, SaveProviderBaseUrlsInput,
+    SelectProviderApiKeyInput, SelectProviderBaseUrlInput, SwitchOutcome, UpdateProviderInput,
     UpdateProviderPreferenceInput, WireApi,
 };
 use crate::models::provider_availability::ProviderAvailabilityTarget;
@@ -15,19 +18,23 @@ use crate::services::config_service::{
     self, ProviderConfig, ProviderInput, ValidatedProviderInput,
 };
 use crate::services::provider_preference_service::{
-    ProviderPreference, ProviderPreferenceService, ProviderPreferenceStore, model_catalog,
+    NamedBaseUrl, ProviderPreference, ProviderPreferenceService, ProviderPreferenceStore,
+    ProviderPrivatePreference, model_catalog, normalize_named_base_urls,
     serialize_store as serialize_preference_store,
 };
 use crate::services::provider_secret_service::{
-    ProviderSecret, ProviderSecretService, ProviderSecretStore, normalize_api_key, serialize_store,
+    NamedApiKey, ProviderSecret, ProviderSecretService, ProviderSecretStore, normalize_api_key,
+    normalize_named_api_keys, serialize_store,
 };
 use crate::services::transaction_service::{
     FileChange, FileChanges, FileOps, StdFileOps, TransactionRequest, TransactionService,
 };
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::Arc;
+use uuid::Uuid;
 
 const CONSISTENT_READ_ATTEMPTS: usize = 3;
 
@@ -101,9 +108,12 @@ impl ProviderService {
         Ok(self.list_state_from_disk(&disk))
     }
 
-    pub fn get_api_key_for_edit(&self, provider_id: &str) -> Result<Option<String>, AppError> {
+    pub fn get_provider_api_keys_for_management(
+        &self,
+        provider_id: &str,
+    ) -> Result<ProviderApiKeyManagementState, AppError> {
         let provider_id = config_service::validate_provider_id(provider_id)?;
-        let disk = self.read_consistent_state(AuthReadMode::Skip)?;
+        let disk = self.read_consistent_state(AuthReadMode::Lenient)?;
         if !disk
             .provider_configs
             .iter()
@@ -111,7 +121,32 @@ impl ProviderService {
         {
             return Err(provider_not_found(&provider_id));
         }
-        Ok(configured_key(&disk.store, &provider_id))
+        let secret = disk.store.providers.get(&provider_id);
+        let is_active = config_service::current_provider_id(&disk.document).as_deref()
+            == Some(provider_id.as_str());
+        let (selected_api_key_id, api_key_status) =
+            effective_api_key_selection(is_active, secret, disk.auth_key.as_deref());
+        let entries = secret
+            .map(|secret| {
+                secret
+                    .api_keys
+                    .iter()
+                    .map(|entry| ProviderApiKeyManagementEntry {
+                        id: entry.id.clone(),
+                        name: entry.name.clone(),
+                        api_key: entry.api_key.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(ProviderApiKeyManagementState {
+            provider_id,
+            entries,
+            selected_api_key_id,
+            api_key_status,
+            fingerprints: disk.fingerprints,
+        })
     }
 
     pub(crate) fn resolve_availability_target(
@@ -119,24 +154,38 @@ impl ProviderService {
         provider_id: &str,
     ) -> Result<ProviderAvailabilityTarget, AppError> {
         let provider_id = config_service::validate_provider_id(provider_id)?;
-        let disk = self.read_consistent_state_read_only(AuthReadMode::Skip)?;
+        let disk = self.read_consistent_state_read_only(AuthReadMode::Strict)?;
         let provider = disk
             .provider_configs
             .iter()
             .find(|provider| provider.id == provider_id)
             .ok_or_else(|| provider_not_found(&provider_id))?;
         let validated = config_service::validate_provider_config(provider)?;
-        let api_key = configured_key(&disk.store, &provider_id).ok_or_else(|| {
-            AppError::new(
-                "PROVIDER_TEST_KEY_MISSING",
-                "该 Provider 尚未配置 API Key，无法测试。",
-                format!("availability target has no key: {provider_id}"),
-            )
-        })?;
-        let model = disk
+        let private_preference = disk
             .preference_store
             .providers
             .get(&provider_id)
+            .ok_or_else(|| {
+                AppError::new(
+                    "PROVIDER_TEST_BASE_URL_UNMANAGED",
+                    "当前 Base URL 尚未纳入 Relay 管理，无法测试。",
+                    format!("availability target has no managed Base URL: {provider_id}"),
+                )
+            })?;
+        if !private_preference
+            .base_urls
+            .iter()
+            .any(|entry| entry.url == validated.base_url)
+        {
+            return Err(AppError::new(
+                "PROVIDER_TEST_BASE_URL_UNMANAGED",
+                "当前 Base URL 尚未纳入 Relay 管理，无法测试。",
+                format!("availability target Base URL is unmanaged: {provider_id}"),
+            ));
+        }
+        let model = private_preference
+            .model_preference
+            .as_ref()
             .map(|preference| preference.selected_model.trim())
             .filter(|model| !model.is_empty())
             .ok_or_else(|| {
@@ -147,6 +196,45 @@ impl ProviderService {
                 )
             })?
             .to_owned();
+        let secret = disk.store.providers.get(&provider_id);
+        let is_active = config_service::current_provider_id(&disk.document).as_deref()
+            == Some(provider_id.as_str());
+        let (selected_api_key_id, api_key_status) =
+            effective_api_key_selection(is_active, secret, disk.auth_key.as_deref());
+        let api_key = match api_key_status {
+            ProviderApiKeyStatus::Managed => {
+                let selected_api_key_id = selected_api_key_id.expect("managed key has an id");
+                secret
+                    .and_then(|secret| {
+                        secret
+                            .api_keys
+                            .iter()
+                            .find(|entry| entry.id == selected_api_key_id)
+                    })
+                    .map(|entry| entry.api_key.clone())
+                    .ok_or_else(|| {
+                        AppError::new(
+                            "PROVIDER_TEST_KEY_MISSING",
+                            "该 Provider 尚未配置 API Key，无法测试。",
+                            format!("availability target has no key: {provider_id}"),
+                        )
+                    })?
+            }
+            ProviderApiKeyStatus::External => {
+                return Err(AppError::new(
+                    "PROVIDER_TEST_KEY_UNMANAGED",
+                    "当前 API Key 尚未纳入 Relay 管理，无法测试。",
+                    format!("availability target auth key is unmanaged: {provider_id}"),
+                ));
+            }
+            ProviderApiKeyStatus::Missing => {
+                return Err(AppError::new(
+                    "PROVIDER_TEST_KEY_MISSING",
+                    "该 Provider 尚未配置 API Key，无法测试。",
+                    format!("availability target has no key: {provider_id}"),
+                ));
+            }
+        };
 
         Ok(ProviderAvailabilityTarget {
             provider_id,
@@ -168,19 +256,22 @@ impl ProviderService {
         })?;
         let preference = ProviderPreference::from_models(&input.models)?;
         let api_key = normalize_api_key(&input.api_key)?;
-        let disk = self.read_consistent_state(AuthReadMode::Skip)?;
+        let disk = self.read_consistent_state(AuthReadMode::Lenient)?;
         let mut new_config = config_service::create_provider(&disk.config_source, &validated)?;
         let mut new_store = disk.store.clone();
         new_store.providers.insert(
             validated.id.clone(),
-            ProviderSecret {
-                api_key: api_key.clone(),
-            },
+            ProviderSecret::single_named(&input.api_key_name, &api_key)?,
         );
         let mut new_preferences = disk.preference_store.clone();
-        new_preferences
-            .providers
-            .insert(validated.id.clone(), preference.clone());
+        new_preferences.providers.insert(
+            validated.id.clone(),
+            ProviderPrivatePreference::with_initial_base_url(
+                &input.base_url_name,
+                &validated.base_url,
+                Some(preference.clone()),
+            )?,
+        );
 
         let auth_change = if input.activate_after_save {
             new_config = config_service::select_provider_with_preference(
@@ -241,53 +332,48 @@ impl ProviderService {
         &self,
         input: UpdateProviderInput,
     ) -> Result<ProviderMutationOutcome, AppError> {
+        let provider_id = config_service::validate_provider_id(&input.id)?;
+        let disk = self.read_consistent_state(AuthReadMode::Lenient)?;
+        let existing = disk
+            .provider_configs
+            .iter()
+            .find(|provider| provider.id == provider_id)
+            .ok_or_else(|| provider_not_found(&provider_id))?;
         let validated = config_service::validate_provider_input(&ProviderInput {
-            id: input.id,
+            id: provider_id,
             name: input.name,
-            base_url: input.base_url,
+            base_url: existing.base_url.clone().unwrap_or_default(),
             wire_api: input.wire_api,
         })?;
-        let disk = self.read_consistent_state(AuthReadMode::Skip)?;
         let is_active = config_service::current_provider_id(&disk.document).as_deref()
             == Some(validated.id.as_str());
         let new_config =
             config_service::update_provider(&disk.config_source, &validated.id, &validated)?;
         let mut new_preferences = disk.preference_store.clone();
         let selected_changed =
-            if let Some(preference) = new_preferences.providers.get_mut(&validated.id) {
-                preference.reconcile_models(&input.models)?
+            if let Some(private_preference) = new_preferences.providers.get_mut(&validated.id) {
+                if let Some(preference) = private_preference.model_preference.as_mut() {
+                    preference.reconcile_models(&input.models)?
+                } else {
+                    private_preference.model_preference =
+                        Some(ProviderPreference::from_models(&input.models)?);
+                    false
+                }
             } else {
                 new_preferences.providers.insert(
                     validated.id.clone(),
-                    ProviderPreference::from_models(&input.models)?,
+                    ProviderPrivatePreference {
+                        base_urls: Vec::new(),
+                        model_preference: Some(ProviderPreference::from_models(&input.models)?),
+                    },
                 );
                 false
             };
-        let preference = new_preferences.providers[&validated.id].clone();
-        let mut new_store = disk.store.clone();
-        let (provider_change, effective_key) = match input.api_key_change {
-            ApiKeyChange::Unchanged => (
-                FileChange::Unchanged,
-                configured_key(&new_store, &validated.id),
-            ),
-            ApiKeyChange::Set(api_key) => {
-                let api_key = normalize_api_key(&api_key)?;
-                new_store.providers.insert(
-                    validated.id.clone(),
-                    ProviderSecret {
-                        api_key: api_key.clone(),
-                    },
-                );
-                (
-                    FileChange::Write(serialize_store(&new_store)?),
-                    Some(api_key),
-                )
-            }
-            ApiKeyChange::Clear => {
-                new_store.providers.remove(&validated.id);
-                (FileChange::Write(serialize_store(&new_store)?), None)
-            }
-        };
+        let preference = new_preferences.providers[&validated.id]
+            .model_preference
+            .clone()
+            .expect("model preference was initialized above");
+        let effective_key = configured_key(&disk.store, &validated.id);
 
         let sync_active = is_active && input.sync_if_active;
         let (final_config, auth_change) = if sync_active {
@@ -316,7 +402,7 @@ impl ProviderService {
                     changes: FileChanges {
                         config: FileChange::Write(final_config.into_bytes()),
                         auth: auth_change,
-                        providers: provider_change,
+                        providers: secret_upgrade_change(&disk)?,
                         preferences: FileChange::Write(serialize_preference_store(
                             &new_preferences,
                         )?),
@@ -353,13 +439,514 @@ impl ProviderService {
         })
     }
 
+    pub async fn save_provider_base_urls(
+        &self,
+        input: SaveProviderBaseUrlsInput,
+    ) -> Result<ProviderMutationOutcome, AppError> {
+        let provider_id = config_service::validate_provider_id(&input.provider_id)?;
+        let disk = self.read_consistent_state(AuthReadMode::Lenient)?;
+        let provider = disk
+            .provider_configs
+            .iter()
+            .find(|provider| provider.id == provider_id)
+            .ok_or_else(|| provider_not_found(&provider_id))?;
+        let validated = config_service::validate_provider_config(provider)?;
+        let is_active = config_service::current_provider_id(&disk.document).as_deref()
+            == Some(provider_id.as_str());
+
+        let mut new_preferences = disk.preference_store.clone();
+        let private_preference = new_preferences
+            .providers
+            .entry(provider_id.clone())
+            .or_insert_with(|| ProviderPrivatePreference {
+                base_urls: Vec::new(),
+                model_preference: None,
+            });
+        let existing = private_preference.base_urls.clone();
+        let selected_base_url_id = existing
+            .iter()
+            .find(|entry| entry.url == validated.base_url)
+            .map(|entry| entry.id.clone());
+
+        let mut updates = BTreeMap::new();
+        let mut additions = Vec::new();
+        for draft in input.entries {
+            match draft.id {
+                Some(id) => {
+                    let id = id.trim().to_owned();
+                    if !existing.iter().any(|entry| entry.id == id) {
+                        return Err(AppError::new(
+                            "UNKNOWN_BASE_URL_ID",
+                            "Base URL 条目已变化，请重新加载后再保存。",
+                            format!("unknown provider Base URL entry id: {id:?}"),
+                        ));
+                    }
+                    if updates.insert(id, (draft.name, draft.url)).is_some() {
+                        return Err(AppError::new(
+                            "DUPLICATE_BASE_URL_ID",
+                            "Base URL 草稿包含重复条目。",
+                            "provider Base URL draft repeats an existing entry id",
+                        ));
+                    }
+                }
+                None => additions.push(NamedBaseUrl {
+                    id: Uuid::new_v4().to_string(),
+                    name: draft.name,
+                    url: draft.url,
+                }),
+            }
+        }
+
+        if selected_base_url_id
+            .as_ref()
+            .is_some_and(|selected_id| !updates.contains_key(selected_id))
+        {
+            return Err(AppError::new(
+                "SELECTED_BASE_URL_DELETE_FORBIDDEN",
+                "当前 Base URL 不能直接删除，请先切换到其他地址。",
+                "provider Base URL draft removes the selected entry",
+            ));
+        }
+
+        let mut base_urls = Vec::with_capacity(updates.len() + additions.len());
+        for entry in existing {
+            if let Some((name, url)) = updates.remove(&entry.id) {
+                base_urls.push(NamedBaseUrl {
+                    id: entry.id,
+                    name,
+                    url,
+                });
+            }
+        }
+        base_urls.extend(additions);
+        if base_urls.is_empty() {
+            return Err(AppError::new(
+                "LAST_BASE_URL_DELETE_FORBIDDEN",
+                "Provider 必须至少保留一个 Base URL。",
+                "provider Base URL draft removes the last entry",
+            ));
+        }
+        let base_urls = normalize_named_base_urls(base_urls)?;
+        let expected_base_url = selected_base_url_id
+            .as_deref()
+            .and_then(|selected_id| {
+                base_urls
+                    .iter()
+                    .find(|entry| entry.id == selected_id)
+                    .map(|entry| entry.url.clone())
+            })
+            .unwrap_or_else(|| validated.base_url.clone());
+        let config_changed = expected_base_url != validated.base_url;
+        let config_change = if config_changed {
+            FileChange::Write(
+                config_service::set_provider_base_url(
+                    &disk.config_source,
+                    &provider_id,
+                    &expected_base_url,
+                )?
+                .into_bytes(),
+            )
+        } else {
+            FileChange::Unchanged
+        };
+        private_preference.base_urls = base_urls.clone();
+
+        self.transaction_service
+            .execute(
+                TransactionRequest {
+                    operation: TransactionOperation::SaveProviderBaseUrls,
+                    provider_id: Some(provider_id.clone()),
+                    expected_files: Some(input.expected_files),
+                    changes: FileChanges {
+                        config: config_change,
+                        auth: FileChange::Unchanged,
+                        providers: secret_upgrade_change(&disk)?,
+                        preferences: FileChange::Write(serialize_preference_store(
+                            &new_preferences,
+                        )?),
+                    },
+                },
+                |paths| {
+                    validate_base_urls_written(paths, &provider_id, &base_urls, &expected_base_url)
+                },
+            )
+            .await?;
+
+        let message = if config_changed && is_active {
+            "Base URL 已保存并写入当前 Codex 配置，请重启 Codex 后生效。"
+        } else if config_changed {
+            "Base URL 已保存，将在应用此 Provider 时生效。"
+        } else {
+            "Base URL 已保存。"
+        };
+        Ok(ProviderMutationOutcome {
+            providers: self.list_providers()?.providers,
+            message: message.into(),
+        })
+    }
+
+    pub async fn select_provider_base_url(
+        &self,
+        input: SelectProviderBaseUrlInput,
+    ) -> Result<ProviderMutationOutcome, AppError> {
+        let provider_id = config_service::validate_provider_id(&input.provider_id)?;
+        let disk = self.read_consistent_state(AuthReadMode::Lenient)?;
+        let provider = disk
+            .provider_configs
+            .iter()
+            .find(|provider| provider.id == provider_id)
+            .ok_or_else(|| provider_not_found(&provider_id))?;
+        let validated = config_service::validate_provider_config(provider)?;
+        let private_preference = disk
+            .preference_store
+            .providers
+            .get(&provider_id)
+            .ok_or_else(|| {
+                AppError::new(
+                    "PROVIDER_BASE_URLS_MISSING",
+                    "该 Provider 尚未保存命名 Base URL。",
+                    "provider has no private Base URL preference",
+                )
+            })?;
+        let selected = private_preference
+            .base_urls
+            .iter()
+            .find(|entry| entry.id == input.base_url_id)
+            .ok_or_else(|| {
+                AppError::new(
+                    "BASE_URL_NOT_FOUND",
+                    "指定的 Base URL 不存在，请重新加载后再试。",
+                    format!("provider Base URL id not found: {:?}", input.base_url_id),
+                )
+            })?;
+        let config_changed = validated.base_url != selected.url;
+        let is_active = config_service::current_provider_id(&disk.document).as_deref()
+            == Some(provider_id.as_str());
+
+        if config_changed || disk.preference_needs_upgrade || disk.secret_needs_upgrade {
+            let config_change = if config_changed {
+                FileChange::Write(
+                    config_service::set_provider_base_url(
+                        &disk.config_source,
+                        &provider_id,
+                        &selected.url,
+                    )?
+                    .into_bytes(),
+                )
+            } else {
+                FileChange::Unchanged
+            };
+            let preference_change = if disk.preference_needs_upgrade {
+                FileChange::Write(serialize_preference_store(&disk.preference_store)?)
+            } else {
+                FileChange::Unchanged
+            };
+            let expected_entries = private_preference.base_urls.clone();
+            let expected_base_url = selected.url.clone();
+            self.transaction_service
+                .execute(
+                    TransactionRequest {
+                        operation: TransactionOperation::SelectProviderBaseUrl,
+                        provider_id: Some(provider_id.clone()),
+                        expected_files: Some(input.expected_files),
+                        changes: FileChanges {
+                            config: config_change,
+                            auth: FileChange::Unchanged,
+                            providers: secret_upgrade_change(&disk)?,
+                            preferences: preference_change,
+                        },
+                    },
+                    |paths| {
+                        validate_base_urls_written(
+                            paths,
+                            &provider_id,
+                            &expected_entries,
+                            &expected_base_url,
+                        )
+                    },
+                )
+                .await?;
+        }
+
+        let message = if config_changed && is_active {
+            "Base URL 已写入当前 Codex 配置，请重启 Codex 后生效。"
+        } else if config_changed {
+            "Base URL 已保存，将在应用此 Provider 时生效。"
+        } else {
+            "该 Base URL 已处于选中状态。"
+        };
+        Ok(ProviderMutationOutcome {
+            providers: self.list_providers()?.providers,
+            message: message.into(),
+        })
+    }
+
+    pub async fn save_provider_api_keys(
+        &self,
+        input: SaveProviderApiKeysInput,
+    ) -> Result<ProviderMutationOutcome, AppError> {
+        let provider_id = config_service::validate_provider_id(&input.provider_id)?;
+        let disk = self.read_consistent_state(AuthReadMode::Strict)?;
+        if !disk
+            .provider_configs
+            .iter()
+            .any(|provider| provider.id == provider_id)
+        {
+            return Err(provider_not_found(&provider_id));
+        }
+        let is_active = config_service::current_provider_id(&disk.document).as_deref()
+            == Some(provider_id.as_str());
+        let existing_secret = disk.store.providers.get(&provider_id).cloned();
+        let existing = existing_secret
+            .as_ref()
+            .map(|secret| secret.api_keys.clone())
+            .unwrap_or_default();
+        let active_managed_id = if is_active {
+            disk.auth_key.as_deref().and_then(|auth_key| {
+                existing
+                    .iter()
+                    .find(|entry| entry.api_key == auth_key)
+                    .map(|entry| entry.id.clone())
+            })
+        } else {
+            None
+        };
+        let protected_selected_id = active_managed_id.clone().or_else(|| {
+            existing_secret
+                .as_ref()
+                .map(|secret| secret.selected_api_key_id.clone())
+        });
+
+        let mut updates = BTreeMap::new();
+        let mut additions = Vec::new();
+        for draft in input.entries {
+            match draft.id {
+                Some(id) => {
+                    let id = id.trim().to_owned();
+                    if !existing.iter().any(|entry| entry.id == id) {
+                        return Err(AppError::new(
+                            "UNKNOWN_API_KEY_ID",
+                            "API Key 条目已变化，请重新加载后再保存。",
+                            format!("unknown provider API key entry id: {id:?}"),
+                        ));
+                    }
+                    if updates.insert(id, (draft.name, draft.api_key)).is_some() {
+                        return Err(AppError::new(
+                            "DUPLICATE_API_KEY_ID",
+                            "API Key 草稿包含重复条目。",
+                            "provider API key draft repeats an existing entry id",
+                        ));
+                    }
+                }
+                None => additions.push(NamedApiKey {
+                    id: Uuid::new_v4().to_string(),
+                    name: draft.name,
+                    api_key: draft.api_key,
+                }),
+            }
+        }
+
+        if protected_selected_id
+            .as_ref()
+            .is_some_and(|selected_id| !updates.contains_key(selected_id))
+        {
+            return Err(AppError::new(
+                "SELECTED_API_KEY_DELETE_FORBIDDEN",
+                "当前 API Key 不能直接删除，请先切换到其他密钥。",
+                "provider API key draft removes the selected entry",
+            ));
+        }
+
+        let mut api_keys = Vec::with_capacity(updates.len() + additions.len());
+        for entry in existing {
+            if let Some((name, api_key)) = updates.remove(&entry.id) {
+                api_keys.push(NamedApiKey {
+                    id: entry.id,
+                    name,
+                    api_key,
+                });
+            }
+        }
+        api_keys.extend(additions);
+        if api_keys.is_empty() {
+            return Err(AppError::new(
+                "LAST_API_KEY_DELETE_FORBIDDEN",
+                "Provider 必须至少保留一个 API Key。",
+                "provider API key draft removes the last entry",
+            ));
+        }
+        let selected_api_key_id = protected_selected_id.unwrap_or_else(|| api_keys[0].id.clone());
+        let normalized = normalize_named_api_keys(api_keys, &selected_api_key_id)?;
+        let new_secret = ProviderSecret {
+            api_keys: normalized.api_keys,
+            selected_api_key_id: normalized.selected_api_key_id,
+        };
+        let expected_auth_key = active_managed_id
+            .as_deref()
+            .and_then(|selected_id| {
+                new_secret
+                    .api_keys
+                    .iter()
+                    .find(|entry| entry.id == selected_id)
+                    .map(|entry| entry.api_key.clone())
+            })
+            .or_else(|| disk.auth_key.clone());
+        let auth_changed = expected_auth_key != disk.auth_key;
+
+        let mut new_store = disk.store.clone();
+        new_store
+            .providers
+            .insert(provider_id.clone(), new_secret.clone());
+        let preference_change = if disk.preference_needs_upgrade {
+            FileChange::Write(serialize_preference_store(&disk.preference_store)?)
+        } else {
+            FileChange::Unchanged
+        };
+        self.transaction_service
+            .execute(
+                TransactionRequest {
+                    operation: TransactionOperation::SaveProviderApiKeys,
+                    provider_id: Some(provider_id.clone()),
+                    expected_files: Some(input.expected_files),
+                    changes: FileChanges {
+                        config: FileChange::Unchanged,
+                        auth: if auth_changed {
+                            match expected_auth_key.as_deref() {
+                                Some(api_key) => FileChange::Write(render_auth_json(api_key)?),
+                                None => FileChange::Delete,
+                            }
+                        } else {
+                            FileChange::Unchanged
+                        },
+                        providers: FileChange::Write(serialize_store(&new_store)?),
+                        preferences: preference_change,
+                    },
+                },
+                |paths| {
+                    validate_api_keys_written(
+                        paths,
+                        &provider_id,
+                        &new_secret,
+                        expected_auth_key.as_deref(),
+                    )
+                },
+            )
+            .await?;
+
+        let message = if auth_changed && is_active {
+            "API Key 已保存并写入当前 Codex 认证，请重启 Codex 后生效。"
+        } else if is_active {
+            "API Key 已保存。"
+        } else {
+            "API Key 已保存，将在应用此 Provider 时生效。"
+        };
+        Ok(ProviderMutationOutcome {
+            providers: self.list_providers()?.providers,
+            message: message.into(),
+        })
+    }
+
+    pub async fn select_provider_api_key(
+        &self,
+        input: SelectProviderApiKeyInput,
+    ) -> Result<ProviderMutationOutcome, AppError> {
+        let provider_id = config_service::validate_provider_id(&input.provider_id)?;
+        let disk = self.read_consistent_state(AuthReadMode::Strict)?;
+        if !disk
+            .provider_configs
+            .iter()
+            .any(|provider| provider.id == provider_id)
+        {
+            return Err(provider_not_found(&provider_id));
+        }
+        let secret = disk
+            .store
+            .providers
+            .get(&provider_id)
+            .cloned()
+            .ok_or_else(provider_api_key_missing)?;
+        let selected = secret
+            .api_keys
+            .iter()
+            .find(|entry| entry.id == input.api_key_id)
+            .cloned()
+            .ok_or_else(|| {
+                AppError::new(
+                    "API_KEY_NOT_FOUND",
+                    "指定的 API Key 不存在，请重新加载后再试。",
+                    format!("provider API key id not found: {:?}", input.api_key_id),
+                )
+            })?;
+        let is_active = config_service::current_provider_id(&disk.document).as_deref()
+            == Some(provider_id.as_str());
+        let selected_changed = secret.selected_api_key_id != selected.id;
+        let expected_auth_key = if is_active {
+            Some(selected.api_key.clone())
+        } else {
+            disk.auth_key.clone()
+        };
+        let auth_changed = expected_auth_key != disk.auth_key;
+
+        if selected_changed
+            || auth_changed
+            || disk.secret_needs_upgrade
+            || disk.preference_needs_upgrade
+        {
+            let new_secret =
+                ProviderSecret::from_named_api_keys(secret.api_keys.clone(), &selected.id)?;
+            let mut new_store = disk.store.clone();
+            new_store
+                .providers
+                .insert(provider_id.clone(), new_secret.clone());
+            self.transaction_service
+                .execute(
+                    TransactionRequest {
+                        operation: TransactionOperation::SelectProviderApiKey,
+                        provider_id: Some(provider_id.clone()),
+                        expected_files: Some(input.expected_files),
+                        changes: FileChanges {
+                            config: FileChange::Unchanged,
+                            auth: if auth_changed {
+                                FileChange::Write(render_auth_json(&selected.api_key)?)
+                            } else {
+                                FileChange::Unchanged
+                            },
+                            providers: FileChange::Write(serialize_store(&new_store)?),
+                            preferences: preference_upgrade_change(&disk)?,
+                        },
+                    },
+                    |paths| {
+                        validate_api_keys_written(
+                            paths,
+                            &provider_id,
+                            &new_secret,
+                            expected_auth_key.as_deref(),
+                        )
+                    },
+                )
+                .await?;
+        }
+
+        let message = if auth_changed && is_active {
+            "API Key 已写入当前 Codex 认证，请重启 Codex 后生效。"
+        } else if selected_changed && !is_active {
+            "API Key 已保存，将在应用此 Provider 时生效。"
+        } else {
+            "该 API Key 已处于选中状态。"
+        };
+        Ok(ProviderMutationOutcome {
+            providers: self.list_providers()?.providers,
+            message: message.into(),
+        })
+    }
+
     pub async fn delete_provider(
         &self,
         provider_id: &str,
         expected_files: FileSetFingerprint,
     ) -> Result<ProviderMutationOutcome, AppError> {
         let provider_id = config_service::validate_provider_id(provider_id)?;
-        let disk = self.read_consistent_state(AuthReadMode::Skip)?;
+        let disk = self.read_consistent_state(AuthReadMode::Lenient)?;
         let provider = disk
             .provider_configs
             .iter()
@@ -400,7 +987,7 @@ impl ProviderService {
 
     pub async fn switch_provider(&self, provider_id: &str) -> Result<SwitchOutcome, AppError> {
         let provider_id = config_service::validate_provider_id(provider_id)?;
-        let disk = self.read_consistent_state(AuthReadMode::Skip)?;
+        let disk = self.read_consistent_state(AuthReadMode::Lenient)?;
         let provider = disk
             .provider_configs
             .iter()
@@ -410,10 +997,25 @@ impl ProviderService {
         let validated = config_service::validate_provider_config(&provider)?;
         let api_key =
             configured_key(&disk.store, &provider_id).ok_or_else(provider_api_key_missing)?;
-        let preference = disk
+        let private_preference = disk
             .preference_store
             .providers
             .get(&provider_id)
+            .ok_or_else(provider_preference_missing)?;
+        if !private_preference
+            .base_urls
+            .iter()
+            .any(|entry| entry.url == validated.base_url)
+        {
+            return Err(AppError::new(
+                "PROVIDER_BASE_URL_UNMANAGED",
+                "当前 Base URL 尚未纳入 Relay 管理，无法应用该 Provider。",
+                "target provider Base URL does not match a managed entry",
+            ));
+        }
+        let preference = private_preference
+            .model_preference
+            .as_ref()
             .ok_or_else(provider_preference_missing)?;
         let new_config = config_service::select_provider_with_preference(
             &disk.config_source,
@@ -431,8 +1033,16 @@ impl ProviderService {
                     changes: FileChanges {
                         config: FileChange::Write(new_config.into_bytes()),
                         auth: FileChange::Write(render_auth_json(&api_key)?),
-                        providers: FileChange::Unchanged,
-                        preferences: FileChange::Unchanged,
+                        providers: if disk.secret_needs_upgrade {
+                            FileChange::Write(serialize_store(&disk.store)?)
+                        } else {
+                            FileChange::Unchanged
+                        },
+                        preferences: if disk.preference_needs_upgrade {
+                            FileChange::Write(serialize_preference_store(&disk.preference_store)?)
+                        } else {
+                            FileChange::Unchanged
+                        },
                     },
                 },
                 |paths| {
@@ -463,7 +1073,7 @@ impl ProviderService {
         input: UpdateProviderPreferenceInput,
     ) -> Result<ProviderMutationOutcome, AppError> {
         let provider_id = config_service::validate_provider_id(&input.provider_id)?;
-        let disk = self.read_consistent_state(AuthReadMode::Skip)?;
+        let disk = self.read_consistent_state(AuthReadMode::Lenient)?;
         if !disk
             .provider_configs
             .iter()
@@ -472,9 +1082,13 @@ impl ProviderService {
             return Err(provider_not_found(&provider_id));
         }
         let mut new_preferences = disk.preference_store.clone();
-        let preference = new_preferences
+        let private_preference = new_preferences
             .providers
             .get_mut(&provider_id)
+            .ok_or_else(provider_preference_missing)?;
+        let preference = private_preference
+            .model_preference
+            .as_mut()
             .ok_or_else(provider_preference_missing)?;
         preference.select(&input.model, &input.reasoning_effort)?;
         let expected_preference = preference.clone();
@@ -503,7 +1117,7 @@ impl ProviderService {
                     changes: FileChanges {
                         config: config_change,
                         auth: FileChange::Unchanged,
-                        providers: FileChange::Unchanged,
+                        providers: secret_upgrade_change(&disk)?,
                         preferences: FileChange::Write(serialize_preference_store(
                             &new_preferences,
                         )?),
@@ -532,9 +1146,9 @@ impl ProviderService {
 
     pub async fn import_current_auth_key(
         &self,
-        expected_provider_id: &str,
+        input: ImportCurrentApiKeyInput,
     ) -> Result<ProviderMutationOutcome, AppError> {
-        let expected_provider_id = config_service::validate_provider_id(expected_provider_id)?;
+        let expected_provider_id = config_service::validate_provider_id(&input.provider_id)?;
         let disk = self.read_consistent_state(AuthReadMode::Strict)?;
         let active = config_service::current_provider_id(&disk.document)
             .ok_or_else(|| provider_not_found(&expected_provider_id))?;
@@ -545,13 +1159,7 @@ impl ProviderService {
                 "requested auth import provider does not match active provider",
             ));
         }
-        if configured_key(&disk.store, &active).is_some() {
-            return Err(AppError::new(
-                "API_KEY_ALREADY_CONFIGURED",
-                "当前 Provider 已经保存了 API Key。",
-                "auth import requested for provider that already has a key",
-            ));
-        }
+        let preference_change = preference_upgrade_change(&disk)?;
         let api_key = disk.auth_key.ok_or_else(|| {
             AppError::new(
                 "AUTH_KEY_MISSING",
@@ -565,28 +1173,36 @@ impl ProviderService {
             .find(|provider| provider.id == active)
             .cloned()
             .ok_or_else(|| provider_not_found(&active))?;
+        let mut api_keys = disk
+            .store
+            .providers
+            .get(&active)
+            .map(|secret| secret.api_keys.clone())
+            .unwrap_or_default();
+        let imported_id = Uuid::new_v4().to_string();
+        api_keys.push(NamedApiKey {
+            id: imported_id.clone(),
+            name: input.name,
+            api_key: api_key.clone(),
+        });
+        let imported = ProviderSecret::from_named_api_keys(api_keys, &imported_id)?;
         let mut new_store = disk.store;
-        new_store.providers.insert(
-            active.clone(),
-            ProviderSecret {
-                api_key: api_key.clone(),
-            },
-        );
+        new_store.providers.insert(active.clone(), imported.clone());
 
         self.transaction_service
             .execute(
                 TransactionRequest {
-                    operation: TransactionOperation::UpdateProvider,
+                    operation: TransactionOperation::ImportCurrentApiKey,
                     provider_id: Some(active.clone()),
-                    expected_files: Some(disk.fingerprints),
+                    expected_files: Some(input.expected_files),
                     changes: FileChanges {
                         config: FileChange::Unchanged,
                         auth: FileChange::Unchanged,
                         providers: FileChange::Write(serialize_store(&new_store)?),
-                        preferences: FileChange::Unchanged,
+                        preferences: preference_change,
                     },
                 },
-                |paths| validate_secret_only(paths, &active, &api_key),
+                |paths| validate_api_keys_written(paths, &active, &imported, Some(&api_key)),
             )
             .await?;
 
@@ -600,7 +1216,7 @@ impl ProviderService {
     }
 
     fn read_consistent_state(&self, auth_mode: AuthReadMode) -> Result<DiskState, AppError> {
-        self.read_consistent_state_with_secret_mode(auth_mode, SecretReadMode::Create)
+        self.read_consistent_state_with_secret_mode(auth_mode, SecretReadMode::PreserveCorrupt)
     }
 
     fn read_consistent_state_read_only(
@@ -620,16 +1236,53 @@ impl ProviderService {
             let config_source = read_optional_utf8(&self.paths.config_file)?.unwrap_or_default();
             let document = config_service::parse_document(&config_source)?;
             let provider_configs = config_service::list_provider_configs(&document)?;
-            let store = match secret_mode {
-                SecretReadMode::Create => self.secret_service.load_or_create()?,
-                SecretReadMode::ReadOnly => self.secret_service.load_read_only()?,
+            let loaded_store = match secret_mode {
+                SecretReadMode::PreserveCorrupt => self.secret_service.load_versioned()?,
+                SecretReadMode::ReadOnly => self.secret_service.load_read_only_versioned()?,
             };
-            let preference_store = self.preference_service.load()?;
+            let mut secret_needs_upgrade = loaded_store.needs_upgrade;
+            let mut store = loaded_store.store;
+            let mut loaded_preferences = self.preference_service.load_versioned()?;
+            let preference_needs_upgrade = loaded_preferences.needs_upgrade;
+            if loaded_preferences.needs_upgrade {
+                loaded_preferences.store.providers.retain(|provider_id, _| {
+                    provider_configs
+                        .iter()
+                        .any(|provider| provider.id == *provider_id)
+                });
+                for (provider_id, preference) in &mut loaded_preferences.store.providers {
+                    let Some(base_url) = provider_configs
+                        .iter()
+                        .find(|provider| provider.id == *provider_id)
+                        .and_then(|provider| provider.base_url.as_deref())
+                    else {
+                        continue;
+                    };
+                    preference.hydrate_legacy_base_url(base_url)?;
+                }
+            }
+            let preference_store = loaded_preferences.store;
             let auth_key = match auth_mode {
-                AuthReadMode::Skip => None,
                 AuthReadMode::Lenient => self.auth_service.read_api_key().ok().flatten(),
                 AuthReadMode::Strict => self.auth_service.read_api_key()?,
             };
+            if let (Some(active_provider_id), Some(auth_key)) = (
+                config_service::current_provider_id(&document),
+                auth_key.as_deref(),
+            ) && let Some(secret) = store.providers.get_mut(&active_provider_id)
+            {
+                let effective_id = secret
+                    .api_keys
+                    .iter()
+                    .find(|entry| entry.api_key == auth_key)
+                    .map(|entry| entry.id.clone());
+                if let Some(effective_id) = effective_id
+                    && secret.selected_api_key_id != effective_id
+                {
+                    secret.selected_api_key_id = effective_id;
+                    secret_needs_upgrade = true;
+                }
+            }
             let after = self.current_fingerprints()?;
             if before == after {
                 return Ok(DiskState {
@@ -637,7 +1290,9 @@ impl ProviderService {
                     document,
                     provider_configs,
                     store,
+                    secret_needs_upgrade,
                     preference_store,
+                    preference_needs_upgrade,
                     auth_key,
                     fingerprints: after,
                 });
@@ -658,20 +1313,22 @@ impl ProviderService {
 
     fn list_state_from_disk(&self, disk: &DiskState) -> ProviderListState {
         let active_provider_id = config_service::current_provider_id(&disk.document);
-        let providers = disk
+        let providers: Vec<ProviderProfile> = disk
             .provider_configs
             .iter()
             .map(|provider| {
                 profile_from_config(
                     provider,
                     active_provider_id.as_deref(),
-                    configured_key(&disk.store, &provider.id).is_some(),
+                    configured_model_preference(&disk.preference_store, &provider.id),
                     disk.preference_store.providers.get(&provider.id),
+                    disk.store.providers.get(&provider.id),
+                    disk.auth_key.as_deref(),
                 )
             })
             .collect();
-        let current_auth_import_available = active_provider_id.as_deref().is_some_and(|active| {
-            configured_key(&disk.store, active).is_none() && disk.auth_key.is_some()
+        let current_auth_import_available = providers.iter().any(|provider: &ProviderProfile| {
+            provider.is_active && provider.api_key_status == ProviderApiKeyStatus::External
         });
 
         ProviderListState {
@@ -697,14 +1354,13 @@ impl ProviderService {
 
 #[derive(Clone, Copy)]
 enum AuthReadMode {
-    Skip,
     Lenient,
     Strict,
 }
 
 #[derive(Clone, Copy)]
 enum SecretReadMode {
-    Create,
+    PreserveCorrupt,
     ReadOnly,
 }
 
@@ -713,54 +1369,232 @@ struct DiskState {
     document: toml_edit::DocumentMut,
     provider_configs: Vec<ProviderConfig>,
     store: ProviderSecretStore,
+    secret_needs_upgrade: bool,
     preference_store: ProviderPreferenceStore,
+    preference_needs_upgrade: bool,
     auth_key: Option<String>,
     fingerprints: FileSetFingerprint,
+}
+
+fn secret_upgrade_change(disk: &DiskState) -> Result<FileChange, AppError> {
+    if disk.secret_needs_upgrade {
+        Ok(FileChange::Write(serialize_store(&disk.store)?))
+    } else {
+        Ok(FileChange::Unchanged)
+    }
+}
+
+fn preference_upgrade_change(disk: &DiskState) -> Result<FileChange, AppError> {
+    if disk.preference_needs_upgrade {
+        Ok(FileChange::Write(serialize_preference_store(
+            &disk.preference_store,
+        )?))
+    } else {
+        Ok(FileChange::Unchanged)
+    }
 }
 
 fn profile_from_config(
     provider: &ProviderConfig,
     active_provider_id: Option<&str>,
-    api_key_configured: bool,
     preference: Option<&ProviderPreference>,
+    private_preference: Option<&ProviderPrivatePreference>,
+    secret: Option<&ProviderSecret>,
+    auth_key: Option<&str>,
 ) -> ProviderProfile {
+    let is_active = active_provider_id == Some(provider.id.as_str());
+    let projection =
+        project_provider_selection(provider, is_active, private_preference, secret, auth_key);
     match config_service::validate_provider_config(provider) {
-        Ok(validated) => ProviderProfile {
-            id: validated.id,
-            name: validated.name,
-            base_url: validated.base_url,
-            wire_api: WireApi::Responses,
-            models: preference
-                .map(|value| value.models.clone())
-                .unwrap_or_default(),
-            selected_model: preference.map(|value| value.selected_model.clone()),
-            reasoning_efforts: preference
-                .map(|value| value.reasoning_efforts.clone())
-                .unwrap_or_default(),
-            preference_configured: preference.is_some(),
-            api_key_configured,
-            is_active: active_provider_id == Some(provider.id.as_str()),
-            is_valid: true,
-            validation_message: None,
-        },
-        Err(error) => ProviderProfile {
-            id: provider.id.clone(),
-            name: provider_display_name(provider),
-            base_url: provider.base_url.clone().unwrap_or_default(),
-            wire_api: WireApi::Responses,
-            models: preference
-                .map(|value| value.models.clone())
-                .unwrap_or_default(),
-            selected_model: preference.map(|value| value.selected_model.clone()),
-            reasoning_efforts: preference
-                .map(|value| value.reasoning_efforts.clone())
-                .unwrap_or_default(),
-            preference_configured: preference.is_some(),
-            api_key_configured,
-            is_active: active_provider_id == Some(provider.id.as_str()),
-            is_valid: false,
-            validation_message: Some(error.public_message().to_owned()),
-        },
+        Ok(validated) => build_provider_profile(
+            ProviderProfileBasics {
+                id: validated.id,
+                name: validated.name,
+                base_url: validated.base_url,
+                is_valid: true,
+                validation_message: None,
+            },
+            preference,
+            projection,
+            is_active,
+        ),
+        Err(error) => {
+            let validation_message = error.public_message().to_owned();
+            build_provider_profile(
+                ProviderProfileBasics {
+                    id: provider.id.clone(),
+                    name: provider_display_name(provider),
+                    base_url: provider.base_url.clone().unwrap_or_default(),
+                    is_valid: false,
+                    validation_message: Some(validation_message),
+                },
+                preference,
+                projection,
+                is_active,
+            )
+        }
+    }
+}
+
+struct ProviderSelectionProjection {
+    base_urls: Vec<ProviderBaseUrlSummary>,
+    selected_base_url_id: Option<String>,
+    base_url_status: ProviderBaseUrlStatus,
+    api_keys: Vec<ProviderApiKeySummary>,
+    selected_api_key_id: Option<String>,
+    api_key_status: ProviderApiKeyStatus,
+}
+
+struct ProviderProfileBasics {
+    id: String,
+    name: String,
+    base_url: String,
+    is_valid: bool,
+    validation_message: Option<String>,
+}
+
+fn project_provider_selection(
+    provider: &ProviderConfig,
+    is_active: bool,
+    private_preference: Option<&ProviderPrivatePreference>,
+    secret: Option<&ProviderSecret>,
+    auth_key: Option<&str>,
+) -> ProviderSelectionProjection {
+    let base_urls = private_preference
+        .map(|preference| {
+            preference
+                .base_urls
+                .iter()
+                .map(|entry| ProviderBaseUrlSummary {
+                    id: entry.id.clone(),
+                    name: entry.name.clone(),
+                    url: entry.url.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let normalized_base_url = provider
+        .base_url
+        .as_deref()
+        .and_then(|base_url| config_service::normalize_base_url(base_url).ok());
+    let selected_base_url_id = private_preference
+        .and_then(|preference| {
+            preference
+                .base_urls
+                .iter()
+                .find(|entry| normalized_base_url.as_deref() == Some(entry.url.as_str()))
+        })
+        .map(|entry| entry.id.clone());
+    let base_url_status = if selected_base_url_id.is_some() {
+        ProviderBaseUrlStatus::Managed
+    } else {
+        ProviderBaseUrlStatus::External
+    };
+
+    let api_keys = secret
+        .map(|secret| {
+            secret
+                .api_keys
+                .iter()
+                .map(|entry| ProviderApiKeySummary {
+                    id: entry.id.clone(),
+                    name: entry.name.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let (selected_api_key_id, api_key_status) =
+        effective_api_key_selection(is_active, secret, auth_key);
+
+    ProviderSelectionProjection {
+        base_urls,
+        selected_base_url_id,
+        base_url_status,
+        api_keys,
+        selected_api_key_id,
+        api_key_status,
+    }
+}
+
+fn effective_api_key_selection(
+    is_active: bool,
+    secret: Option<&ProviderSecret>,
+    auth_key: Option<&str>,
+) -> (Option<String>, ProviderApiKeyStatus) {
+    if is_active {
+        match auth_key {
+            Some(auth_key) => match secret.and_then(|secret| {
+                secret
+                    .api_keys
+                    .iter()
+                    .find(|entry| entry.api_key == auth_key)
+            }) {
+                Some(entry) => (Some(entry.id.clone()), ProviderApiKeyStatus::Managed),
+                None => (None, ProviderApiKeyStatus::External),
+            },
+            None => (None, ProviderApiKeyStatus::Missing),
+        }
+    } else {
+        match secret.and_then(|secret| {
+            secret
+                .api_keys
+                .iter()
+                .find(|entry| entry.id == secret.selected_api_key_id)
+        }) {
+            Some(entry) => (Some(entry.id.clone()), ProviderApiKeyStatus::Managed),
+            None => (None, ProviderApiKeyStatus::Missing),
+        }
+    }
+}
+
+fn build_provider_profile(
+    basics: ProviderProfileBasics,
+    preference: Option<&ProviderPreference>,
+    projection: ProviderSelectionProjection,
+    is_active: bool,
+) -> ProviderProfile {
+    let preference_configured = preference.is_some();
+    let api_key_configured = !projection.api_keys.is_empty();
+    let disabled_reason = if !basics.is_valid {
+        basics.validation_message.clone()
+    } else if projection.base_url_status != ProviderBaseUrlStatus::Managed {
+        Some("当前 Base URL 尚未纳入 Relay 管理。".into())
+    } else if projection.api_key_status == ProviderApiKeyStatus::External {
+        Some("当前 API Key 尚未纳入 Relay 管理。".into())
+    } else if projection.api_key_status == ProviderApiKeyStatus::Missing {
+        Some("尚未配置 API Key。".into())
+    } else if !preference_configured {
+        Some("尚未配置可用模型。".into())
+    } else {
+        None
+    };
+    let configuration_complete = disabled_reason.is_none();
+
+    ProviderProfile {
+        id: basics.id,
+        name: basics.name,
+        base_url: basics.base_url,
+        base_urls: projection.base_urls,
+        selected_base_url_id: projection.selected_base_url_id,
+        base_url_status: projection.base_url_status,
+        api_keys: projection.api_keys,
+        selected_api_key_id: projection.selected_api_key_id,
+        api_key_status: projection.api_key_status,
+        wire_api: WireApi::Responses,
+        models: preference
+            .map(|value| value.models.clone())
+            .unwrap_or_default(),
+        selected_model: preference.map(|value| value.selected_model.clone()),
+        reasoning_efforts: preference
+            .map(|value| value.reasoning_efforts.clone())
+            .unwrap_or_default(),
+        preference_configured,
+        api_key_configured,
+        configuration_complete,
+        disabled_reason,
+        is_active,
+        is_valid: basics.is_valid,
+        validation_message: basics.validation_message,
     }
 }
 
@@ -768,8 +1602,18 @@ fn configured_key(store: &ProviderSecretStore, provider_id: &str) -> Option<Stri
     store
         .providers
         .get(provider_id)
-        .map(|secret| secret.api_key.clone())
-        .filter(|api_key| !api_key.is_empty())
+        .and_then(ProviderSecret::selected_api_key)
+        .map(str::to_owned)
+}
+
+fn configured_model_preference<'a>(
+    store: &'a ProviderPreferenceStore,
+    provider_id: &str,
+) -> Option<&'a ProviderPreference> {
+    store
+        .providers
+        .get(provider_id)
+        .and_then(|preference| preference.model_preference.as_ref())
 }
 
 fn provider_display_name(provider: &ProviderConfig) -> String {
@@ -802,7 +1646,7 @@ fn validate_provider_written(
         ));
     }
 
-    let store = ProviderSecretService::new(paths.providers_file.clone()).load_or_create()?;
+    let store = ProviderSecretService::new(paths.providers_file.clone()).load_read_only()?;
     let actual_key = configured_key(&store, &expected.id);
     if actual_key.as_deref() != expected_key {
         return Err(post_write_validation_error(
@@ -846,7 +1690,7 @@ fn validate_provider_deleted(paths: &AppPaths, provider_id: &str) -> Result<(), 
             "deleted provider still exists in config.toml",
         ));
     }
-    let store = ProviderSecretService::new(paths.providers_file.clone()).load_or_create()?;
+    let store = ProviderSecretService::new(paths.providers_file.clone()).load_read_only()?;
     if store.providers.contains_key(provider_id) {
         return Err(post_write_validation_error(
             "deleted provider still exists in providers.json",
@@ -862,17 +1706,6 @@ fn validate_provider_deleted(paths: &AppPaths, provider_id: &str) -> Result<(), 
     Ok(())
 }
 
-fn validate_secret_only(paths: &AppPaths, provider_id: &str, key: &str) -> Result<(), AppError> {
-    let store = ProviderSecretService::new(paths.providers_file.clone()).load_or_create()?;
-    if configured_key(&store, provider_id).as_deref() == Some(key) {
-        Ok(())
-    } else {
-        Err(post_write_validation_error(
-            "imported provider secret does not match auth key",
-        ))
-    }
-}
-
 fn validate_preference_written(
     paths: &AppPaths,
     provider_id: &str,
@@ -880,7 +1713,7 @@ fn validate_preference_written(
     require_active_config: bool,
 ) -> Result<(), AppError> {
     let store = ProviderPreferenceService::new(paths.provider_preferences_file.clone()).load()?;
-    if store.providers.get(provider_id) != Some(expected) {
+    if configured_model_preference(&store, provider_id) != Some(expected) {
         return Err(post_write_validation_error(
             "provider preference does not match expected value",
         ));
@@ -904,6 +1737,59 @@ fn validate_preference_written(
                 "top-level model preference does not match expected value",
             ));
         }
+    }
+    Ok(())
+}
+
+fn validate_base_urls_written(
+    paths: &AppPaths,
+    provider_id: &str,
+    expected_entries: &[NamedBaseUrl],
+    expected_base_url: &str,
+) -> Result<(), AppError> {
+    let store = ProviderPreferenceService::new(paths.provider_preferences_file.clone()).load()?;
+    let actual_entries = store
+        .providers
+        .get(provider_id)
+        .map(|preference| preference.base_urls.as_slice());
+    if actual_entries != Some(expected_entries) {
+        return Err(post_write_validation_error(
+            "provider Base URL entries do not match expected values",
+        ));
+    }
+
+    let source = read_required_utf8(&paths.config_file)?;
+    let document = config_service::parse_document(&source)?;
+    let provider = config_service::list_provider_configs(&document)?
+        .into_iter()
+        .find(|provider| provider.id == provider_id)
+        .ok_or_else(|| post_write_validation_error("provider table is missing"))?;
+    let actual = config_service::validate_provider_config(&provider)?;
+    if actual.base_url != expected_base_url {
+        return Err(post_write_validation_error(
+            "provider Base URL selection does not match expected value",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_api_keys_written(
+    paths: &AppPaths,
+    provider_id: &str,
+    expected_secret: &ProviderSecret,
+    expected_auth_key: Option<&str>,
+) -> Result<(), AppError> {
+    let store = ProviderSecretService::new(paths.providers_file.clone()).load_read_only()?;
+    if store.providers.get(provider_id) != Some(expected_secret) {
+        return Err(post_write_validation_error(
+            "provider API Key entries do not match expected values",
+        ));
+    }
+    let actual_auth_key = AuthService::new(paths.auth_file.clone()).read_api_key()?;
+    if actual_auth_key.as_deref() != expected_auth_key {
+        return Err(post_write_validation_error(
+            "auth.json key does not match expected API Key state",
+        ));
     }
     Ok(())
 }
@@ -975,7 +1861,12 @@ fn post_write_validation_error(detail: &str) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::provider::{ApiKeyChange, CreateProviderInput, UpdateProviderInput};
+    use crate::models::provider::{
+        CreateProviderInput, ImportCurrentApiKeyInput, ProviderApiKeyDraft, ProviderApiKeyStatus,
+        ProviderBaseUrlDraft, ProviderBaseUrlStatus, SaveProviderApiKeysInput,
+        SaveProviderBaseUrlsInput, SelectProviderApiKeyInput, SelectProviderBaseUrlInput,
+        UpdateProviderInput,
+    };
     use std::fs;
     use std::sync::Arc;
 
@@ -1009,9 +1900,11 @@ mod tests {
         CreateProviderInput {
             id: "provider-c".into(),
             name: "Provider C".into(),
+            base_url_name: "主用地址".into(),
             base_url: "https://provider-c.example.com/v1".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.6-sol".into(), "gpt-5.4-mini".into()],
+            api_key_name: "主用密钥".into(),
             api_key: "test-key-c-not-real".into(),
             activate_after_save,
             expected_files: state.fingerprints.clone(),
@@ -1032,11 +1925,274 @@ mod tests {
         assert!(state.providers[0].is_active);
         assert!(state.providers[0].api_key_configured);
         assert!(state.providers[1].api_key_configured);
+        assert_eq!(state.providers[0].base_urls.len(), 1);
+        assert_eq!(state.providers[0].base_urls[0].id, "legacy-default");
+        assert_eq!(state.providers[0].base_urls[0].name, "默认地址");
+        assert_eq!(
+            state.providers[0].selected_base_url_id.as_deref(),
+            Some("legacy-default")
+        );
+        assert_eq!(
+            state.providers[0].base_url_status,
+            ProviderBaseUrlStatus::Managed
+        );
+        assert_eq!(state.providers[0].api_keys.len(), 1);
+        assert_eq!(state.providers[0].api_keys[0].id, "legacy-default");
+        assert_eq!(state.providers[0].api_keys[0].name, "默认密钥");
+        assert_eq!(
+            state.providers[0].selected_api_key_id.as_deref(),
+            Some("legacy-default")
+        );
+        assert_eq!(
+            state.providers[0].api_key_status,
+            ProviderApiKeyStatus::Managed
+        );
+        assert!(state.providers[0].configuration_complete);
         assert_eq!(state.active_provider_id.as_deref(), Some("provider-a"));
         assert!(!state.current_auth_import_available);
         assert!(!json.contains("test-key-a-not-real"));
         assert!(!json.contains("test-key-b-not-real"));
         assert!(!json.contains("\"apiKey\":"));
+    }
+
+    #[test]
+    fn list_does_not_create_missing_private_stores() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        fs::write(&paths.config_file, MULTIPLE).unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+
+        service.list_providers().unwrap();
+
+        assert!(!paths.providers_file.exists());
+        assert!(!paths.provider_preferences_file.exists());
+    }
+
+    #[tokio::test]
+    async fn saving_external_base_url_does_not_create_missing_secret_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        fs::write(&paths.config_file, MULTIPLE).unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        service
+            .save_provider_base_urls(SaveProviderBaseUrlsInput {
+                provider_id: "provider-a".into(),
+                entries: vec![ProviderBaseUrlDraft {
+                    id: None,
+                    name: "主用地址".into(),
+                    url: "https://provider-a.example.com/v1".into(),
+                }],
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        assert!(!paths.providers_file.exists());
+        assert!(paths.provider_preferences_file.exists());
+    }
+
+    #[tokio::test]
+    async fn regular_edit_does_not_import_an_external_base_url() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        fs::write(&paths.config_file, MULTIPLE).unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        service
+            .update_provider(UpdateProviderInput {
+                id: "provider-b".into(),
+                name: "Provider B 已更新".into(),
+                wire_api: "responses".into(),
+                models: vec!["gpt-5.5".into()],
+                sync_if_active: false,
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        let preferences = ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+            .load()
+            .unwrap();
+        let preference = &preferences.providers["provider-b"];
+        assert!(preference.base_urls.is_empty());
+        assert!(preference.model_preference.is_some());
+        assert!(!paths.providers_file.exists());
+
+        let refreshed = service.list_providers().unwrap();
+        let provider = refreshed
+            .providers
+            .iter()
+            .find(|provider| provider.id == "provider-b")
+            .unwrap();
+        assert_eq!(provider.base_url_status, ProviderBaseUrlStatus::External);
+        assert_eq!(provider.selected_base_url_id, None);
+    }
+
+    #[test]
+    fn v2_projection_uses_config_and_active_auth_as_effective_selection() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        fs::write(&paths.config_file, MULTIPLE).unwrap();
+        fs::write(&paths.auth_file, AUTH_A).unwrap();
+        fs::write(
+            &paths.providers_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "apiKeys": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "当前密钥",
+          "apiKey": "test-key-a-not-real"
+        },
+        {
+          "id": "f8e62dc2-46df-4234-92d5-7d318d879ff7",
+          "name": "备用密钥",
+          "apiKey": "test-key-a-backup-not-real"
+        }
+      ],
+      "selectedApiKeyId": "f8e62dc2-46df-4234-92d5-7d318d879ff7"
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        fs::write(
+            &paths.provider_preferences_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "备用地址",
+          "url": "https://provider-a-backup.example.com/v1"
+        },
+        {
+          "id": "f8e62dc2-46df-4234-92d5-7d318d879ff7",
+          "name": "当前地址",
+          "url": "https://provider-a.example.com/v1"
+        }
+      ],
+      "modelPreference": {
+        "models": ["gpt-5.6-sol"],
+        "selectedModel": "gpt-5.6-sol",
+        "reasoningEfforts": { "gpt-5.6-sol": "medium" }
+      }
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        let service = ProviderService::new(paths, "0.1.0");
+
+        let state = service.list_providers().unwrap();
+        let provider = &state.providers[0];
+
+        assert_eq!(
+            provider.selected_base_url_id.as_deref(),
+            Some("f8e62dc2-46df-4234-92d5-7d318d879ff7")
+        );
+        assert_eq!(provider.base_url_status, ProviderBaseUrlStatus::Managed);
+        assert_eq!(
+            provider.selected_api_key_id.as_deref(),
+            Some("65c7650d-d20d-4dca-b445-8aa47fcbe92c")
+        );
+        assert_eq!(provider.api_key_status, ProviderApiKeyStatus::Managed);
+        assert!(provider.configuration_complete);
+    }
+
+    #[test]
+    fn unknown_external_values_and_missing_secret_are_projected_without_key_values() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        fs::write(&paths.config_file, MULTIPLE).unwrap();
+        fs::write(
+            &paths.auth_file,
+            "{\n  \"OPENAI_API_KEY\": \"test-key-external-not-real\"\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            &paths.providers_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "apiKeys": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "已保存密钥",
+          "apiKey": "test-key-a-not-real"
+        }
+      ],
+      "selectedApiKeyId": "65c7650d-d20d-4dca-b445-8aa47fcbe92c"
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        fs::write(
+            &paths.provider_preferences_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "其他地址",
+          "url": "https://provider-a-other.example.com/v1"
+        }
+      ],
+      "modelPreference": {
+        "models": ["gpt-5.6-sol"],
+        "selectedModel": "gpt-5.6-sol",
+        "reasoningEfforts": { "gpt-5.6-sol": "medium" }
+      }
+    },
+    "provider-b": {
+      "baseUrls": [
+        {
+          "id": "f8e62dc2-46df-4234-92d5-7d318d879ff7",
+          "name": "主用地址",
+          "url": "https://provider-b.example.com/v1"
+        }
+      ],
+      "modelPreference": {
+        "models": ["gpt-5.5"],
+        "selectedModel": "gpt-5.5",
+        "reasoningEfforts": { "gpt-5.5": "medium" }
+      }
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        let service = ProviderService::new(paths, "0.1.0");
+
+        let state = service.list_providers().unwrap();
+        let active = &state.providers[0];
+        let inactive = &state.providers[1];
+        let json = serde_json::to_string(&state).unwrap();
+
+        assert_eq!(active.base_url_status, ProviderBaseUrlStatus::External);
+        assert_eq!(active.selected_base_url_id, None);
+        assert_eq!(active.api_key_status, ProviderApiKeyStatus::External);
+        assert_eq!(active.selected_api_key_id, None);
+        assert!(!active.configuration_complete);
+        assert_eq!(inactive.api_key_status, ProviderApiKeyStatus::Missing);
+        assert!(!inactive.configuration_complete);
+        assert!(!json.contains("test-key-external-not-real"));
+        assert!(!json.contains("test-key-a-not-real"));
     }
 
     #[test]
@@ -1060,6 +2216,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let paths = create_paths(&directory);
         write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_EMPTY);
+        fs::remove_file(&paths.auth_file).unwrap();
         let service = ProviderService::new(paths, "0.1.0");
 
         let error = service
@@ -1084,7 +2241,7 @@ mod tests {
             .resolve_availability_target("provider-a")
             .unwrap_err();
 
-        assert_eq!(error.code(), "PROVIDER_TEST_KEY_MISSING");
+        assert_eq!(error.code(), "PROVIDER_TEST_KEY_UNMANAGED");
         assert!(!paths.providers_file.exists());
     }
 
@@ -1095,7 +2252,21 @@ mod tests {
         write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
         fs::write(
             &paths.provider_preferences_file,
-            "{\n  \"version\": 1,\n  \"providers\": {}\n}\n",
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "主用地址",
+          "url": "https://provider-a.example.com/v1"
+        }
+      ]
+    }
+  }
+}
+"#,
         )
         .unwrap();
         let service = ProviderService::new(paths, "0.1.0");
@@ -1105,6 +2276,58 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.code(), "PROVIDER_TEST_MODEL_MISSING");
+    }
+
+    #[test]
+    fn availability_target_rejects_unmanaged_url_and_external_active_key() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        fs::write(&paths.config_file, MULTIPLE).unwrap();
+        fs::write(&paths.auth_file, AUTH_A).unwrap();
+        fs::write(&paths.providers_file, PROVIDERS_MULTIPLE).unwrap();
+        fs::write(
+            &paths.provider_preferences_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "其他地址",
+          "url": "https://provider-a-other.example.com/v1"
+        }
+      ],
+      "modelPreference": {
+        "models": ["gpt-5.6-sol"],
+        "selectedModel": "gpt-5.6-sol",
+        "reasoningEfforts": { "gpt-5.6-sol": "medium" }
+      }
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+
+        let url_error = service
+            .resolve_availability_target("provider-a")
+            .unwrap_err();
+        assert_eq!(url_error.code(), "PROVIDER_TEST_BASE_URL_UNMANAGED");
+
+        fs::write(&paths.provider_preferences_file, PREFERENCES_MULTIPLE).unwrap();
+        fs::write(
+            &paths.auth_file,
+            "{\n  \"OPENAI_API_KEY\": \"test-key-external-not-real\"\n}\n",
+        )
+        .unwrap();
+
+        let key_error = service
+            .resolve_availability_target("provider-a")
+            .unwrap_err();
+        assert_eq!(key_error.code(), "PROVIDER_TEST_KEY_UNMANAGED");
+        assert!(!key_error.to_string().contains("test-key"));
     }
 
     #[tokio::test]
@@ -1144,7 +2367,9 @@ wire_api = "chat_completions"
         write_state(&paths, MULTIPLE, AUTH_A, orphan);
         let service = ProviderService::new(paths, "0.1.0");
 
-        let error = service.get_api_key_for_edit("orphan").unwrap_err();
+        let error = service
+            .get_provider_api_keys_for_management("orphan")
+            .unwrap_err();
 
         assert_eq!(error.code(), "PROVIDER_NOT_FOUND");
         assert!(!error.to_string().contains("test-key-b-not-real"));
@@ -1173,10 +2398,27 @@ wire_api = "chat_completions"
             .unwrap();
         assert_eq!(store.providers.len(), 3);
         assert_eq!(
-            store.providers.get("provider-c").unwrap().api_key,
-            "test-key-c-not-real"
+            store
+                .providers
+                .get("provider-c")
+                .and_then(ProviderSecret::selected_api_key),
+            Some("test-key-c-not-real")
         );
-        assert_eq!(fs::read_to_string(&paths.auth_file).unwrap(), AUTH_A);
+        let secret = &store.providers["provider-c"];
+        assert_eq!(secret.api_keys[0].name, "主用密钥");
+        assert_eq!(secret.selected_api_key_id, secret.api_keys[0].id);
+        let preferences = ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+            .load()
+            .unwrap();
+        let preference = &preferences.providers["provider-c"];
+        assert_eq!(preference.base_urls[0].name, "主用地址");
+        assert_eq!(
+            AuthService::new(paths.auth_file.clone())
+                .read_api_key()
+                .unwrap()
+                .as_deref(),
+            Some("test-key-a-not-real")
+        );
     }
 
     #[tokio::test]
@@ -1218,10 +2460,8 @@ wire_api = "chat_completions"
         let input = UpdateProviderInput {
             id: "provider-a".into(),
             name: "Updated Provider A".into(),
-            base_url: "https://updated.example.com/v1".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.6-sol".into()],
-            api_key_change: ApiKeyChange::Unchanged,
             sync_if_active: false,
             expected_files: before.fingerprints,
         };
@@ -1235,12 +2475,25 @@ wire_api = "chat_completions"
         let config = fs::read_to_string(&paths.config_file).unwrap();
         assert!(config.contains("unknown_number = 42"));
         assert!(config.contains("[profiles.personal]"));
-        let key = service.get_api_key_for_edit("provider-a").unwrap();
-        assert_eq!(key.as_deref(), Some("test-key-a-not-real"));
+        assert!(config.contains("base_url = \"https://provider-a.example.com/v1\""));
+        let keys = service
+            .get_provider_api_keys_for_management("provider-a")
+            .unwrap();
+        assert_eq!(keys.entries.len(), 1);
+        assert_eq!(keys.entries[0].api_key, "test-key-a-not-real");
+        let preferences = ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+            .load_versioned()
+            .unwrap();
+        assert!(!preferences.needs_upgrade);
+        assert_eq!(
+            preferences.store.providers["provider-a"].base_urls[0].id,
+            "legacy-default"
+        );
+        assert!(!preferences.store.providers.contains_key("provider-b"));
     }
 
     #[tokio::test]
-    async fn updating_active_key_with_sync_updates_auth_json() {
+    async fn updating_active_regular_fields_syncs_model_without_changing_url_or_auth() {
         let directory = tempfile::tempdir().unwrap();
         let paths = create_paths(&directory);
         write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
@@ -1249,26 +2502,29 @@ wire_api = "chat_completions"
         let input = UpdateProviderInput {
             id: "provider-a".into(),
             name: "Provider A".into(),
-            base_url: "https://provider-a.example.com/v2".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.4-mini".into()],
-            api_key_change: ApiKeyChange::Set("test-key-a-updated-not-real".into()),
             sync_if_active: true,
             expected_files: before.fingerprints,
         };
 
         service.update_provider(input).await.unwrap();
 
-        let auth = fs::read_to_string(&paths.auth_file).unwrap();
-        assert!(auth.contains("test-key-a-updated-not-real"));
+        assert_eq!(
+            AuthService::new(paths.auth_file.clone())
+                .read_api_key()
+                .unwrap()
+                .as_deref(),
+            Some("test-key-a-not-real")
+        );
         let config = fs::read_to_string(&paths.config_file).unwrap();
-        assert!(config.contains("base_url = \"https://provider-a.example.com/v2\""));
+        assert!(config.contains("base_url = \"https://provider-a.example.com/v1\""));
         assert!(config.contains("model = \"gpt-5.4-mini\""));
         assert!(config.contains("model_reasoning_effort = \"none\""));
     }
 
     #[tokio::test]
-    async fn clearing_non_current_key_preserves_other_keys_and_active_auth() {
+    async fn updating_non_current_regular_fields_preserves_all_keys_and_active_auth() {
         let directory = tempfile::tempdir().unwrap();
         let paths = create_paths(&directory);
         write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
@@ -1277,10 +2533,8 @@ wire_api = "chat_completions"
         let input = UpdateProviderInput {
             id: "provider-b".into(),
             name: "Provider B".into(),
-            base_url: "https://provider-b.example.com/v1".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.5".into()],
-            api_key_change: ApiKeyChange::Clear,
             sync_if_active: false,
             expected_files: before.fingerprints,
         };
@@ -1292,8 +2546,680 @@ wire_api = "chat_completions"
             .load_or_create()
             .unwrap();
         assert!(store.providers.contains_key("provider-a"));
-        assert!(!store.providers.contains_key("provider-b"));
+        assert_eq!(
+            configured_key(&store, "provider-b").as_deref(),
+            Some("test-key-b-not-real")
+        );
         assert_eq!(fs::read_to_string(&paths.auth_file).unwrap(), AUTH_A);
+    }
+
+    #[tokio::test]
+    async fn regular_edit_upgrades_the_legacy_secret_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        service
+            .update_provider(UpdateProviderInput {
+                id: "provider-b".into(),
+                name: "Provider B".into(),
+                wire_api: "responses".into(),
+                models: vec!["gpt-5.5".into()],
+                sync_if_active: false,
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        let providers: serde_json::Value =
+            serde_json::from_slice(&fs::read(&paths.providers_file).unwrap()).unwrap();
+        assert_eq!(providers["version"], 2);
+    }
+
+    #[tokio::test]
+    async fn api_key_selection_upgrades_the_legacy_preference_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        service
+            .select_provider_api_key(SelectProviderApiKeyInput {
+                provider_id: "provider-b".into(),
+                api_key_id: "legacy-default".into(),
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        let preferences: serde_json::Value =
+            serde_json::from_slice(&fs::read(&paths.provider_preferences_file).unwrap()).unwrap();
+        assert_eq!(preferences["version"], 2);
+    }
+
+    #[tokio::test]
+    async fn regular_edit_persists_the_active_auth_key_as_the_selected_entry() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        fs::write(&paths.config_file, MULTIPLE).unwrap();
+        fs::write(&paths.auth_file, AUTH_A).unwrap();
+        fs::write(
+            &paths.providers_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "apiKeys": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "当前认证",
+          "apiKey": "test-key-a-not-real"
+        },
+        {
+          "id": "f8e62dc2-46df-4234-92d5-7d318d879ff7",
+          "name": "旧预选",
+          "apiKey": "test-key-a-backup-not-real"
+        }
+      ],
+      "selectedApiKeyId": "f8e62dc2-46df-4234-92d5-7d318d879ff7"
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        fs::write(&paths.provider_preferences_file, PREFERENCES_MULTIPLE).unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        service
+            .update_provider(UpdateProviderInput {
+                id: "provider-a".into(),
+                name: "Provider A".into(),
+                wire_api: "responses".into(),
+                models: vec!["gpt-5.6-sol".into()],
+                sync_if_active: false,
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        let store = ProviderSecretService::new(paths.providers_file.clone())
+            .load_read_only()
+            .unwrap();
+        assert_eq!(
+            store.providers["provider-a"].selected_api_key_id,
+            "65c7650d-d20d-4dca-b445-8aa47fcbe92c"
+        );
+    }
+
+    #[tokio::test]
+    async fn base_url_batch_save_preserves_ids_and_order_and_syncs_selected_value() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        fs::write(
+            &paths.provider_preferences_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "主用地址",
+          "url": "https://provider-a.example.com/v1"
+        },
+        {
+          "id": "f8e62dc2-46df-4234-92d5-7d318d879ff7",
+          "name": "待删除地址",
+          "url": "https://provider-a-old.example.com/v1"
+        }
+      ],
+      "modelPreference": {
+        "models": ["gpt-5.6-sol"],
+        "selectedModel": "gpt-5.6-sol",
+        "reasoningEfforts": { "gpt-5.6-sol": "medium" }
+      }
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        service
+            .save_provider_base_urls(SaveProviderBaseUrlsInput {
+                provider_id: "provider-a".into(),
+                entries: vec![
+                    ProviderBaseUrlDraft {
+                        id: Some("65c7650d-d20d-4dca-b445-8aa47fcbe92c".into()),
+                        name: "主用地址已改名".into(),
+                        url: "https://provider-a-new.example.com/v1".into(),
+                    },
+                    ProviderBaseUrlDraft {
+                        id: None,
+                        name: "新增地址".into(),
+                        url: "https://provider-a-backup.example.com/v1".into(),
+                    },
+                ],
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        let preferences = ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+            .load()
+            .unwrap();
+        let entries = &preferences.providers["provider-a"].base_urls;
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].id, "65c7650d-d20d-4dca-b445-8aa47fcbe92c");
+        assert_eq!(entries[0].name, "主用地址已改名");
+        assert_eq!(entries[0].url, "https://provider-a-new.example.com/v1");
+        assert_ne!(entries[1].id, "f8e62dc2-46df-4234-92d5-7d318d879ff7");
+        assert_eq!(entries[1].name, "新增地址");
+        let config = fs::read_to_string(&paths.config_file).unwrap();
+        assert!(config.contains("base_url = \"https://provider-a-new.example.com/v1\""));
+        assert_eq!(
+            AuthService::new(paths.auth_file.clone())
+                .read_api_key()
+                .unwrap()
+                .as_deref(),
+            Some("test-key-a-not-real")
+        );
+    }
+
+    #[test]
+    fn api_key_management_query_returns_only_target_full_keys_with_redacted_debug() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        fs::write(&paths.config_file, MULTIPLE).unwrap();
+        fs::write(&paths.auth_file, AUTH_A).unwrap();
+        fs::write(
+            &paths.providers_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "apiKeys": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "当前密钥",
+          "apiKey": "test-key-a-not-real"
+        },
+        {
+          "id": "f8e62dc2-46df-4234-92d5-7d318d879ff7",
+          "name": "备用密钥",
+          "apiKey": "test-key-a-backup-not-real"
+        }
+      ],
+      "selectedApiKeyId": "f8e62dc2-46df-4234-92d5-7d318d879ff7"
+    },
+    "provider-b": {
+      "apiKeys": [
+        {
+          "id": "e2d4ae25-4dc8-4f24-9dd2-790f6f9e2da1",
+          "name": "其他 Provider 密钥",
+          "apiKey": "test-key-b-not-real"
+        }
+      ],
+      "selectedApiKeyId": "e2d4ae25-4dc8-4f24-9dd2-790f6f9e2da1"
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        fs::write(&paths.provider_preferences_file, PREFERENCES_MULTIPLE).unwrap();
+        let service = ProviderService::new(paths, "0.1.0");
+
+        let management = service
+            .get_provider_api_keys_for_management("provider-a")
+            .unwrap();
+
+        assert_eq!(management.provider_id, "provider-a");
+        assert_eq!(management.entries.len(), 2);
+        assert_eq!(management.entries[0].name, "当前密钥");
+        assert_eq!(management.entries[0].api_key, "test-key-a-not-real");
+        assert_eq!(
+            management.selected_api_key_id.as_deref(),
+            Some("65c7650d-d20d-4dca-b445-8aa47fcbe92c")
+        );
+        assert_eq!(management.api_key_status, ProviderApiKeyStatus::Managed);
+        let debug = format!("{management:?}");
+        assert!(!debug.contains("test-key-a-not-real"));
+        assert!(!debug.contains("test-key-a-backup-not-real"));
+        assert!(!debug.contains("test-key-b-not-real"));
+    }
+
+    #[tokio::test]
+    async fn api_key_batch_save_preserves_ids_and_order_and_syncs_active_selected_value() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        fs::write(&paths.config_file, MULTIPLE).unwrap();
+        fs::write(&paths.auth_file, AUTH_A).unwrap();
+        fs::write(
+            &paths.providers_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "apiKeys": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "当前密钥",
+          "apiKey": "test-key-a-not-real"
+        },
+        {
+          "id": "f8e62dc2-46df-4234-92d5-7d318d879ff7",
+          "name": "待删除密钥",
+          "apiKey": "test-key-a-old-not-real"
+        }
+      ],
+      "selectedApiKeyId": "65c7650d-d20d-4dca-b445-8aa47fcbe92c"
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        fs::write(&paths.provider_preferences_file, PREFERENCES_MULTIPLE).unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        service
+            .save_provider_api_keys(SaveProviderApiKeysInput {
+                provider_id: "provider-a".into(),
+                entries: vec![
+                    ProviderApiKeyDraft {
+                        id: Some("65c7650d-d20d-4dca-b445-8aa47fcbe92c".into()),
+                        name: "当前密钥已改名".into(),
+                        api_key: "test-key-a-updated-not-real".into(),
+                    },
+                    ProviderApiKeyDraft {
+                        id: None,
+                        name: "新增密钥".into(),
+                        api_key: "test-key-a-backup-not-real".into(),
+                    },
+                ],
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        let store = ProviderSecretService::new(paths.providers_file.clone())
+            .load_or_create()
+            .unwrap();
+        let secret = &store.providers["provider-a"];
+        assert_eq!(secret.api_keys.len(), 2);
+        assert_eq!(
+            secret.api_keys[0].id,
+            "65c7650d-d20d-4dca-b445-8aa47fcbe92c"
+        );
+        assert_eq!(secret.api_keys[0].name, "当前密钥已改名");
+        assert_eq!(secret.api_keys[0].api_key, "test-key-a-updated-not-real");
+        assert_ne!(
+            secret.api_keys[1].id,
+            "f8e62dc2-46df-4234-92d5-7d318d879ff7"
+        );
+        assert_eq!(secret.api_keys[1].name, "新增密钥");
+        assert_eq!(secret.selected_api_key_id, secret.api_keys[0].id);
+        assert_eq!(
+            AuthService::new(paths.auth_file.clone())
+                .read_api_key()
+                .unwrap()
+                .as_deref(),
+            Some("test-key-a-updated-not-real")
+        );
+        let list_json = serde_json::to_string(&service.list_providers().unwrap()).unwrap();
+        assert!(!list_json.contains("test-key-a-updated-not-real"));
+        assert!(!list_json.contains("test-key-a-backup-not-real"));
+    }
+
+    #[tokio::test]
+    async fn api_key_batch_save_requires_switch_before_deleting_selected_entry() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let original_providers = fs::read(&paths.providers_file).unwrap();
+
+        let error = service
+            .save_provider_api_keys(SaveProviderApiKeysInput {
+                provider_id: "provider-a".into(),
+                entries: vec![ProviderApiKeyDraft {
+                    id: None,
+                    name: "替代密钥".into(),
+                    api_key: "test-key-a-replacement-not-real".into(),
+                }],
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code(), "SELECTED_API_KEY_DELETE_FORBIDDEN");
+        assert_eq!(fs::read(&paths.providers_file).unwrap(), original_providers);
+        assert_eq!(
+            AuthService::new(paths.auth_file.clone())
+                .read_api_key()
+                .unwrap()
+                .as_deref(),
+            Some("test-key-a-not-real")
+        );
+    }
+
+    #[tokio::test]
+    async fn api_key_selection_is_independent_for_current_and_non_current_providers() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        fs::write(&paths.config_file, MULTIPLE).unwrap();
+        fs::write(&paths.auth_file, AUTH_A).unwrap();
+        fs::write(
+            &paths.providers_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "apiKeys": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "主用密钥",
+          "apiKey": "test-key-a-not-real"
+        },
+        {
+          "id": "1c1d8839-188f-4e34-b9a8-4d56d43da2b0",
+          "name": "备用密钥",
+          "apiKey": "test-key-a-backup-not-real"
+        }
+      ],
+      "selectedApiKeyId": "65c7650d-d20d-4dca-b445-8aa47fcbe92c"
+    },
+    "provider-b": {
+      "apiKeys": [
+        {
+          "id": "f8e62dc2-46df-4234-92d5-7d318d879ff7",
+          "name": "主用密钥",
+          "apiKey": "test-key-b-not-real"
+        },
+        {
+          "id": "e2d4ae25-4dc8-4f24-9dd2-790f6f9e2da1",
+          "name": "备用密钥",
+          "apiKey": "test-key-b-backup-not-real"
+        }
+      ],
+      "selectedApiKeyId": "f8e62dc2-46df-4234-92d5-7d318d879ff7"
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        fs::write(&paths.provider_preferences_file, PREFERENCES_MULTIPLE).unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        let inactive_outcome = service
+            .select_provider_api_key(SelectProviderApiKeyInput {
+                provider_id: "provider-b".into(),
+                api_key_id: "e2d4ae25-4dc8-4f24-9dd2-790f6f9e2da1".into(),
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            inactive_outcome.message,
+            "API Key 已保存，将在应用此 Provider 时生效。"
+        );
+        let state = service.list_providers().unwrap();
+        assert_eq!(state.active_provider_id.as_deref(), Some("provider-a"));
+        assert_eq!(
+            state.providers[1].selected_api_key_id.as_deref(),
+            Some("e2d4ae25-4dc8-4f24-9dd2-790f6f9e2da1")
+        );
+        assert_eq!(
+            AuthService::new(paths.auth_file.clone())
+                .read_api_key()
+                .unwrap()
+                .as_deref(),
+            Some("test-key-a-not-real")
+        );
+
+        let refreshed = service.list_providers().unwrap();
+        let active_outcome = service
+            .select_provider_api_key(SelectProviderApiKeyInput {
+                provider_id: "provider-a".into(),
+                api_key_id: "1c1d8839-188f-4e34-b9a8-4d56d43da2b0".into(),
+                expected_files: refreshed.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            active_outcome.message,
+            "API Key 已写入当前 Codex 认证，请重启 Codex 后生效。"
+        );
+        let active_state = service.list_providers().unwrap();
+        assert_eq!(
+            active_state.active_provider_id.as_deref(),
+            Some("provider-a")
+        );
+        assert_eq!(
+            active_state.providers[0].selected_api_key_id.as_deref(),
+            Some("1c1d8839-188f-4e34-b9a8-4d56d43da2b0")
+        );
+        assert_eq!(
+            AuthService::new(paths.auth_file.clone())
+                .read_api_key()
+                .unwrap()
+                .as_deref(),
+            Some("test-key-a-backup-not-real")
+        );
+    }
+
+    #[tokio::test]
+    async fn base_url_batch_save_rejects_deleting_last_entry_without_writing() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        fs::write(
+            &paths.provider_preferences_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "未选中地址",
+          "url": "https://provider-a-other.example.com/v1"
+        }
+      ],
+      "modelPreference": {
+        "models": ["gpt-5.6-sol"],
+        "selectedModel": "gpt-5.6-sol",
+        "reasoningEfforts": { "gpt-5.6-sol": "medium" }
+      }
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let original_config = fs::read(&paths.config_file).unwrap();
+        let original_auth = fs::read(&paths.auth_file).unwrap();
+        let original_providers = fs::read(&paths.providers_file).unwrap();
+        let original_preferences = fs::read(&paths.provider_preferences_file).unwrap();
+
+        let error = service
+            .save_provider_base_urls(SaveProviderBaseUrlsInput {
+                provider_id: "provider-a".into(),
+                entries: Vec::new(),
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code(), "LAST_BASE_URL_DELETE_FORBIDDEN");
+        assert_eq!(fs::read(&paths.config_file).unwrap(), original_config);
+        assert_eq!(fs::read(&paths.auth_file).unwrap(), original_auth);
+        assert_eq!(fs::read(&paths.providers_file).unwrap(), original_providers);
+        assert_eq!(
+            fs::read(&paths.provider_preferences_file).unwrap(),
+            original_preferences
+        );
+    }
+
+    #[tokio::test]
+    async fn base_url_batch_save_requires_switch_before_deleting_selected_entry() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let original_preferences = fs::read(&paths.provider_preferences_file).unwrap();
+
+        let error = service
+            .save_provider_base_urls(SaveProviderBaseUrlsInput {
+                provider_id: "provider-a".into(),
+                entries: vec![ProviderBaseUrlDraft {
+                    id: None,
+                    name: "替代地址".into(),
+                    url: "https://provider-a-new.example.com/v1".into(),
+                }],
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code(), "SELECTED_BASE_URL_DELETE_FORBIDDEN");
+        assert_eq!(
+            fs::read(&paths.provider_preferences_file).unwrap(),
+            original_preferences
+        );
+    }
+
+    #[tokio::test]
+    async fn selecting_non_current_base_url_keeps_active_provider_and_auth_unchanged() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        fs::write(
+            &paths.provider_preferences_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "主用地址",
+          "url": "https://provider-a.example.com/v1"
+        },
+        {
+          "id": "1c1d8839-188f-4e34-b9a8-4d56d43da2b0",
+          "name": "备用地址",
+          "url": "https://provider-a-backup.example.com/v1"
+        }
+      ],
+      "modelPreference": {
+        "models": ["gpt-5.6-sol"],
+        "selectedModel": "gpt-5.6-sol",
+        "reasoningEfforts": { "gpt-5.6-sol": "medium" }
+      }
+    },
+    "provider-b": {
+      "baseUrls": [
+        {
+          "id": "f8e62dc2-46df-4234-92d5-7d318d879ff7",
+          "name": "主用地址",
+          "url": "https://provider-b.example.com/v1"
+        },
+        {
+          "id": "e2d4ae25-4dc8-4f24-9dd2-790f6f9e2da1",
+          "name": "备用地址",
+          "url": "https://provider-b-backup.example.com/v1"
+        }
+      ],
+      "modelPreference": {
+        "models": ["gpt-5.5"],
+        "selectedModel": "gpt-5.5",
+        "reasoningEfforts": { "gpt-5.5": "medium" }
+      }
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        let outcome = service
+            .select_provider_base_url(SelectProviderBaseUrlInput {
+                provider_id: "provider-b".into(),
+                base_url_id: "e2d4ae25-4dc8-4f24-9dd2-790f6f9e2da1".into(),
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outcome.message,
+            "Base URL 已保存，将在应用此 Provider 时生效。"
+        );
+        let state = service.list_providers().unwrap();
+        assert_eq!(state.active_provider_id.as_deref(), Some("provider-a"));
+        assert_eq!(
+            state.providers[1].selected_base_url_id.as_deref(),
+            Some("e2d4ae25-4dc8-4f24-9dd2-790f6f9e2da1")
+        );
+        assert_eq!(
+            AuthService::new(paths.auth_file.clone())
+                .read_api_key()
+                .unwrap()
+                .as_deref(),
+            Some("test-key-a-not-real")
+        );
+
+        let refreshed = service.list_providers().unwrap();
+        let active_outcome = service
+            .select_provider_base_url(SelectProviderBaseUrlInput {
+                provider_id: "provider-a".into(),
+                base_url_id: "1c1d8839-188f-4e34-b9a8-4d56d43da2b0".into(),
+                expected_files: refreshed.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            active_outcome.message,
+            "Base URL 已写入当前 Codex 配置，请重启 Codex 后生效。"
+        );
+        let active_state = service.list_providers().unwrap();
+        assert_eq!(
+            active_state.active_provider_id.as_deref(),
+            Some("provider-a")
+        );
+        assert_eq!(
+            active_state.providers[0].selected_base_url_id.as_deref(),
+            Some("1c1d8839-188f-4e34-b9a8-4d56d43da2b0")
+        );
+        assert_eq!(
+            AuthService::new(paths.auth_file.clone())
+                .read_api_key()
+                .unwrap()
+                .as_deref(),
+            Some("test-key-a-not-real")
+        );
     }
 
     #[tokio::test]
@@ -1324,6 +3250,13 @@ wire_api = "chat_completions"
             !ProviderSecretService::new(paths.providers_file.clone())
                 .is_configured("provider-b")
                 .unwrap()
+        );
+        assert!(
+            !ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+                .load()
+                .unwrap()
+                .providers
+                .contains_key("provider-b")
         );
 
         let refreshed = service.list_providers().unwrap();
@@ -1382,6 +3315,60 @@ wire_api = "chat_completions"
     }
 
     #[tokio::test]
+    async fn switch_rejects_unmanaged_base_url_without_modifying_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        fs::write(
+            &paths.provider_preferences_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "主用地址",
+          "url": "https://provider-a.example.com/v1"
+        }
+      ],
+      "modelPreference": {
+        "models": ["gpt-5.6-sol"],
+        "selectedModel": "gpt-5.6-sol",
+        "reasoningEfforts": { "gpt-5.6-sol": "medium" }
+      }
+    },
+    "provider-b": {
+      "baseUrls": [
+        {
+          "id": "f8e62dc2-46df-4234-92d5-7d318d879ff7",
+          "name": "其他地址",
+          "url": "https://provider-b-other.example.com/v1"
+        }
+      ],
+      "modelPreference": {
+        "models": ["gpt-5.5"],
+        "selectedModel": "gpt-5.5",
+        "reasoningEfforts": { "gpt-5.5": "medium" }
+      }
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let original_config = fs::read(&paths.config_file).unwrap();
+        let original_auth = fs::read(&paths.auth_file).unwrap();
+
+        let error = service.switch_provider("provider-b").await.unwrap_err();
+
+        assert_eq!(error.code(), "PROVIDER_BASE_URL_UNMANAGED");
+        assert_eq!(fs::read(&paths.config_file).unwrap(), original_config);
+        assert_eq!(fs::read(&paths.auth_file).unwrap(), original_auth);
+    }
+
+    #[tokio::test]
     async fn imports_existing_auth_key_only_into_current_provider_after_confirmation() {
         let directory = tempfile::tempdir().unwrap();
         let paths = create_paths(&directory);
@@ -1390,7 +3377,14 @@ wire_api = "chat_completions"
 
         let before = service.list_providers().unwrap();
         assert!(before.current_auth_import_available);
-        let outcome = service.import_current_auth_key("provider-a").await.unwrap();
+        let outcome = service
+            .import_current_auth_key(ImportCurrentApiKeyInput {
+                provider_id: "provider-a".into(),
+                name: "外部密钥".into(),
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
 
         assert_eq!(
             outcome.message,
@@ -1401,7 +3395,69 @@ wire_api = "chat_completions"
             .unwrap();
         assert_eq!(store.providers.len(), 1);
         assert!(store.providers.contains_key("provider-a"));
+        assert_eq!(store.providers["provider-a"].api_keys[0].name, "外部密钥");
         assert!(!store.providers.contains_key("provider-b"));
+    }
+
+    #[tokio::test]
+    async fn named_auth_import_appends_to_existing_keys_and_selects_the_imported_value() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        fs::write(&paths.config_file, MULTIPLE).unwrap();
+        fs::write(
+            &paths.auth_file,
+            "{\n  \"OPENAI_API_KEY\": \"test-key-external-not-real\"\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            &paths.providers_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "apiKeys": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "已保存密钥",
+          "apiKey": "test-key-a-not-real"
+        }
+      ],
+      "selectedApiKeyId": "65c7650d-d20d-4dca-b445-8aa47fcbe92c"
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        fs::write(&paths.provider_preferences_file, PREFERENCES_MULTIPLE).unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        assert!(before.current_auth_import_available);
+
+        service
+            .import_current_auth_key(ImportCurrentApiKeyInput {
+                provider_id: "provider-a".into(),
+                name: "外部密钥".into(),
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        let store = ProviderSecretService::new(paths.providers_file.clone())
+            .load_or_create()
+            .unwrap();
+        let secret = &store.providers["provider-a"];
+        assert_eq!(secret.api_keys.len(), 2);
+        assert_eq!(secret.api_keys[0].name, "已保存密钥");
+        assert_eq!(secret.api_keys[1].name, "外部密钥");
+        assert_eq!(secret.selected_api_key_id, secret.api_keys[1].id);
+        assert_eq!(
+            AuthService::new(paths.auth_file.clone())
+                .read_api_key()
+                .unwrap()
+                .as_deref(),
+            Some("test-key-external-not-real")
+        );
     }
 
     #[tokio::test]

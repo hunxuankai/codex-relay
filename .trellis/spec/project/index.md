@@ -6,6 +6,8 @@ Codex Relay 的产品边界与总体架构。实现跨前后端、配置文件�
 
 - 产品能力、非目标或兼容性边界：读取 [product-contract.md](product-contract.md)。
 - 跨层数据流、文件所有权或启动流程：读取 [architecture.md](architecture.md)。
+- 修改 Provider 地址、密钥、选择、私有存储或管理 UI：读取
+  [provider-multi-credentials.md](provider-multi-credentials.md)。
 - 再按改动领域加载 `backend/`、`frontend/`、`security/`、`testing/` 或 `release/`。
 
 ## 质量检查
@@ -19,3 +21,4 @@ Codex Relay 的产品边界与总体架构。实现跨前后端、配置文件�
 
 - [产品契约](product-contract.md)
 - [总体架构](architecture.md)
+- [Provider 多命名地址与密钥契约](provider-multi-credentials.md)

@@ -1,11 +1,10 @@
 use crate::infrastructure::file_fingerprint::FileSetFingerprint;
 use crate::infrastructure::path_service::AppPaths;
 use crate::models::health::{HealthCheck, HealthLevel, HealthReport};
-use crate::services::auth_service::AuthService;
+use crate::models::provider::{ProviderApiKeyStatus, ProviderBaseUrlStatus};
 use crate::services::autostart_service::AutostartService;
 use crate::services::backup_service::BackupService;
 use crate::services::config_service;
-use crate::services::provider_secret_service::ProviderSecretService;
 use crate::services::provider_service::ProviderService;
 use crate::services::settings_service::SettingsService;
 use chrono::Utc;
@@ -297,72 +296,108 @@ impl SelfCheckService {
             )),
         }
 
-        let store =
-            match ProviderSecretService::new(self.paths.providers_file.clone()).load_or_create() {
-                Ok(store) => store,
+        let provider_state =
+            match ProviderService::new(self.paths.clone(), self.app_version.clone())
+                .list_providers()
+            {
+                Ok(state) => state,
                 Err(error) => {
                     checks.push(error_check(
-                        "provider-secrets",
-                        "Provider API Key",
+                        "provider-managed-state",
+                        "Provider 受管状态",
                         error.public_message(),
                     ));
                     return;
                 }
             };
-        let auth_key = match AuthService::new(self.paths.auth_file.clone()).read_api_key() {
-            Ok(key) => key,
-            Err(error) => {
-                checks.push(error_check(
-                    "auth-json",
-                    "Codex 认证",
-                    error.public_message(),
-                ));
-                return;
-            }
-        };
 
         if let Some(active) = active {
-            let provider_key = store
+            let Some(provider) = provider_state
                 .providers
-                .get(&active)
-                .map(|secret| secret.api_key.as_str())
-                .filter(|key| !key.is_empty());
-            match provider_key {
-                Some(_) => checks.push(normal_check(
-                    "current-provider-key",
-                    "当前 Provider API Key",
-                    "已配置。",
+                .iter()
+                .find(|provider| provider.id == active)
+            else {
+                return;
+            };
+            match provider.base_url_status {
+                ProviderBaseUrlStatus::Managed => checks.push(normal_check(
+                    "managed-base-url",
+                    "当前 Base URL",
+                    "当前地址已纳入 Relay 管理。",
                 )),
-                None => checks.push(error_check(
-                    "current-provider-key",
-                    "当前 Provider API Key",
-                    "当前 Provider 尚未设置 API Key。",
-                )),
-            }
-            match auth_key.as_deref() {
-                Some(_) => checks.push(normal_check(
-                    "auth-json",
-                    "Codex 认证",
-                    "auth.json 包含 OPENAI_API_KEY。",
-                )),
-                None => checks.push(error_check(
-                    "auth-json",
-                    "Codex 认证",
-                    "auth.json 缺少 OPENAI_API_KEY。",
+                ProviderBaseUrlStatus::External => checks.push(error_check(
+                    "managed-base-url",
+                    "当前 Base URL",
+                    "当前地址尚未命名纳入 Relay 管理。",
                 )),
             }
-            if provider_key.is_some() && auth_key.as_deref() == provider_key {
+
+            if provider.preference_configured {
                 checks.push(normal_check(
-                    "auth-key-match",
-                    "API Key 一致性",
-                    "当前认证密钥与 Provider 密钥一致。",
+                    "provider-model-preference",
+                    "Provider 模型偏好",
+                    "已配置当前模型与推理强度。",
                 ));
             } else {
                 checks.push(error_check(
-                    "auth-key-match",
-                    "API Key 一致性",
-                    "当前认证密钥与 Provider 密钥不一致。",
+                    "provider-model-preference",
+                    "Provider 模型偏好",
+                    "当前 Provider 尚未配置模型偏好。",
                 ));
+            }
+
+            match provider.api_key_status {
+                ProviderApiKeyStatus::Managed => {
+                    checks.push(normal_check(
+                        "current-provider-key",
+                        "当前 Provider API Key",
+                        "当前密钥已纳入 Relay 管理。",
+                    ));
+                    checks.push(normal_check(
+                        "auth-json",
+                        "Codex 认证",
+                        "auth.json 包含已纳管的 OPENAI_API_KEY。",
+                    ));
+                    checks.push(normal_check(
+                        "auth-key-match",
+                        "API Key 一致性",
+                        "当前认证密钥与命名密钥一致。",
+                    ));
+                }
+                ProviderApiKeyStatus::External => {
+                    checks.push(error_check(
+                        "current-provider-key",
+                        "当前 Provider API Key",
+                        "当前认证密钥尚未命名纳入 Relay 管理。",
+                    ));
+                    checks.push(normal_check(
+                        "auth-json",
+                        "Codex 认证",
+                        "auth.json 包含 OPENAI_API_KEY。",
+                    ));
+                    checks.push(error_check(
+                        "auth-key-match",
+                        "API Key 一致性",
+                        "当前认证密钥与已保存命名密钥不一致。",
+                    ));
+                }
+                ProviderApiKeyStatus::Missing => {
+                    checks.push(error_check(
+                        "current-provider-key",
+                        "当前 Provider API Key",
+                        "当前 Provider 尚未设置 API Key。",
+                    ));
+                    checks.push(error_check(
+                        "auth-json",
+                        "Codex 认证",
+                        "auth.json 缺少 OPENAI_API_KEY。",
+                    ));
+                    checks.push(error_check(
+                        "auth-key-match",
+                        "API Key 一致性",
+                        "当前认证密钥缺失。",
+                    ));
+                }
             }
         }
     }
@@ -641,6 +676,11 @@ mod tests {
             include_str!("../../../fixtures/providers-multiple.json"),
         )
         .unwrap();
+        fs::write(
+            &paths.provider_preferences_file,
+            include_str!("../../../fixtures/provider-preferences-multiple.json"),
+        )
+        .unwrap();
         let backend = Arc::new(FakeAutostartBackend::default());
         *backend.enabled.lock().unwrap() = autostart_enabled;
         let service = SelfCheckService::new(
@@ -695,6 +735,47 @@ mod tests {
                 .checks
                 .iter()
                 .any(|check| check.id == "autostart" && check.level == HealthLevel::Normal)
+        );
+    }
+
+    #[tokio::test]
+    async fn extended_check_reports_unmanaged_active_base_url_as_error() {
+        let probe = Arc::new(FakeCodexProbe::new(CodexProbeResult::Detected(
+            "codex-cli 1.0.0".into(),
+        )));
+        let (_directory, paths, service) = valid_service(probe, false);
+        fs::write(
+            &paths.provider_preferences_file,
+            r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "其他地址",
+          "url": "https://provider-a-other.example.com/v1"
+        }
+      ],
+      "modelPreference": {
+        "models": ["gpt-5.6-sol"],
+        "selectedModel": "gpt-5.6-sol",
+        "reasoningEfforts": { "gpt-5.6-sol": "medium" }
+      }
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+
+        let report = service.run_extended_checks().await;
+
+        assert_eq!(report.level, HealthLevel::Error);
+        assert!(
+            report.checks.iter().any(|check| {
+                check.id == "managed-base-url" && check.level == HealthLevel::Error
+            })
         );
     }
 

@@ -12,12 +12,20 @@ const provider: ProviderProfile = {
   id: 'provider-a',
   name: 'Provider A',
   baseUrl: 'https://provider-a.example.test/v1',
+  baseUrls: [{ id: 'url-primary', name: '主用地址', url: 'https://provider-a.example.test/v1' }],
+  selectedBaseUrlId: 'url-primary',
+  baseUrlStatus: 'managed',
+  apiKeys: [{ id: 'key-primary', name: '主用密钥' }],
+  selectedApiKeyId: 'key-primary',
+  apiKeyStatus: 'managed',
   wireApi: 'responses',
   models: ['gpt-5.6-sol'],
   selectedModel: 'gpt-5.6-sol',
   reasoningEfforts: { 'gpt-5.6-sol': 'medium' },
   preferenceConfigured: true,
   apiKeyConfigured: true,
+  configurationComplete: true,
+  disabledReason: null,
   isActive: false,
   isValid: true,
   validationMessage: null,
@@ -135,7 +143,12 @@ describe('ProviderAvailabilityPanel', () => {
   it('explains why testing is disabled when the Provider is not ready', () => {
     const wrapper = mount(ProviderAvailabilityPanel, {
       props: {
-        provider: { ...provider, apiKeyConfigured: false },
+        provider: {
+          ...provider,
+          apiKeyStatus: 'external',
+          configurationComplete: false,
+          disabledReason: '外部密钥尚未纳管。',
+        },
         apiResult: null,
         codexResult: null,
         runningKind: null,
@@ -144,7 +157,7 @@ describe('ProviderAvailabilityPanel', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('未配置 API Key，无法测试。')
+    expect(wrapper.text()).toContain('外部密钥尚未纳管。')
     expect(wrapper.get('[aria-label="测试 Provider A 的 API 可用性"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[aria-label="运行 Provider A 的 Codex 兼容性测试"]').attributes('disabled')).toBeDefined()
   })

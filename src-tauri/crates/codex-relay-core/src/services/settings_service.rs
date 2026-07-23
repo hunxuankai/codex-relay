@@ -194,7 +194,7 @@ mod tests {
         assert!(settings.tray_only_on_autostart);
         assert_eq!(
             fs::read_to_string(&paths.providers_file).unwrap(),
-            "{\n  \"version\": 1,\n  \"providers\": {}\n}\n"
+            "{\n  \"version\": 2,\n  \"providers\": {}\n}\n"
         );
     }
 

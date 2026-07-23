@@ -8,8 +8,14 @@ import type { HealthReport } from '../types/health'
 import type { ProviderAvailabilityResult } from '../types/providerAvailability'
 import type {
   CreateProviderInput,
+  ImportCurrentApiKeyInput,
+  ProviderApiKeyManagementState,
   ProviderListState,
   ProviderMutationOutcome,
+  SaveProviderApiKeysInput,
+  SaveProviderBaseUrlsInput,
+  SelectProviderApiKeyInput,
+  SelectProviderBaseUrlInput,
   SwitchOutcome,
   UpdateProviderInput,
 } from '../types/provider'
@@ -21,7 +27,7 @@ import {
   checkForUpdate,
   cancelProviderTest,
   exitApplication,
-  getProviderApiKey,
+  getProviderApiKeysForManagement,
   getSettings,
   getCurrentVersion,
   importCurrentAuthKey,
@@ -33,7 +39,11 @@ import {
   restoreBackup,
   runCriticalSelfCheck,
   runExtendedSelfCheck,
+  saveProviderApiKeys,
+  saveProviderBaseUrls,
   saveSettings,
+  selectProviderApiKey,
+  selectProviderBaseUrl,
   setAutostart,
   switchProvider,
   testProviderApi,
@@ -56,12 +66,24 @@ const fingerprints = {
   config: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'config' },
   auth: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'auth' },
   providers: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'providers' },
+  preferences: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'preferences' },
 }
 
 const providerState: ProviderListState = {
   providers: [],
   activeProviderId: null,
   currentAuthImportAvailable: false,
+  fingerprints,
+  modelCatalog: [],
+}
+
+const apiKeyManagementState: ProviderApiKeyManagementState = {
+  providerId: 'provider-a',
+  entries: [
+    { id: 'key-a', name: '主用密钥', apiKey: 'test-key-management-not-real' },
+  ],
+  selectedApiKeyId: 'key-a',
+  apiKeyStatus: 'managed',
   fingerprints,
 }
 
@@ -118,6 +140,17 @@ function success<T>(data: T) {
   return { success: true, data }
 }
 
+function redactApiKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactApiKeys)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      key === 'apiKey' ? '<redacted>' : redactApiKeys(entry),
+    ]),
+  )
+}
+
 describe('Tauri service boundary', () => {
   beforeEach(() => {
     invokeMock.mockReset()
@@ -129,7 +162,11 @@ describe('Tauri service boundary', () => {
   it('calls the exact Rust command names and arguments', async () => {
     invokeMock
       .mockResolvedValueOnce(success(providerState))
-      .mockResolvedValueOnce(success('test-key-not-real'))
+      .mockResolvedValueOnce(success(apiKeyManagementState))
+      .mockResolvedValueOnce(success(mutation))
+      .mockResolvedValueOnce(success(mutation))
+      .mockResolvedValueOnce(success(mutation))
+      .mockResolvedValueOnce(success(mutation))
       .mockResolvedValueOnce(success(mutation))
       .mockResolvedValueOnce(success(mutation))
       .mockResolvedValueOnce(success(mutation))
@@ -152,31 +189,65 @@ describe('Tauri service boundary', () => {
     const createInput: CreateProviderInput = {
       id: 'provider-a',
       name: 'Provider A',
+      baseUrlName: '主用地址',
       baseUrl: 'https://provider-a.example.test/v1',
       wireApi: 'responses',
-      model: 'model-a',
-      apiKey: 'test-key-not-real',
+      models: ['model-a'],
+      apiKeyName: '主用密钥',
+      apiKey: 'test-key-create-not-real',
       activateAfterSave: true,
       expectedFiles: fingerprints,
     }
     const updateInput: UpdateProviderInput = {
       id: 'provider-a',
       name: 'Provider A',
-      baseUrl: 'https://provider-a.example.test/v1',
       wireApi: 'responses',
-      model: null,
-      apiKeyChange: { action: 'set', value: 'replacement-key-not-real' },
+      models: ['model-a'],
       syncIfActive: true,
+      expectedFiles: fingerprints,
+    }
+    const saveBaseUrlsInput: SaveProviderBaseUrlsInput = {
+      providerId: 'provider-a',
+      entries: [
+        { id: 'url-a', name: '主用地址', url: 'https://provider-a.example.test/v1' },
+        { id: null, name: '备用地址', url: 'https://backup.example.test/v1' },
+      ],
+      expectedFiles: fingerprints,
+    }
+    const selectBaseUrlInput: SelectProviderBaseUrlInput = {
+      providerId: 'provider-a',
+      baseUrlId: 'url-a',
+      expectedFiles: fingerprints,
+    }
+    const saveApiKeysInput: SaveProviderApiKeysInput = {
+      providerId: 'provider-a',
+      entries: [
+        { id: 'key-a', name: '主用密钥', apiKey: 'test-key-save-not-real' },
+      ],
+      expectedFiles: fingerprints,
+    }
+    const selectApiKeyInput: SelectProviderApiKeyInput = {
+      providerId: 'provider-a',
+      apiKeyId: 'key-a',
+      expectedFiles: fingerprints,
+    }
+    const importInput: ImportCurrentApiKeyInput = {
+      providerId: 'provider-a',
+      name: '当前密钥',
       expectedFiles: fingerprints,
     }
 
     await listProviders()
-    await getProviderApiKey('provider-a')
+    await getProviderApiKeysForManagement('provider-a')
     await createProvider(createInput)
     await updateProvider(updateInput)
+    await saveProviderBaseUrls(saveBaseUrlsInput)
+    await selectProviderBaseUrl(selectBaseUrlInput)
+    await saveProviderApiKeys(saveApiKeysInput)
+    await selectProviderApiKey(selectApiKeyInput)
     await deleteProvider('provider-a', fingerprints)
     await switchProvider('provider-a')
-    await importCurrentAuthKey('provider-a')
+    await importCurrentAuthKey(importInput)
     await testProviderApi('provider-a', 'request-api')
     await testProviderCodexCompatibility('provider-a', 'request-codex')
     await cancelProviderTest('request-codex')
@@ -191,14 +262,18 @@ describe('Tauri service boundary', () => {
     await runExtendedSelfCheck()
     await exitApplication()
 
-    expect(invokeMock.mock.calls).toEqual([
+    expect(redactApiKeys(invokeMock.mock.calls)).toEqual([
       ['list_providers'],
-      ['get_provider_api_key', { providerId: 'provider-a' }],
-      ['create_provider', { input: createInput }],
+      ['get_provider_api_keys_for_management', { providerId: 'provider-a' }],
+      ['create_provider', { input: redactApiKeys(createInput) }],
       ['update_provider', { input: updateInput }],
+      ['save_provider_base_urls', { input: saveBaseUrlsInput }],
+      ['select_provider_base_url', { input: selectBaseUrlInput }],
+      ['save_provider_api_keys', { input: redactApiKeys(saveApiKeysInput) }],
+      ['select_provider_api_key', { input: selectApiKeyInput }],
       ['delete_provider', { providerId: 'provider-a', expectedFiles: fingerprints }],
       ['switch_provider', { providerId: 'provider-a' }],
-      ['import_current_auth_key', { providerId: 'provider-a' }],
+      ['import_current_auth_key', { input: importInput }],
       ['test_provider_api', { providerId: 'provider-a', requestId: 'request-api' }],
       ['test_provider_codex_compatibility', { providerId: 'provider-a', requestId: 'request-codex' }],
       ['cancel_provider_test', { requestId: 'request-codex' }],
@@ -213,6 +288,10 @@ describe('Tauri service boundary', () => {
       ['run_extended_self_check'],
       ['exit_application'],
     ])
+    const createArgs = invokeMock.mock.calls[2]?.[1] as { input: CreateProviderInput }
+    const saveKeysArgs = invokeMock.mock.calls[6]?.[1] as { input: SaveProviderApiKeysInput }
+    expect(createArgs.input.apiKey === createInput.apiKey).toBe(true)
+    expect(saveKeysArgs.input.entries[0]?.apiKey === saveApiKeysInput.entries[0]?.apiKey).toBe(true)
   })
 
   it('throws only the safe command code and message', async () => {

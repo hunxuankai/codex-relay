@@ -10,6 +10,11 @@ pub enum TransactionOperation {
     RestoreBackup,
     SyncCurrentProvider,
     UpdateProviderPreference,
+    SaveProviderBaseUrls,
+    SelectProviderBaseUrl,
+    SaveProviderApiKeys,
+    SelectProviderApiKey,
+    ImportCurrentApiKey,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -2,7 +2,7 @@
 import { shallowRef } from 'vue'
 import { ElButton, ElCard } from 'element-plus'
 import AppNotification from '../components/AppNotification.vue'
-import ConfirmDialog from '../components/ConfirmDialog.vue'
+import ImportCurrentApiKeyDialog from '../components/ImportCurrentApiKeyDialog.vue'
 
 defineProps<{
   busy: boolean
@@ -17,14 +17,14 @@ const emit = defineEmits<{
   addProvider: []
   later: []
   exit: []
-  importCurrentKey: []
+  importCurrentKey: [name: string]
 }>()
 
 const confirmImport = shallowRef(false)
 
-function importCurrentKey() {
+function importCurrentKey(name: string) {
   confirmImport.value = false
-  emit('importCurrentKey')
+  emit('importCurrentKey', name)
 }
 </script>
 
@@ -94,13 +94,12 @@ function importCurrentKey() {
       </div>
     </ElCard>
 
-    <ConfirmDialog
+    <ImportCurrentApiKeyDialog
       :open="confirmImport"
-      title="确认保存当前密钥"
-      :message="`检测到当前 Codex 配置中存在 API Key，是否将其保存到当前 Provider「${currentProviderName ?? ''}」？密钥会以明文写入本机 providers.json。`"
-      confirm-label="确认保存"
-      @confirm="importCurrentKey"
-      @cancel="confirmImport = false"
+      :provider-name="currentProviderName ?? ''"
+      :busy="busy"
+      @import="importCurrentKey"
+      @close="confirmImport = false"
     />
   </main>
 </template>

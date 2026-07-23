@@ -12,9 +12,13 @@ const modelCatalog: ModelCatalogItem[] = [
 function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
   return {
     id: 'provider-a', name: 'Provider A', baseUrl: 'https://provider-a.example.test/v1', wireApi: 'responses',
+    baseUrls: [{ id: 'url-primary', name: '主用地址', url: 'https://provider-a.example.test/v1' }],
+    selectedBaseUrlId: 'url-primary', baseUrlStatus: 'managed',
+    apiKeys: [{ id: 'key-primary', name: '主用密钥' }], selectedApiKeyId: 'key-primary', apiKeyStatus: 'managed',
     models: ['gpt-5.6-sol', 'gpt-5.4-mini'], selectedModel: 'gpt-5.6-sol',
     reasoningEfforts: { 'gpt-5.6-sol': 'high', 'gpt-5.4-mini': 'low' }, preferenceConfigured: true,
-    apiKeyConfigured: true, isActive: false, isValid: true, validationMessage: null, ...overrides,
+    apiKeyConfigured: true, configurationComplete: true, disabledReason: null,
+    isActive: false, isValid: true, validationMessage: null, ...overrides,
   }
 }
 

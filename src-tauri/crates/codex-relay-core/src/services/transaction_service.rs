@@ -6,8 +6,8 @@ use crate::models::backup::BackupSummary;
 use crate::models::settings::Settings;
 use crate::models::transaction::{ConfigTransaction, TransactionOperation};
 use crate::services::backup_service::{BackupService, FileSnapshot};
-use crate::services::provider_preference_service::ProviderPreferenceStore;
-use crate::services::provider_secret_service::ProviderSecretStore;
+use crate::services::provider_preference_service::parse_store as parse_provider_preference_store;
+use crate::services::provider_secret_service::parse_store as parse_provider_secret_store;
 use chrono::Utc;
 use std::fmt;
 use std::fs;
@@ -559,33 +559,26 @@ fn validate_managed_file(kind: ManagedFileKind, bytes: &[u8]) -> Result<(), AppE
                 })
         }
         ManagedFileKind::Providers => {
-            let store: ProviderSecretStore = serde_json::from_slice(bytes).map_err(|error| {
-                AppError::new(
-                    "INVALID_TEMP_PROVIDER_SECRETS",
-                    "临时 providers.json 验证失败。",
-                    error.to_string(),
-                )
-            })?;
-            if store.version == 1 {
-                Ok(())
-            } else {
-                Err(AppError::new(
-                    "INVALID_TEMP_PROVIDER_SECRETS",
-                    "临时 providers.json 版本无效。",
-                    format!("temporary provider secret version is {}", store.version),
-                ))
-            }
+            parse_provider_secret_store(bytes)
+                .map(|_| ())
+                .map_err(|error| {
+                    AppError::new(
+                        "INVALID_TEMP_PROVIDER_SECRETS",
+                        "临时 providers.json 验证失败。",
+                        error.internal_detail().to_owned(),
+                    )
+                })
         }
         ManagedFileKind::Preferences => {
-            let store: ProviderPreferenceStore =
-                serde_json::from_slice(bytes).map_err(|error| {
+            parse_provider_preference_store(bytes)
+                .map(|_| ())
+                .map_err(|error| {
                     AppError::new(
                         "INVALID_TEMP_PROVIDER_PREFERENCES",
                         "临时 provider-preferences.json 验证失败。",
-                        error.to_string(),
+                        error.internal_detail().to_owned(),
                     )
-                })?;
-            crate::services::provider_preference_service::serialize_store(&store).map(|_| ())
+                })
         }
         ManagedFileKind::TransactionMarker => serde_json::from_slice::<serde_json::Value>(bytes)
             .map(|_| ())
@@ -1000,6 +993,83 @@ wire_api = "responses"
             .unwrap_err();
         assert_eq!(providers_error.code(), "TRANSACTION_FAILED_ROLLED_BACK");
         assert_eq!(fs::read(&paths.providers_file).unwrap(), PROVIDERS);
+    }
+
+    #[test]
+    fn managed_private_json_validation_accepts_v1_and_v2_but_rejects_unknown_versions() {
+        let providers_v2 = r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "apiKeys": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "主用密钥",
+          "apiKey": "test-key-provider-a-not-real"
+        }
+      ],
+      "selectedApiKeyId": "65c7650d-d20d-4dca-b445-8aa47fcbe92c"
+    }
+  }
+}
+"#
+        .as_bytes();
+        let preferences_v1 = r#"{
+  "version": 1,
+  "providers": {
+    "provider-a": {
+      "models": ["gpt-5.6-sol"],
+      "selectedModel": "gpt-5.6-sol",
+      "reasoningEfforts": { "gpt-5.6-sol": "medium" }
+    }
+  }
+}
+"#
+        .as_bytes();
+        let preferences_v2 = r#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "主用地址",
+          "url": "https://provider-a.example.test/v1"
+        }
+      ],
+      "modelPreference": {
+        "models": ["gpt-5.6-sol"],
+        "selectedModel": "gpt-5.6-sol",
+        "reasoningEfforts": { "gpt-5.6-sol": "medium" }
+      }
+    }
+  }
+}
+"#
+        .as_bytes();
+
+        validate_managed_file(ManagedFileKind::Providers, PROVIDERS).unwrap();
+        validate_managed_file(ManagedFileKind::Providers, providers_v2).unwrap();
+        validate_managed_file(ManagedFileKind::Preferences, preferences_v1).unwrap();
+        validate_managed_file(ManagedFileKind::Preferences, preferences_v2).unwrap();
+        assert_eq!(
+            validate_managed_file(
+                ManagedFileKind::Providers,
+                br#"{"version":3,"providers":{}}"#,
+            )
+            .unwrap_err()
+            .code(),
+            "INVALID_TEMP_PROVIDER_SECRETS"
+        );
+        assert_eq!(
+            validate_managed_file(
+                ManagedFileKind::Preferences,
+                br#"{"version":3,"providers":{}}"#,
+            )
+            .unwrap_err()
+            .code(),
+            "INVALID_TEMP_PROVIDER_PREFERENCES"
+        );
     }
 
     #[tokio::test]

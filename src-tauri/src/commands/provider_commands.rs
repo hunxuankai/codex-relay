@@ -3,8 +3,10 @@ use crate::commands::command_result;
 use crate::error::CommandResult;
 use crate::infrastructure::file_fingerprint::FileSetFingerprint;
 use crate::models::provider::{
-    CreateProviderInput, ProviderListState, ProviderMutationOutcome, SwitchOutcome,
-    UpdateProviderInput, UpdateProviderPreferenceInput,
+    CreateProviderInput, ImportCurrentApiKeyInput, ProviderApiKeyManagementState,
+    ProviderListState, ProviderMutationOutcome, SaveProviderApiKeysInput,
+    SaveProviderBaseUrlsInput, SelectProviderApiKeyInput, SelectProviderBaseUrlInput,
+    SwitchOutcome, UpdateProviderInput, UpdateProviderPreferenceInput,
 };
 
 pub(crate) fn list_providers_inner(state: &AppState) -> CommandResult<ProviderListState> {
@@ -16,19 +18,23 @@ pub fn list_providers(state: tauri::State<'_, AppState>) -> CommandResult<Provid
     list_providers_inner(&state)
 }
 
-pub(crate) fn get_provider_api_key_inner(
+pub(crate) fn get_provider_api_keys_for_management_inner(
     state: &AppState,
     provider_id: String,
-) -> CommandResult<Option<String>> {
-    command_result(state.provider_service.get_api_key_for_edit(&provider_id))
+) -> CommandResult<ProviderApiKeyManagementState> {
+    command_result(
+        state
+            .provider_service
+            .get_provider_api_keys_for_management(&provider_id),
+    )
 }
 
 #[tauri::command]
-pub fn get_provider_api_key(
+pub fn get_provider_api_keys_for_management(
     state: tauri::State<'_, AppState>,
     provider_id: String,
-) -> CommandResult<Option<String>> {
-    get_provider_api_key_inner(&state, provider_id)
+) -> CommandResult<ProviderApiKeyManagementState> {
+    get_provider_api_keys_for_management_inner(&state, provider_id)
 }
 
 pub(crate) async fn create_provider_inner(
@@ -74,6 +80,106 @@ pub async fn update_provider(
         Err(error) => return Ok(CommandResult::failure(&error)),
     };
     let result = update_provider_inner(&state, input).await;
+    drop(application_write);
+    if let Some(outcome) = result.data.as_ref() {
+        crate::tray::after_provider_mutation(&app, outcome.message.clone(), false);
+    }
+    Ok(result)
+}
+
+pub(crate) async fn save_provider_base_urls_inner(
+    state: &AppState,
+    input: SaveProviderBaseUrlsInput,
+) -> CommandResult<ProviderMutationOutcome> {
+    command_result(state.provider_service.save_provider_base_urls(input).await)
+}
+
+#[tauri::command]
+pub async fn save_provider_base_urls(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    input: SaveProviderBaseUrlsInput,
+) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+    let application_write = match state.begin_application_write() {
+        Ok(application_write) => application_write,
+        Err(error) => return Ok(CommandResult::failure(&error)),
+    };
+    let result = save_provider_base_urls_inner(&state, input).await;
+    drop(application_write);
+    if let Some(outcome) = result.data.as_ref() {
+        crate::tray::after_provider_mutation(&app, outcome.message.clone(), false);
+    }
+    Ok(result)
+}
+
+pub(crate) async fn select_provider_base_url_inner(
+    state: &AppState,
+    input: SelectProviderBaseUrlInput,
+) -> CommandResult<ProviderMutationOutcome> {
+    command_result(state.provider_service.select_provider_base_url(input).await)
+}
+
+#[tauri::command]
+pub async fn select_provider_base_url(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    input: SelectProviderBaseUrlInput,
+) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+    let application_write = match state.begin_application_write() {
+        Ok(application_write) => application_write,
+        Err(error) => return Ok(CommandResult::failure(&error)),
+    };
+    let result = select_provider_base_url_inner(&state, input).await;
+    drop(application_write);
+    if let Some(outcome) = result.data.as_ref() {
+        crate::tray::after_provider_mutation(&app, outcome.message.clone(), false);
+    }
+    Ok(result)
+}
+
+pub(crate) async fn save_provider_api_keys_inner(
+    state: &AppState,
+    input: SaveProviderApiKeysInput,
+) -> CommandResult<ProviderMutationOutcome> {
+    command_result(state.provider_service.save_provider_api_keys(input).await)
+}
+
+#[tauri::command]
+pub async fn save_provider_api_keys(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    input: SaveProviderApiKeysInput,
+) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+    let application_write = match state.begin_application_write() {
+        Ok(application_write) => application_write,
+        Err(error) => return Ok(CommandResult::failure(&error)),
+    };
+    let result = save_provider_api_keys_inner(&state, input).await;
+    drop(application_write);
+    if let Some(outcome) = result.data.as_ref() {
+        crate::tray::after_provider_mutation(&app, outcome.message.clone(), false);
+    }
+    Ok(result)
+}
+
+pub(crate) async fn select_provider_api_key_inner(
+    state: &AppState,
+    input: SelectProviderApiKeyInput,
+) -> CommandResult<ProviderMutationOutcome> {
+    command_result(state.provider_service.select_provider_api_key(input).await)
+}
+
+#[tauri::command]
+pub async fn select_provider_api_key(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    input: SelectProviderApiKeyInput,
+) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+    let application_write = match state.begin_application_write() {
+        Ok(application_write) => application_write,
+        Err(error) => return Ok(CommandResult::failure(&error)),
+    };
+    let result = select_provider_api_key_inner(&state, input).await;
     drop(application_write);
     if let Some(outcome) = result.data.as_ref() {
         crate::tray::after_provider_mutation(&app, outcome.message.clone(), false);
@@ -189,27 +295,22 @@ pub async fn switch_provider(
 
 pub(crate) async fn import_current_auth_key_inner(
     state: &AppState,
-    provider_id: String,
+    input: ImportCurrentApiKeyInput,
 ) -> CommandResult<ProviderMutationOutcome> {
-    command_result(
-        state
-            .provider_service
-            .import_current_auth_key(&provider_id)
-            .await,
-    )
+    command_result(state.provider_service.import_current_auth_key(input).await)
 }
 
 #[tauri::command]
 pub async fn import_current_auth_key(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
-    provider_id: String,
+    input: ImportCurrentApiKeyInput,
 ) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),
     };
-    let result = import_current_auth_key_inner(&state, provider_id).await;
+    let result = import_current_auth_key_inner(&state, input).await;
     drop(application_write);
     if let Some(outcome) = result.data.as_ref() {
         crate::tray::after_provider_mutation(&app, outcome.message.clone(), false);

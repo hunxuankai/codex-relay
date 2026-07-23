@@ -643,7 +643,10 @@ fn separator() -> TrayMenuItemModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::provider::{ProviderProfile, WireApi};
+    use crate::models::provider::{
+        ProviderApiKeyStatus, ProviderApiKeySummary, ProviderBaseUrlStatus, ProviderBaseUrlSummary,
+        ProviderProfile, WireApi,
+    };
     use crate::models::settings::{Settings, WindowBounds};
 
     fn provider(
@@ -657,6 +660,26 @@ mod tests {
             id: id.into(),
             name: name.into(),
             base_url: format!("https://{id}.example.test/v1"),
+            base_urls: vec![ProviderBaseUrlSummary {
+                id: "legacy-default".into(),
+                name: "默认地址".into(),
+                url: format!("https://{id}.example.test/v1"),
+            }],
+            selected_base_url_id: Some("legacy-default".into()),
+            base_url_status: ProviderBaseUrlStatus::Managed,
+            api_keys: api_key_configured
+                .then(|| ProviderApiKeySummary {
+                    id: "legacy-default".into(),
+                    name: "默认密钥".into(),
+                })
+                .into_iter()
+                .collect(),
+            selected_api_key_id: api_key_configured.then(|| "legacy-default".into()),
+            api_key_status: if api_key_configured {
+                ProviderApiKeyStatus::Managed
+            } else {
+                ProviderApiKeyStatus::Missing
+            },
             wire_api: WireApi::Responses,
             models: vec!["gpt-5.6-sol".into()],
             selected_model: Some("gpt-5.6-sol".into()),
@@ -666,6 +689,8 @@ mod tests {
             )]),
             preference_configured: true,
             api_key_configured,
+            configuration_complete: valid && api_key_configured,
+            disabled_reason: (!valid || !api_key_configured).then(|| "配置不完整".into()),
             is_active: active,
             is_valid: valid,
             validation_message: None,

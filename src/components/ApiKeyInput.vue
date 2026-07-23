@@ -3,24 +3,13 @@ import { shallowRef } from 'vue'
 import { ElButton, ElInput } from 'element-plus'
 
 defineProps<{
-  configured: boolean
   disabled?: boolean
   invalid?: boolean
   describedBy?: string
 }>()
 
 const model = defineModel<string>({ required: true })
-const emit = defineEmits<{
-  clear: []
-}>()
 const visible = shallowRef(false)
-const confirmingClear = shallowRef(false)
-
-function confirmClear() {
-  model.value = ''
-  confirmingClear.value = false
-  emit('clear')
-}
 </script>
 
 <template>
@@ -33,7 +22,7 @@ function confirmClear() {
         class="text-input"
         :type="visible ? 'text' : 'password'"
         :disabled="disabled"
-        :placeholder="configured ? '已配置，留空保持不变' : '输入 API Key'"
+        placeholder="输入 API Key"
         :aria-invalid="invalid ? 'true' : undefined"
         :aria-describedby="describedBy"
         autocomplete="off"
@@ -48,28 +37,7 @@ function confirmClear() {
         {{ visible ? '隐藏' : '显示' }}
       </ElButton>
     </div>
-    <p class="field-help">
-      {{ configured ? '未输入新值时不会覆盖现有密钥。' : '密钥仅保存在本机明文配置文件中。' }}
-    </p>
-    <ElButton
-      v-if="configured && !confirmingClear"
-      native-type="button"
-      type="danger"
-      plain
-      class="danger-link"
-      aria-label="清空 API Key"
-      :disabled="disabled"
-      @click="confirmingClear = true"
-    >
-      清空密钥
-    </ElButton>
-    <div v-if="confirmingClear" class="clear-confirmation" role="alert">
-      <span>确认清空已保存的 API Key？</span>
-      <ElButton type="danger" native-type="button" aria-label="确认清空 API Key" @click="confirmClear">确认清空</ElButton>
-      <ElButton native-type="button" aria-label="取消清空 API Key" @click="confirmingClear = false">
-        取消
-      </ElButton>
-    </div>
+    <p class="field-help">密钥仅保存在本机明文配置文件中。</p>
   </div>
 </template>
 
@@ -79,8 +47,7 @@ function confirmClear() {
   gap: 0.45rem;
 }
 
-.input-row,
-.clear-confirmation {
+.input-row {
   display: flex;
   gap: 0.5rem;
   align-items: center;
@@ -101,12 +68,4 @@ function confirmClear() {
   font-size: 0.82rem;
 }
 
-.danger-link {
-  width: fit-content;
-}
-
-.clear-confirmation {
-  flex-wrap: wrap;
-  color: var(--danger);
-}
 </style>

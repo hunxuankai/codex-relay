@@ -73,7 +73,6 @@ const emit = defineEmits<{
               <dd>
                 {{
                   provider.selectedModel ||
-                  provider.model ||
                   (provider.preferenceConfigured === false
                     ? '模型偏好未配置'
                     : '未指定（切换时保留现有模型）')
@@ -98,7 +97,7 @@ const emit = defineEmits<{
               type="primary"
               native-type="button"
               :aria-label="`使用 ${provider.name}`"
-              :disabled="busy || provider.isActive || !provider.isValid || !provider.apiKeyConfigured || provider.preferenceConfigured === false"
+              :disabled="busy || provider.isActive || !provider.isValid || !provider.configurationComplete"
               @click="emit('use', provider.id)"
             >
               使用

@@ -18,7 +18,7 @@ defineEmits<{
         <h1>关于 Codex Relay</h1>
         <p class="summary">
           Codex Relay 是一个本机 Provider 配置管理工具，通过受保护的文件事务让 Codex CLI
-          在不同 Provider 和 API Key 之间切换。
+          在不同 Provider 之间切换，并为每个 Provider 独立切换多个命名 Base URL 与 API Key。
         </p>
       </div>
     </header>
@@ -43,10 +43,11 @@ defineEmits<{
     <ElCard class="info-card" shadow="never" aria-labelledby="workflow-title">
       <h2 id="workflow-title">工作原理</h2>
       <ol class="workflow-list">
-        <li><code>config.toml</code> 保存 Provider 地址及 Codex 顶层当前模型、推理强度等官方配置。</li>
-        <li><code>provider-preferences.json</code> 保存 Relay 的 Provider 模型集合和逐模型推理强度偏好。</li>
-        <li><code>providers.json</code> 保存每个 Provider 对应的 API Key。</li>
-        <li>切换 Provider 时，将目标配置同步到 <code>config.toml</code>，并将目标密钥写入 <code>auth.json</code>。</li>
+        <li><code>config.toml</code> 保存每个 Provider 当前实际 Base URL，以及 Codex 顶层当前模型、推理强度等官方配置。</li>
+        <li><code>provider-preferences.json</code> 保存多个命名 Base URL、模型集合和逐模型推理强度偏好。</li>
+        <li><code>providers.json</code> 保存每个 Provider 的多个命名 API Key 与密钥预选。</li>
+        <li>Base URL 与 API Key 可以独立切换；当前 Provider 立即同步，非当前 Provider 只保存预选。</li>
+        <li>切换 Provider 时，将其预选地址、密钥、模型和推理强度同步到 <code>config.toml</code> 与 <code>auth.json</code>。</li>
         <li>每次受管写入前创建备份；写入失败时尝试恢复所有已触及文件。</li>
       </ol>
     </ElCard>
@@ -95,8 +96,8 @@ defineEmits<{
         <article class="content-section">
           <h3>Codex Relay 应用数据</h3>
           <ul>
-            <li><code>providers.json</code>：各 Provider 的 API Key。</li>
-            <li><code>provider-preferences.json</code>：各 Provider 的可用模型、当前偏好和逐模型推理强度。</li>
+            <li><code>providers.json</code>：各 Provider 的多个命名 API Key 和密钥预选。</li>
+            <li><code>provider-preferences.json</code>：各 Provider 的多个命名 Base URL、可用模型、当前偏好和逐模型推理强度。</li>
             <li><code>settings.json</code>：窗口、托盘、首次引导、自启动和应用网络代理设置。</li>
             <li>
               <code>backups/</code>：配置事务快照、元数据和设置备份；备份页可展开事务文件列表，
@@ -121,8 +122,9 @@ defineEmits<{
       <h2 id="security-title">数据与安全</h2>
       <ul>
         <li><code>providers.json</code>、<code>auth.json</code> 和配置备份可能包含明文 API Key。</li>
+        <li>API Key 只在用户打开“管理与查看”对话框时返回前端，打开管理器后默认明文显示；关闭后清空该对话框的密钥状态。</li>
         <li>除用户显式启动 Provider 可用性或 Codex 兼容性测试外，本程序不会调用模型接口验证 Base URL 或 API Key；自动更新检查失败时静默处理，也不会自动下载或安装。</li>
-        <li>从界面清空密钥只会修改本机文件，不会在 Provider 平台吊销远端凭据。</li>
+        <li>删除或替换本机命名密钥不会在 Provider 平台吊销远端凭据；怀疑泄漏时必须在 Provider 平台轮换。</li>
         <li>卸载程序不会删除 Codex 配置、Codex Relay 应用数据、API Key、日志或备份。</li>
       </ul>
     </ElCard>

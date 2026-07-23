@@ -21,12 +21,14 @@
 ## 领域服务
 
 - `config_service`：Provider 读取、校验和 TOML 局部修改；Provider ID 创建后不可改。
-- `provider_secret_service`：版本化 `providers.json`；损坏时保留副本并返回安全错误。
+- `provider_secret_service`：版本化 `providers.json` v1/v2，拥有命名密钥、稳定 ID、顺序、
+  唯一性和 `selectedApiKeyId` 校验；损坏时保留副本并返回安全错误。
 - `auth_service`：读取当前密钥并渲染只含 `OPENAI_API_KEY` 的规范 JSON。
 - `backup_service`：事务快照、列表、加载和最多 20 份清理。
 - `transaction_service`：锁、指纹、备份、临时写、验证和回滚。
 - `provider_service`：组合配置、密钥、认证与事务，作为主界面和托盘的唯一业务入口。
-- `provider_preference_service`：保存 Relay 私有模型目录和逐模型推理强度；不得把该元数据写入 Codex `[model_providers.<id>]`。
+- `provider_preference_service`：版本化 `provider-preferences.json` v1/v2，保存命名 Base URL 与
+  Relay 私有模型偏好；不得保存第二份 URL 选择游标或把该元数据写入 Codex Provider 块。
 - `settings_service` / `autostart_service`：保存偏好并核对 Windows 实际自启状态。
 - `self_check_service`：关键自检和扩展自检。
 - `file_watch_service`：防抖、写入抑制和脱敏变化事件。
@@ -41,13 +43,16 @@ interface CommandResult<T> {
 }
 ```
 
-command 只能：解析参数 → 调用一次服务 → 映射 `CommandResult<T>` → 触发必要的安全刷新。不得直接读写三个受管文件，不得返回堆栈、内部路径错误、文件全文或普通列表中的密钥。
+command 只能：解析参数 → 调用一次服务 → 映射 `CommandResult<T>` → 触发必要的安全刷新。不得直接读写四个受管文件，不得返回堆栈、内部路径错误、文件全文或普通列表中的密钥。只有 `get_provider_api_keys_for_management` 可在显式管理边界返回完整密钥，并必须使用脱敏 `Debug`。
 
 ## Provider 写操作矩阵
 
 | 操作 | 必须经过 | 关键验证 |
 |---|---|---|
-| 创建/编辑 | `ProviderService` → `TransactionService` | 字段、指纹、目标密钥动作、未知内容保留 |
+| 创建 | `ProviderService` → `TransactionService` | 初始 URL/Key 名称和值、四文件指纹、未知内容保留 |
+| 常规编辑 | 同上 | 只修改名称、Wire API、模型；不得替换或清空 URL/Key |
+| URL/Key 批量管理 | 同上 | 稳定 ID、顺序、唯一性、当前项/最后项删除保护 |
+| URL/Key 独立选择 | 同上 | 当前/非当前语义、`config.toml` / `auth.json` 单向同步 |
 | 删除 | 同上 | 当前 Provider 禁止删除；其他 Provider/密钥保留 |
 | 切换/同步 | 同上 | 目标存在且有密钥；顶层 Provider/模型/认证一致 |
 | 恢复 | `BackupService` + `TransactionService` | 路径合法、恢复前备份、原字节与存在状态一致 |

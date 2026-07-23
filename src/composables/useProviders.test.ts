@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { RelayCommandError } from '../services/tauri'
 import type {
   CreateProviderInput,
+  ProviderBaseUrlDraft,
   ProviderListState,
   ProviderMutationOutcome,
   ProviderProfile,
@@ -14,16 +15,29 @@ const fingerprints = {
   config: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'config' },
   auth: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'auth' },
   providers: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'providers' },
+  preferences: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'preferences' },
 }
 
 function provider(id: string, active = false): ProviderProfile {
+  const baseUrl = `https://${id}.example.test/v1`
   return {
     id,
     name: id === 'provider-a' ? 'Provider A' : 'Provider B',
-    baseUrl: `https://${id}.example.test/v1`,
+    baseUrl,
+    baseUrls: [{ id: `${id}-url`, name: '主用地址', url: baseUrl }],
+    selectedBaseUrlId: `${id}-url`,
+    baseUrlStatus: 'managed',
+    apiKeys: [{ id: `${id}-key`, name: '主用密钥' }],
+    selectedApiKeyId: `${id}-key`,
+    apiKeyStatus: 'managed',
     wireApi: 'responses',
-    model: null,
+    models: ['gpt-5.6-sol'],
+    selectedModel: 'gpt-5.6-sol',
+    reasoningEfforts: { 'gpt-5.6-sol': 'medium' },
+    preferenceConfigured: true,
     apiKeyConfigured: true,
+    configurationComplete: true,
+    disabledReason: null,
     isActive: active,
     isValid: true,
     validationMessage: null,
@@ -36,6 +50,7 @@ function state(providers: ProviderProfile[]): ProviderListState {
     activeProviderId: providers.find((item) => item.isActive)?.id ?? null,
     currentAuthImportAvailable: false,
     fingerprints,
+    modelCatalog: [],
   }
 }
 
@@ -48,6 +63,9 @@ function client(overrides: Partial<ProviderClient> = {}): ProviderClient {
     listProviders: vi.fn().mockResolvedValue(state([])),
     createProvider: vi.fn().mockResolvedValue(mutation('已保存。')),
     updateProvider: vi.fn().mockResolvedValue(mutation('已更新。')),
+    saveProviderBaseUrls: vi.fn().mockResolvedValue(mutation('地址已保存。')),
+    selectProviderBaseUrl: vi.fn().mockResolvedValue(mutation('地址已切换。')),
+    selectProviderApiKey: vi.fn().mockResolvedValue(mutation('密钥已切换。')),
     deleteProvider: vi.fn().mockResolvedValue(mutation('已删除。')),
     switchProvider: vi.fn().mockResolvedValue({
       providers: [],
@@ -159,6 +177,75 @@ describe('useProviders', () => {
     expect(switchProvider).toHaveBeenCalledWith('provider-b')
     expect(providers.activeProvider.value?.id).toBe('provider-b')
     expect(providers.successMessage.value).toBe('已切换到「Provider B」。')
+  })
+
+  it('saves Base URLs and independently selects URL and API Key using the current fingerprint', async () => {
+    const listProviders = vi.fn().mockResolvedValue(
+      state([provider('provider-a', true)]),
+    )
+    const saveProviderBaseUrls = vi.fn().mockResolvedValue(mutation('地址已保存。'))
+    const selectProviderBaseUrl = vi.fn().mockResolvedValue(mutation('地址已切换。'))
+    const selectProviderApiKey = vi.fn().mockResolvedValue(mutation('密钥已切换。'))
+    const providers = useProviders({
+      client: client({
+        listProviders,
+        saveProviderBaseUrls,
+        selectProviderBaseUrl,
+        selectProviderApiKey,
+      }),
+      subscribe: false,
+    })
+    await flushPromises()
+    const entries: ProviderBaseUrlDraft[] = [
+      {
+        id: 'provider-a-url',
+        name: '主用地址',
+        url: 'https://provider-a.example.test/v1',
+      },
+      { id: null, name: '备用地址', url: 'https://backup.example.test/v1' },
+    ]
+
+    await providers.saveBaseUrls('provider-a', entries)
+    await providers.selectBaseUrl('provider-a', 'provider-a-url')
+    await providers.selectApiKey('provider-a', 'provider-a-key')
+
+    expect(saveProviderBaseUrls).toHaveBeenCalledWith({
+      providerId: 'provider-a',
+      entries,
+      expectedFiles: fingerprints,
+    })
+    expect(selectProviderBaseUrl).toHaveBeenCalledWith({
+      providerId: 'provider-a',
+      baseUrlId: 'provider-a-url',
+      expectedFiles: fingerprints,
+    })
+    expect(selectProviderApiKey).toHaveBeenCalledWith({
+      providerId: 'provider-a',
+      apiKeyId: 'provider-a-key',
+      expectedFiles: fingerprints,
+    })
+    expect(listProviders).toHaveBeenCalledTimes(4)
+  })
+
+  it('imports the current auth key only with an explicit name and current fingerprint', async () => {
+    const importCurrentAuthKey = vi.fn().mockResolvedValue(mutation('当前密钥已导入。'))
+    const providers = useProviders({
+      client: client({
+        listProviders: vi.fn().mockResolvedValue(state([provider('provider-a', true)])),
+        importCurrentAuthKey,
+      }),
+      subscribe: false,
+    })
+    await flushPromises()
+
+    await providers.importCurrentKey('provider-a', '从 Codex 导入')
+
+    expect(importCurrentAuthKey).toHaveBeenCalledWith({
+      providerId: 'provider-a',
+      name: '从 Codex 导入',
+      expectedFiles: fingerprints,
+    })
+    expect(providers.successMessage.value).toBe('当前密钥已导入。')
   })
 
   it('blocks repeated actions while busy', async () => {
