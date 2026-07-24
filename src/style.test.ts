@@ -96,8 +96,9 @@ describe('global Windows visual system', () => {
     expect(selfCheckErrorBanner).toMatch(/@media \(max-width:\s*\d+px\)/)
   })
 
-  it('keeps the top notification borders inset from the window edges', () => {
+  it('keeps the top notification inset from neighboring shell rows and window edges', () => {
     expect(app).toMatch(/\.app-notification-slot\s*{[\s\S]*?margin-inline:\s*1\.25rem/)
+    expect(app).toMatch(/\.app-notification-slot\s*{[\s\S]*?margin-block:\s*0\.75rem/)
   })
 
   it('keeps Provider list tracks packed at the top of its pane', () => {

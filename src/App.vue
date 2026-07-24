@@ -23,6 +23,7 @@ import ProvidersView from './views/ProvidersView.vue'
 import SettingsView from './views/SettingsView.vue'
 
 type AppView = 'providers' | 'health' | 'backups' | 'settings' | 'about'
+type AppMessage = { level: 'success' | 'error'; message: string }
 
 const providerState = useProviders()
 const healthState = useHealth()
@@ -39,7 +40,8 @@ const onboardingDismissed = shallowRef(false)
 const startCreatingProvider = shallowRef(false)
 const pendingFirstProvider = shallowRef(false)
 const lastOperation = shallowRef<string | null>(null)
-const appMessage = shallowRef<{ level: 'success' | 'error'; message: string } | null>(null)
+const appMessage = shallowRef<AppMessage | null>(null)
+const appMessageId = shallowRef(0)
 const appVersion = shallowRef<string | null>(null)
 
 const configMissing = computed(() => {
@@ -88,6 +90,11 @@ async function completeOnboarding() {
   return true
 }
 
+function showAppMessage(message: AppMessage) {
+  appMessage.value = message
+  appMessageId.value += 1
+}
+
 async function addFirstProvider() {
   onboardingDismissed.value = true
   pendingFirstProvider.value = true
@@ -123,7 +130,7 @@ async function exitApplication() {
   try {
     await relay.exitApplication()
   } catch {
-    appMessage.value = { level: 'error', message: '无法退出应用，请使用托盘菜单中的“退出”。' }
+    showAppMessage({ level: 'error', message: '无法退出应用，请使用托盘菜单中的“退出”。' })
   }
 }
 
@@ -137,7 +144,7 @@ async function handleBackupRestored() {
     return
   }
   const message = '配置备份已恢复，但状态刷新未完全成功，请手动重新加载。'
-  appMessage.value = { level: 'error', message }
+  showAppMessage({ level: 'error', message })
   lastOperation.value = message
 }
 
@@ -178,11 +185,11 @@ onMounted(async () => {
   await Promise.all([healthState.runExtended(), versionPromise])
   try {
     stopNotification = await relay.onAppNotification((notification) => {
-      appMessage.value = notification
+      showAppMessage(notification)
       lastOperation.value = notification.message
     })
   } catch {
-    appMessage.value = { level: 'error', message: '无法监听应用通知。' }
+    showAppMessage({ level: 'error', message: '无法监听应用通知。' })
   }
 })
 
@@ -277,6 +284,7 @@ onUnmounted(() => {
       class="app-notification-slot"
       :message="appMessage?.message ?? null"
       :level="appMessage?.level ?? 'success'"
+      :message-id="appMessageId"
     />
 
     <section class="app-content">
@@ -349,6 +357,7 @@ onUnmounted(() => {
 
 .app-notification-slot {
   grid-row: 4;
+  margin-block: 0.75rem;
   margin-inline: 1.25rem;
 }
 
