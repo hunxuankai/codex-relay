@@ -681,6 +681,8 @@ mod tests {
         include_bytes!("../../../../../fixtures/config-multiple-providers.toml");
     const AUTH_A: &[u8] = include_bytes!("../../../../../fixtures/auth-api-key.json");
     const PROVIDERS: &[u8] = include_bytes!("../../../../../fixtures/providers-multiple.json");
+    const PREFERENCES: &[u8] =
+        include_bytes!("../../../../../fixtures/provider-preferences-multiple.json");
     const CONFIG_B: &[u8] = br#"model_provider = "provider-b"
 
 [model_providers.provider-a]
@@ -759,12 +761,44 @@ wire_api = "responses"
         assert_eq!(fs::read(&paths.config_file).unwrap(), CONFIG_B);
         assert_eq!(fs::read(&paths.auth_file).unwrap(), AUTH_B);
         assert!(!paths.app_data_dir.join("transaction.json").exists());
-        assert_eq!(backup.list_backups().unwrap().len(), 1);
+        assert_eq!(backup.list_backups().unwrap().backups.len(), 1);
         assert_eq!(
             outcome.transaction.provider_id.as_deref(),
             Some("provider-b")
         );
         assert!(outcome.fingerprints.config.exists);
+    }
+
+    #[tokio::test]
+    async fn transaction_succeeds_when_an_unavailable_backup_is_preserved() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_initial_files(&paths);
+        let expected = FileSetFingerprint::from_paths(
+            &paths.config_file,
+            &paths.auth_file,
+            &paths.providers_file,
+            &paths.provider_preferences_file,
+        )
+        .unwrap();
+        let unavailable_directory = paths.backups_dir.join("unavailable-backup");
+        fs::create_dir_all(&unavailable_directory).unwrap();
+        fs::write(
+            unavailable_directory.join("metadata.json"),
+            b"{ invalid json",
+        )
+        .unwrap();
+        let backup = BackupService::new(paths.backups_dir.clone(), "0.1.0");
+        let service = TransactionService::new(paths.clone(), backup);
+
+        service
+            .execute(request(Some(expected)), |_| Ok(()))
+            .await
+            .unwrap();
+
+        assert_eq!(fs::read(&paths.config_file).unwrap(), CONFIG_B);
+        assert_eq!(fs::read(&paths.auth_file).unwrap(), AUTH_B);
+        assert!(unavailable_directory.exists());
     }
 
     #[tokio::test]
@@ -793,7 +827,7 @@ wire_api = "responses"
             fs::read(&paths.config_file).unwrap(),
             b"model_provider = \"external\"\n"
         );
-        assert!(backup.list_backups().unwrap().is_empty());
+        assert!(backup.list_backups().unwrap().backups.is_empty());
     }
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1170,6 +1204,48 @@ wire_api = "responses"
         assert_eq!(fs::read(&paths.config_file).unwrap(), CONFIG_B);
         assert_eq!(fs::read(&paths.auth_file).unwrap(), AUTH_B);
         assert_eq!(fs::read(&paths.providers_file).unwrap(), PROVIDERS);
-        assert_eq!(backup.list_backups().unwrap().len(), 2);
+        assert_eq!(backup.list_backups().unwrap().backups.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn restore_legacy_backup_preserves_current_preferences_before_removing_them() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_initial_files(&paths);
+        fs::write(&paths.provider_preferences_file, PREFERENCES).unwrap();
+        let legacy_directory = paths.backups_dir.join("legacy-backup");
+        let legacy_metadata = br#"{
+  "transactionId": "legacy-backup",
+  "createdAt": "2026-07-19T22:00:00+08:00",
+  "operation": "switch_provider",
+  "providerId": "provider-b",
+  "configExisted": true,
+  "authExisted": true,
+  "providersExisted": true,
+  "appVersion": "0.1.0"
+}
+"#;
+        fs::create_dir_all(&legacy_directory).unwrap();
+        fs::write(legacy_directory.join("metadata.json"), legacy_metadata).unwrap();
+        fs::write(legacy_directory.join("config.toml"), CONFIG_B).unwrap();
+        fs::write(legacy_directory.join("auth.json"), AUTH_B).unwrap();
+        fs::write(legacy_directory.join("providers.json"), PROVIDERS).unwrap();
+        let backup = BackupService::new(paths.backups_dir.clone(), "0.1.2");
+        let service = TransactionService::new(paths.clone(), backup.clone());
+
+        let outcome = service.restore_backup("legacy-backup").await.unwrap();
+        let current_snapshot = backup
+            .load_snapshot(&outcome.backup.directory_name)
+            .unwrap();
+
+        assert_eq!(fs::read(&paths.config_file).unwrap(), CONFIG_B);
+        assert_eq!(fs::read(&paths.auth_file).unwrap(), AUTH_B);
+        assert_eq!(fs::read(&paths.providers_file).unwrap(), PROVIDERS);
+        assert!(!paths.provider_preferences_file.exists());
+        assert_eq!(current_snapshot.preferences.as_deref(), Some(PREFERENCES));
+        assert_eq!(
+            fs::read(legacy_directory.join("metadata.json")).unwrap(),
+            legacy_metadata
+        );
     }
 }

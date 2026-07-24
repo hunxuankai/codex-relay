@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub const BACKUP_METADATA_SCHEMA_VERSION: u32 = 2;
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum BackupFileName {
     #[serde(rename = "config.toml")]
@@ -39,6 +41,7 @@ impl BackupFileName {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupMetadata {
+    pub schema_version: u32,
     pub transaction_id: String,
     pub created_at: String,
     pub operation: String,
@@ -48,6 +51,13 @@ pub struct BackupMetadata {
     pub providers_existed: bool,
     pub preferences_existed: bool,
     pub app_version: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BackupCompatibility {
+    Current,
+    LegacyWithoutPreferences,
 }
 
 impl BackupMetadata {
@@ -76,6 +86,23 @@ pub struct BackupSummary {
     pub directory_name: String,
     pub metadata: BackupMetadata,
     pub files: Vec<BackupFileName>,
+    pub compatibility: BackupCompatibility,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupInventory {
+    pub backups: Vec<BackupSummary>,
+    pub unavailable_backups: Vec<UnavailableBackup>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnavailableBackup {
+    pub directory_name: String,
+    pub code: String,
+    pub message: String,
+    pub can_open_metadata: bool,
 }
 
 #[cfg(test)]
@@ -85,6 +112,7 @@ mod tests {
     #[test]
     fn backup_metadata_does_not_have_secret_fields() {
         let metadata = BackupMetadata {
+            schema_version: BACKUP_METADATA_SCHEMA_VERSION,
             transaction_id: "tx-1".into(),
             created_at: "2026-07-20T22:00:00+08:00".into(),
             operation: "switch_provider".into(),

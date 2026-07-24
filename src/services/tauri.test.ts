@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 import { getVersion } from '@tauri-apps/api/app'
 import { check } from '@tauri-apps/plugin-updater'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { BackupSummary } from '../types/backup'
+import type { BackupInventory } from '../types/backup'
 import type { HealthReport } from '../types/health'
 import type { ProviderAvailabilityResult } from '../types/providerAvailability'
 import type {
@@ -121,7 +121,7 @@ const health: HealthReport = {
   generatedAt: '2026-07-20T00:00:00+08:00',
 }
 
-const backups: BackupSummary[] = []
+const backups: BackupInventory = { backups: [], unavailableBackups: [] }
 
 const availabilityResult: ProviderAvailabilityResult = {
   providerId: 'provider-a',

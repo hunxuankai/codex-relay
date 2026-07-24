@@ -449,15 +449,18 @@ impl SelfCheckService {
         }
 
         match self.backup_service.list_backups() {
-            Ok(backups) if backups.len() <= 20 => checks.push(normal_check(
+            Ok(inventory) if inventory.backups.len() <= 20 => checks.push(normal_check(
                 "backup-count",
                 "配置备份",
-                &format!("当前有 {} 份事务备份。", backups.len()),
+                &format!("当前有 {} 份事务备份。", inventory.backups.len()),
             )),
-            Ok(backups) => checks.push(warning_check(
+            Ok(inventory) => checks.push(warning_check(
                 "backup-count",
                 "配置备份",
-                &format!("当前有 {} 份备份，超过建议上限 20。", backups.len()),
+                &format!(
+                    "当前有 {} 份备份，超过建议上限 20。",
+                    inventory.backups.len()
+                ),
             )),
             Err(error) => checks.push(error_check(
                 "backup-count",

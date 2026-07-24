@@ -1,7 +1,12 @@
 use crate::error::AppError;
-use crate::models::backup::{BackupFileName, BackupMetadata, BackupSummary};
+use crate::models::backup::{
+    BACKUP_METADATA_SCHEMA_VERSION, BackupCompatibility, BackupFileName, BackupInventory,
+    BackupMetadata, BackupSummary, UnavailableBackup,
+};
 use crate::models::transaction::{ConfigTransaction, TransactionOperation};
 use chrono::Utc;
+use serde::Deserialize;
+use serde_json::Value;
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -12,6 +17,27 @@ const AUTH_FILE_NAME: &str = "auth.json";
 const PROVIDERS_FILE_NAME: &str = "providers.json";
 const PREFERENCES_FILE_NAME: &str = "provider-preferences.json";
 const METADATA_FILE_NAME: &str = "metadata.json";
+
+#[derive(Clone, Debug)]
+struct ParsedBackupMetadata {
+    metadata: BackupMetadata,
+    compatibility: BackupCompatibility,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnversionedBackupMetadata {
+    transaction_id: String,
+    created_at: String,
+    operation: String,
+    provider_id: Option<String>,
+    config_existed: bool,
+    auth_existed: bool,
+    providers_existed: bool,
+    #[serde(default)]
+    preferences_existed: bool,
+    app_version: String,
+}
 
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct FileSnapshot {
@@ -72,6 +98,7 @@ impl BackupService {
         })?;
 
         let metadata = BackupMetadata {
+            schema_version: BACKUP_METADATA_SCHEMA_VERSION,
             transaction_id: transaction.id.clone(),
             created_at: transaction.started_at.clone(),
             operation: operation_name(transaction.operation).into(),
@@ -115,15 +142,18 @@ impl BackupService {
             directory_name,
             metadata,
             files,
+            compatibility: BackupCompatibility::Current,
         })
     }
 
-    pub fn list_backups(&self) -> Result<Vec<BackupSummary>, AppError> {
+    pub fn list_backups(&self) -> Result<BackupInventory, AppError> {
         if !self.root.exists() {
-            return Ok(Vec::new());
+            return Ok(BackupInventory::default());
         }
 
-        let mut backups = fs::read_dir(&self.root)
+        let mut backups = Vec::new();
+        let mut unavailable_backups = Vec::new();
+        for entry in fs::read_dir(&self.root)
             .map_err(AppError::from)?
             .filter_map(Result::ok)
             .filter_map(|entry| {
@@ -133,26 +163,42 @@ impl BackupService {
                     .filter(|file_type| file_type.is_dir())
                     .map(|_| entry)
             })
-            .map(|entry| {
-                let directory_name = entry.file_name().to_string_lossy().into_owned();
-                let metadata = read_metadata(&entry.path().join(METADATA_FILE_NAME))?;
-                let files = available_backup_files(&entry.path(), &metadata);
-                Ok(BackupSummary {
-                    directory_name,
-                    metadata,
-                    files,
-                })
-            })
-            .collect::<Result<Vec<_>, AppError>>()?;
+        {
+            let directory_name = entry.file_name().to_string_lossy().into_owned();
+            let directory = entry.path();
+            match read_metadata(&directory.join(METADATA_FILE_NAME)) {
+                Ok(parsed) => {
+                    let files = available_backup_files(&directory, &parsed.metadata);
+                    backups.push(BackupSummary {
+                        directory_name,
+                        metadata: parsed.metadata,
+                        files,
+                        compatibility: parsed.compatibility,
+                    });
+                }
+                Err(error) if is_unavailable_backup_metadata_error(&error) => {
+                    unavailable_backups.push(unavailable_backup(
+                        directory_name,
+                        &directory,
+                        &error,
+                    ));
+                }
+                Err(error) => return Err(error),
+            }
+        }
 
         backups.sort_by(|left, right| right.metadata.created_at.cmp(&left.metadata.created_at));
-        Ok(backups)
+        unavailable_backups.sort_by(|left, right| left.directory_name.cmp(&right.directory_name));
+        Ok(BackupInventory {
+            backups,
+            unavailable_backups,
+        })
     }
 
     pub fn load_snapshot(&self, directory_name: &str) -> Result<FileSnapshot, AppError> {
         validate_backup_name(directory_name)?;
         let directory = self.root.join(directory_name);
-        let metadata = read_metadata(&directory.join(METADATA_FILE_NAME))?;
+        let metadata = read_metadata(&directory.join(METADATA_FILE_NAME))?.metadata;
 
         Ok(FileSnapshot {
             config: read_snapshot_file(&directory.join(CONFIG_FILE_NAME), metadata.config_existed)?,
@@ -195,17 +241,16 @@ impl BackupService {
         }
 
         let metadata_path = resolve_file_inside_directory(&directory, METADATA_FILE_NAME)?;
-        let metadata = read_metadata(&metadata_path)?;
+        if file_name == BackupFileName::Metadata {
+            return Ok(metadata_path);
+        }
+        let metadata = read_metadata(&metadata_path)?.metadata;
         if !file_name.existed_in(&metadata) {
             return Err(AppError::new(
                 "BACKUP_FILE_NOT_FOUND",
                 "该备份中不存在所选文件。",
                 "backup metadata records selected file as absent",
             ));
-        }
-
-        if file_name == BackupFileName::Metadata {
-            return Ok(metadata_path);
         }
         resolve_file_inside_directory(&directory, file_name.as_str())
     }
@@ -215,7 +260,7 @@ impl BackupService {
         max_backups: usize,
         active_transaction_id: Option<&str>,
     ) -> Result<(), AppError> {
-        let mut backups = self.list_backups()?;
+        let mut backups = self.list_backups()?.backups;
         backups.sort_by(|left, right| left.metadata.created_at.cmp(&right.metadata.created_at));
 
         while backups.len() > max_backups {
@@ -284,7 +329,7 @@ fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
     file.sync_all().map_err(AppError::from)
 }
 
-fn read_metadata(path: &Path) -> Result<BackupMetadata, AppError> {
+fn read_metadata(path: &Path) -> Result<ParsedBackupMetadata, AppError> {
     let bytes = fs::read(path).map_err(|error| {
         AppError::new(
             "BACKUP_METADATA_READ_FAILED",
@@ -292,13 +337,108 @@ fn read_metadata(path: &Path) -> Result<BackupMetadata, AppError> {
             error.to_string(),
         )
     })?;
-    serde_json::from_slice(&bytes).map_err(|error| {
+    let value = serde_json::from_slice::<Value>(&bytes).map_err(invalid_backup_metadata)?;
+    let object = value.as_object().ok_or_else(|| {
         AppError::new(
             "INVALID_BACKUP_METADATA",
             "备份元数据格式无效。",
-            error.to_string(),
+            "backup metadata JSON root is not an object",
         )
-    })
+    })?;
+
+    match object.get("schemaVersion") {
+        Some(Value::Number(version)) => {
+            let version = version.as_u64().ok_or_else(|| {
+                AppError::new(
+                    "INVALID_BACKUP_METADATA",
+                    "备份元数据格式无效。",
+                    "backup metadata schemaVersion is not an unsigned integer",
+                )
+            })?;
+            if version != u64::from(BACKUP_METADATA_SCHEMA_VERSION) {
+                return Err(AppError::new(
+                    "UNSUPPORTED_BACKUP_METADATA_VERSION",
+                    "备份元数据版本不受支持。",
+                    format!("unsupported backup metadata schema version: {version}"),
+                ));
+            }
+            let metadata =
+                serde_json::from_value::<BackupMetadata>(value).map_err(invalid_backup_metadata)?;
+            Ok(ParsedBackupMetadata {
+                metadata,
+                compatibility: BackupCompatibility::Current,
+            })
+        }
+        Some(_) => Err(AppError::new(
+            "INVALID_BACKUP_METADATA",
+            "备份元数据格式无效。",
+            "backup metadata schemaVersion is not a number",
+        )),
+        None => {
+            let compatibility = if object.contains_key("preferencesExisted") {
+                BackupCompatibility::Current
+            } else {
+                BackupCompatibility::LegacyWithoutPreferences
+            };
+            let legacy = serde_json::from_value::<UnversionedBackupMetadata>(value)
+                .map_err(invalid_backup_metadata)?;
+            Ok(ParsedBackupMetadata {
+                metadata: BackupMetadata {
+                    schema_version: if compatibility == BackupCompatibility::Current {
+                        BACKUP_METADATA_SCHEMA_VERSION
+                    } else {
+                        1
+                    },
+                    transaction_id: legacy.transaction_id,
+                    created_at: legacy.created_at,
+                    operation: legacy.operation,
+                    provider_id: legacy.provider_id,
+                    config_existed: legacy.config_existed,
+                    auth_existed: legacy.auth_existed,
+                    providers_existed: legacy.providers_existed,
+                    preferences_existed: legacy.preferences_existed,
+                    app_version: legacy.app_version,
+                },
+                compatibility,
+            })
+        }
+    }
+}
+
+fn invalid_backup_metadata(error: serde_json::Error) -> AppError {
+    AppError::new(
+        "INVALID_BACKUP_METADATA",
+        "备份元数据格式无效。",
+        error.to_string(),
+    )
+}
+
+fn is_unavailable_backup_metadata_error(error: &AppError) -> bool {
+    matches!(
+        error.code(),
+        "BACKUP_METADATA_READ_FAILED"
+            | "INVALID_BACKUP_METADATA"
+            | "UNSUPPORTED_BACKUP_METADATA_VERSION"
+    )
+}
+
+fn unavailable_backup(
+    directory_name: String,
+    directory: &Path,
+    error: &AppError,
+) -> UnavailableBackup {
+    let message = match error.code() {
+        "UNSUPPORTED_BACKUP_METADATA_VERSION" => {
+            "此备份使用当前版本不支持的元数据格式，已保留，无法安全恢复。"
+        }
+        _ => "无法读取此备份的元数据，已保留，无法安全恢复。",
+    };
+    UnavailableBackup {
+        directory_name,
+        code: error.code().into(),
+        message: message.into(),
+        can_open_metadata: directory.join(METADATA_FILE_NAME).is_file(),
+    }
 }
 
 fn read_snapshot_file(path: &Path, expected: bool) -> Result<Option<Vec<u8>>, AppError> {
@@ -426,6 +566,7 @@ mod tests {
         let metadata = fs::read_to_string(backup_directory.join("metadata.json")).unwrap();
         assert!(!metadata.contains("test-key-a-not-real"));
         assert!(!metadata.contains("OPENAI_API_KEY"));
+        assert!(metadata.contains("\"schemaVersion\": 2"));
         assert!(metadata.ends_with('\n'));
         assert!(!summary.metadata.providers_existed);
         assert_eq!(
@@ -464,11 +605,218 @@ mod tests {
         let listed = service.list_backups().unwrap();
         let loaded = service.load_snapshot(&newest.directory_name).unwrap();
 
-        assert_eq!(listed[0].metadata.transaction_id, "tx-new");
-        assert_eq!(listed[1].metadata.transaction_id, "tx-old");
+        assert_eq!(listed.backups[0].metadata.transaction_id, "tx-new");
+        assert_eq!(listed.backups[1].metadata.transaction_id, "tx-old");
         assert_eq!(loaded.config.as_deref(), Some(b"second\n".as_slice()));
         assert!(loaded.auth.is_none());
         assert!(loaded.providers.is_some());
+    }
+
+    #[test]
+    fn legacy_metadata_without_preferences_is_recoverable_without_rewriting_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = BackupService::new(directory.path().join("backups"), "0.1.0");
+        let backup_directory = service.root().join("legacy-backup");
+        let metadata = br#"{
+  "transactionId": "legacy-transaction",
+  "createdAt": "2026-07-19T22:00:00+08:00",
+  "operation": "switch_provider",
+  "providerId": "provider-a",
+  "configExisted": true,
+  "authExisted": false,
+  "providersExisted": false,
+  "appVersion": "0.1.0"
+}
+"#;
+        fs::create_dir_all(&backup_directory).unwrap();
+        fs::write(backup_directory.join(METADATA_FILE_NAME), metadata).unwrap();
+        fs::write(
+            backup_directory.join(CONFIG_FILE_NAME),
+            b"model_provider = \"provider-a\"\n",
+        )
+        .unwrap();
+
+        let listed = service.list_backups().unwrap();
+        let loaded = service.load_snapshot("legacy-backup").unwrap();
+        let resolved = service
+            .resolve_backup_file("legacy-backup", BackupFileName::Config)
+            .unwrap();
+        service.cleanup_old_backups(20, None).unwrap();
+
+        assert_eq!(listed.backups.len(), 1);
+        assert_eq!(
+            listed.backups[0].metadata.transaction_id,
+            "legacy-transaction"
+        );
+        assert!(!listed.backups[0].metadata.preferences_existed);
+        assert_eq!(
+            listed.backups[0].compatibility,
+            BackupCompatibility::LegacyWithoutPreferences
+        );
+        assert_eq!(
+            listed.backups[0].files,
+            vec![BackupFileName::Config, BackupFileName::Metadata]
+        );
+        assert_eq!(
+            loaded.config.as_deref(),
+            Some(b"model_provider = \"provider-a\"\n".as_slice())
+        );
+        assert!(loaded.preferences.is_none());
+        assert_eq!(
+            resolved,
+            fs::canonicalize(backup_directory.join(CONFIG_FILE_NAME)).unwrap()
+        );
+        assert!(backup_directory.exists());
+        assert_eq!(
+            fs::read(backup_directory.join(METADATA_FILE_NAME)).unwrap(),
+            metadata
+        );
+    }
+
+    #[test]
+    fn unversioned_metadata_with_preferences_keeps_the_preferences_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = BackupService::new(directory.path().join("backups"), "0.1.0");
+        let backup_directory = service.root().join("unversioned-v2-backup");
+        let metadata = br#"{
+  "transactionId": "unversioned-v2",
+  "createdAt": "2026-07-20T22:00:00+08:00",
+  "operation": "switch_provider",
+  "providerId": "provider-a",
+  "configExisted": false,
+  "authExisted": false,
+  "providersExisted": false,
+  "preferencesExisted": true,
+  "appVersion": "0.1.2"
+}
+"#;
+        fs::create_dir_all(&backup_directory).unwrap();
+        fs::write(backup_directory.join(METADATA_FILE_NAME), metadata).unwrap();
+        fs::write(
+            backup_directory.join(PREFERENCES_FILE_NAME),
+            b"{\n  \"version\": 2,\n  \"providers\": {}\n}\n",
+        )
+        .unwrap();
+
+        let listed = service.list_backups().unwrap();
+        let loaded = service.load_snapshot("unversioned-v2-backup").unwrap();
+
+        assert_eq!(listed.backups.len(), 1);
+        assert_eq!(
+            listed.backups[0].compatibility,
+            BackupCompatibility::Current
+        );
+        assert!(listed.backups[0].metadata.preferences_existed);
+        assert_eq!(
+            listed.backups[0].metadata.schema_version,
+            BACKUP_METADATA_SCHEMA_VERSION
+        );
+        assert!(loaded.preferences.is_some());
+    }
+
+    #[test]
+    fn unsupported_metadata_version_is_listed_as_unavailable() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = BackupService::new(directory.path().join("backups"), "0.1.0");
+        let unavailable_directory = service.root().join("future-backup");
+        fs::create_dir_all(&unavailable_directory).unwrap();
+        fs::write(
+            unavailable_directory.join(METADATA_FILE_NAME),
+            br#"{
+  "schemaVersion": 3,
+  "transactionId": "future-transaction"
+}
+"#,
+        )
+        .unwrap();
+
+        let listed = service.list_backups().unwrap();
+
+        assert!(listed.backups.is_empty());
+        assert_eq!(listed.unavailable_backups.len(), 1);
+        assert_eq!(
+            listed.unavailable_backups[0].code,
+            "UNSUPPORTED_BACKUP_METADATA_VERSION"
+        );
+        assert_eq!(
+            listed.unavailable_backups[0].message,
+            "此备份使用当前版本不支持的元数据格式，已保留，无法安全恢复。"
+        );
+    }
+
+    #[test]
+    fn invalid_metadata_does_not_hide_recoverable_backups_or_block_cleanup() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = BackupService::new(directory.path().join("backups"), "0.1.0");
+        let valid = service
+            .create_backup(
+                &transaction("tx-valid", "2026-07-20T22:00:00+08:00"),
+                &FileSnapshot::default(),
+            )
+            .unwrap();
+        let unavailable_directory = service.root().join("unavailable-backup");
+        fs::create_dir_all(&unavailable_directory).unwrap();
+        fs::write(
+            unavailable_directory.join(METADATA_FILE_NAME),
+            b"{ invalid json",
+        )
+        .unwrap();
+
+        let listed = service.list_backups().unwrap();
+        service.cleanup_old_backups(20, None).unwrap();
+
+        assert_eq!(listed.backups.len(), 1);
+        assert_eq!(listed.backups[0].directory_name, valid.directory_name);
+        assert_eq!(listed.unavailable_backups.len(), 1);
+        assert_eq!(
+            listed.unavailable_backups[0].directory_name,
+            "unavailable-backup"
+        );
+        assert_eq!(
+            listed.unavailable_backups[0].code,
+            "INVALID_BACKUP_METADATA"
+        );
+        assert!(listed.unavailable_backups[0].can_open_metadata);
+        assert_eq!(
+            listed.unavailable_backups[0].message,
+            "无法读取此备份的元数据，已保留，无法安全恢复。"
+        );
+        assert!(unavailable_directory.exists());
+    }
+
+    #[test]
+    fn missing_metadata_is_listed_without_an_open_action() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = BackupService::new(directory.path().join("backups"), "0.1.0");
+        fs::create_dir_all(service.root().join("missing-metadata")).unwrap();
+
+        let listed = service.list_backups().unwrap();
+
+        assert!(listed.backups.is_empty());
+        assert_eq!(listed.unavailable_backups.len(), 1);
+        assert_eq!(
+            listed.unavailable_backups[0].code,
+            "BACKUP_METADATA_READ_FAILED"
+        );
+        assert!(!listed.unavailable_backups[0].can_open_metadata);
+    }
+
+    #[test]
+    fn metadata_file_can_be_opened_when_its_contents_are_unreadable() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = BackupService::new(directory.path().join("backups"), "0.1.0");
+        let backup_directory = service.root().join("unavailable-backup");
+        fs::create_dir_all(&backup_directory).unwrap();
+        fs::write(backup_directory.join(METADATA_FILE_NAME), b"{ invalid json").unwrap();
+
+        let resolved = service
+            .resolve_backup_file("unavailable-backup", BackupFileName::Metadata)
+            .unwrap();
+
+        assert_eq!(
+            resolved,
+            fs::canonicalize(backup_directory.join(METADATA_FILE_NAME)).unwrap()
+        );
     }
 
     #[test]
@@ -582,7 +930,7 @@ mod tests {
 
         let listed = service.list_backups().unwrap();
 
-        assert_eq!(listed[0].files, vec![BackupFileName::Metadata]);
+        assert_eq!(listed.backups[0].files, vec![BackupFileName::Metadata]);
     }
 
     #[test]
@@ -617,19 +965,22 @@ mod tests {
         service.cleanup_old_backups(20, Some("tx-01")).unwrap();
         let listed = service.list_backups().unwrap();
 
-        assert_eq!(listed.len(), 20);
+        assert_eq!(listed.backups.len(), 20);
         assert!(
             listed
+                .backups
                 .iter()
                 .any(|backup| backup.metadata.transaction_id == "tx-01")
         );
         assert!(
             !listed
+                .backups
                 .iter()
                 .any(|backup| backup.metadata.transaction_id == "tx-02")
         );
         assert!(
             !listed
+                .backups
                 .iter()
                 .any(|backup| backup.metadata.transaction_id == "tx-03")
         );

@@ -205,7 +205,7 @@ mod tests {
         let backups = backup_commands::list_backups_inner(&state);
 
         assert!(backups.success);
-        assert_eq!(backups.data.unwrap().len(), 1);
+        assert_eq!(backups.data.unwrap().backups.len(), 1);
     }
 
     #[test]

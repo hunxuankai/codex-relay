@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type Event, type UnlistenFn } from '@tauri-apps/api/event'
 import { getVersion } from '@tauri-apps/api/app'
 import { check, type DownloadEvent } from '@tauri-apps/plugin-updater'
-import type { BackupFileName, BackupSummary } from '../types/backup'
+import type { BackupFileName, BackupInventory } from '../types/backup'
 import type { CommandResult } from '../types/command'
 import type { HealthReport } from '../types/health'
 import type { ProviderAvailabilityResult } from '../types/providerAvailability'
@@ -164,7 +164,7 @@ export function exitApplication(): Promise<void> {
   return call('exit_application')
 }
 
-export function listBackups(): Promise<BackupSummary[]> {
+export function listBackups(): Promise<BackupInventory> {
   return call('list_backups')
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ElButton, ElCard } from 'element-plus'
+import { ElButton, ElCard, ElTag } from 'element-plus'
 import type { BackupFileName, BackupSummary } from '../types/backup'
 
 const props = defineProps<{
@@ -22,7 +22,17 @@ const fileListId = `backup-files-${encodeURIComponent(props.backup.directoryName
     <ElCard class="backup-card" shadow="never">
       <div class="backup-card-summary">
         <div class="backup-details">
-          <strong>{{ backup.metadata.transactionId }}</strong>
+          <div class="backup-title">
+            <strong>{{ backup.metadata.transactionId }}</strong>
+            <ElTag
+              v-if="backup.compatibility === 'legacyWithoutPreferences'"
+              type="warning"
+              effect="plain"
+              size="small"
+            >
+              旧版备份
+            </ElTag>
+          </div>
           <span>{{ backup.metadata.createdAt }}</span>
           <span>操作：{{ backup.metadata.operation }}</span>
           <span>Provider：{{ backup.metadata.providerId ?? '无' }}</span>
@@ -92,6 +102,13 @@ const fileListId = `backup-files-${encodeURIComponent(props.backup.directoryName
 .backup-actions {
   display: grid;
   gap: 0.25rem;
+}
+
+.backup-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .backup-actions {

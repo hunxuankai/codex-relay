@@ -1,15 +1,15 @@
 use crate::app_state::AppState;
 use crate::commands::command_result;
 use crate::error::CommandResult;
-use crate::models::backup::{BackupFileName, BackupSummary};
+use crate::models::backup::{BackupFileName, BackupInventory};
 use crate::models::provider::ProviderMutationOutcome;
 
-pub(crate) fn list_backups_inner(state: &AppState) -> CommandResult<Vec<BackupSummary>> {
+pub(crate) fn list_backups_inner(state: &AppState) -> CommandResult<BackupInventory> {
     command_result(state.provider_service.list_backups())
 }
 
 #[tauri::command]
-pub fn list_backups(state: tauri::State<'_, AppState>) -> CommandResult<Vec<BackupSummary>> {
+pub fn list_backups(state: tauri::State<'_, AppState>) -> CommandResult<BackupInventory> {
     list_backups_inner(&state)
 }
 

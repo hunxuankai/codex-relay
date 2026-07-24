@@ -211,7 +211,7 @@ async fn audited_provider_and_backup_workflow_ignores_default_path_sentinels() {
         })
         .await
         .unwrap();
-    assert_eq!(service.list_backups().unwrap().len(), 1);
+    assert_eq!(service.list_backups().unwrap().backups.len(), 1);
 
     let observed = audit.observed();
     assert!(!observed.is_empty());

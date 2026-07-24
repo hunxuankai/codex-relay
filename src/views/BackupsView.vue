@@ -4,6 +4,7 @@ import { ElButton, ElEmpty, ElSkeleton } from 'element-plus'
 import AppNotification from '../components/AppNotification.vue'
 import BackupCard from '../components/BackupCard.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import UnavailableBackupList from '../components/UnavailableBackupList.vue'
 import { useBackups } from '../composables/useBackups'
 
 const emit = defineEmits<{
@@ -19,6 +20,13 @@ const selectedBackup = computed(
       (backup) => backup.directoryName === restoreDirectoryName.value,
     ) ?? null,
 )
+const restoreMessage = computed(() => {
+  const transactionId = selectedBackup.value?.metadata.transactionId ?? ''
+  const legacyNote = selectedBackup.value?.compatibility === 'legacyWithoutPreferences'
+    ? '该旧版备份不包含命名地址、模型与推理偏好，恢复会回到旧版状态。'
+    : ''
+  return `确定恢复事务 ${transactionId} 吗？${legacyNote}恢复前会再次备份当前状态，完成后将刷新 Provider 与自检状态。`
+})
 
 async function confirmRestore() {
   const directoryName = restoreDirectoryName.value
@@ -51,8 +59,14 @@ function toggleFiles(directoryName: string) {
     <AppNotification :message="backupState.error.value?.message ?? null" level="error" />
 
     <ElSkeleton v-if="backupState.loading.value" :rows="3" animated aria-label="正在加载备份" />
-    <ElEmpty v-else-if="backupState.backups.value.length === 0" description="暂无可恢复的事务备份。" />
-    <ul v-else class="backup-list">
+    <ElEmpty
+      v-else-if="backupState.backups.value.length === 0 && backupState.unavailableBackups.value.length === 0"
+      description="暂无可恢复的事务备份。"
+    />
+    <ul
+      v-if="!backupState.loading.value && backupState.backups.value.length > 0"
+      class="backup-list"
+    >
       <BackupCard
         v-for="backup in backupState.backups.value"
         :key="backup.directoryName"
@@ -65,10 +79,17 @@ function toggleFiles(directoryName: string) {
       />
     </ul>
 
+    <UnavailableBackupList
+      v-if="!backupState.loading.value && backupState.unavailableBackups.value.length > 0"
+      :backups="backupState.unavailableBackups.value"
+      :busy="backupState.busy.value"
+      @open-metadata="backupState.openFile($event, 'metadata.json')"
+    />
+
     <ConfirmDialog
       :open="Boolean(restoreDirectoryName)"
       title="确认恢复备份"
-      :message="`确定恢复事务 ${selectedBackup?.metadata.transactionId ?? ''} 吗？恢复前会再次备份当前状态，完成后将刷新 Provider 与自检状态。`"
+      :message="restoreMessage"
       confirm-label="恢复"
       @confirm="confirmRestore"
       @cancel="restoreDirectoryName = null"

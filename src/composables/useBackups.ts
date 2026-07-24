@@ -1,11 +1,11 @@
 import { readonly, ref, shallowRef } from 'vue'
 import * as relay from '../services/tauri'
-import type { BackupFileName, BackupSummary } from '../types/backup'
+import type { BackupFileName, BackupInventory, BackupSummary, UnavailableBackup } from '../types/backup'
 import type { RelayUiError } from '../types/command'
 import type { ProviderMutationOutcome } from '../types/provider'
 
 export interface BackupClient {
-  listBackups(): Promise<BackupSummary[]>
+  listBackups(): Promise<BackupInventory>
   openBackupFile(directoryName: string, fileName: BackupFileName): Promise<void>
   restoreBackup(directoryName: string): Promise<ProviderMutationOutcome>
 }
@@ -23,6 +23,7 @@ const defaultClient: BackupClient = {
 export function useBackups(options: UseBackupsOptions = {}) {
   const client = options.client ?? defaultClient
   const backupList = ref<BackupSummary[]>([])
+  const unavailableBackupList = ref<UnavailableBackup[]>([])
   const loading = shallowRef(true)
   const busy = shallowRef(false)
   const error = shallowRef<RelayUiError | null>(null)
@@ -42,7 +43,8 @@ export function useBackups(options: UseBackupsOptions = {}) {
     try {
       const next = await client.listBackups()
       if (request === requestSequence) {
-        backupList.value = next
+        backupList.value = [...next.backups]
+        unavailableBackupList.value = [...next.unavailableBackups]
       }
       return true
     } catch (caught) {
@@ -94,6 +96,7 @@ export function useBackups(options: UseBackupsOptions = {}) {
 
   return {
     backups: readonly(backupList),
+    unavailableBackups: readonly(unavailableBackupList),
     loading: readonly(loading),
     busy: readonly(busy),
     error: readonly(error),

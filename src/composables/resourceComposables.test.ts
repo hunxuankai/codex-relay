@@ -1,7 +1,7 @@
 import { flushPromises } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import { RelayCommandError } from '../services/tauri'
-import type { BackupSummary } from '../types/backup'
+import type { BackupInventory, BackupSummary } from '../types/backup'
 import type { HealthReport } from '../types/health'
 import type { ProviderMutationOutcome } from '../types/provider'
 import type { Settings, SettingsState } from '../types/settings'
@@ -27,6 +27,7 @@ const backup: BackupSummary = {
   directoryName: 'backup-1',
   files: ['config.toml', 'auth.json', 'providers.json', 'metadata.json'],
   metadata: {
+    schemaVersion: 2,
     transactionId: 'tx-1',
     createdAt: '2026-07-20T00:00:00+08:00',
     operation: 'switch_provider',
@@ -34,8 +35,15 @@ const backup: BackupSummary = {
     configExisted: true,
     authExisted: true,
     providersExisted: true,
+    preferencesExisted: false,
     appVersion: '0.1.0',
   },
+  compatibility: 'current',
+}
+
+const backupInventory: BackupInventory = {
+  backups: [backup],
+  unavailableBackups: [],
 }
 
 const settings: Settings = {
@@ -95,8 +103,8 @@ describe('resource composables', () => {
     const restored: ProviderMutationOutcome = { providers: [], message: '配置备份已恢复。' }
     const listBackups = vi
       .fn()
-      .mockResolvedValueOnce([backup])
-      .mockResolvedValueOnce([backup])
+      .mockResolvedValueOnce(backupInventory)
+      .mockResolvedValueOnce(backupInventory)
     const client: BackupClient = {
       listBackups,
       openBackupFile: vi.fn(),
@@ -115,7 +123,7 @@ describe('resource composables', () => {
   it('opens a selected backup file through the typed client', async () => {
     const openBackupFile = vi.fn().mockResolvedValue(undefined)
     const client = {
-      listBackups: vi.fn().mockResolvedValue([backup]),
+      listBackups: vi.fn().mockResolvedValue(backupInventory),
       openBackupFile,
       restoreBackup: vi.fn(),
     } satisfies BackupClient
@@ -131,7 +139,7 @@ describe('resource composables', () => {
 
   it('surfaces a safe error when a backup file cannot be opened', async () => {
     const client = {
-      listBackups: vi.fn().mockResolvedValue([backup]),
+      listBackups: vi.fn().mockResolvedValue(backupInventory),
       openBackupFile: vi.fn().mockRejectedValue(
         new RelayCommandError('OPEN_BACKUP_FILE_FAILED', '无法使用记事本打开备份文件。'),
       ),
@@ -193,7 +201,7 @@ describe('resource composables', () => {
     const client: BackupClient = {
       listBackups: vi
         .fn()
-        .mockResolvedValueOnce([backup])
+        .mockResolvedValueOnce(backupInventory)
         .mockRejectedValueOnce(new RelayCommandError('BACKUP_REFRESH_FAILED', '刷新备份失败。')),
       openBackupFile: vi.fn(),
       restoreBackup: vi

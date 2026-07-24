@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref, shallowRef } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { BackupSummary } from '../types/backup'
+import type { BackupSummary, UnavailableBackup } from '../types/backup'
 import BackupsView from './BackupsView.vue'
 
 const mockUseBackups = vi.hoisted(() => vi.fn())
@@ -11,6 +11,7 @@ const backup: BackupSummary = {
   directoryName: '20260720-transaction-1',
   files: ['config.toml', 'auth.json', 'providers.json', 'metadata.json'],
   metadata: {
+    schemaVersion: 2,
     transactionId: 'transaction-1',
     createdAt: '2026-07-20T00:00:00+08:00',
     operation: 'switch_provider',
@@ -18,11 +19,22 @@ const backup: BackupSummary = {
     configExisted: true,
     authExisted: true,
     providersExisted: true,
+    preferencesExisted: false,
     appVersion: '0.1.0',
   },
+  compatibility: 'current',
 }
 
-function controller(options: { fail?: boolean; openFail?: boolean } = {}) {
+const unavailableBackup: UnavailableBackup = {
+  directoryName: 'unavailable-backup',
+  code: 'INVALID_BACKUP_METADATA',
+  message: '无法读取此备份的元数据，已保留，无法安全恢复。',
+  canOpenMetadata: true,
+}
+
+function controller(
+  options: { fail?: boolean; loading?: boolean; openFail?: boolean; unavailable?: boolean } = {},
+) {
   const error = shallowRef<{ code: string; message: string } | null>(null)
   const successMessage = shallowRef<string | null>(null)
   const restore = vi.fn().mockImplementation(async () => {
@@ -42,7 +54,8 @@ function controller(options: { fail?: boolean; openFail?: boolean } = {}) {
   })
   return {
     backups: ref([backup]),
-    loading: shallowRef(false),
+    unavailableBackups: ref(options.unavailable ? [unavailableBackup] : []),
+    loading: shallowRef(options.loading ?? false),
     busy: shallowRef(false),
     error,
     successMessage,
@@ -92,7 +105,9 @@ describe('BackupsView', () => {
         configExisted: false,
         authExisted: false,
         providersExisted: false,
+        preferencesExisted: false,
       },
+      compatibility: 'current',
     }
     const state = controller()
     state.backups.value = [backup, second]
@@ -108,6 +123,67 @@ describe('BackupsView', () => {
 
     await wrapper.get('[aria-label="收起备份文件 transaction-2"]').trigger('click')
     expect(wrapper.find('#backup-files-20260720-transaction-2').exists()).toBe(false)
+  })
+
+  it('labels legacy backups and explains their preference restore impact before confirmation', async () => {
+    const state = controller()
+    state.backups.value = [{
+      ...backup,
+      compatibility: 'legacyWithoutPreferences',
+      metadata: { ...backup.metadata, schemaVersion: 1, preferencesExisted: false },
+    }]
+    mockUseBackups.mockReturnValue(state)
+    const wrapper = mount(BackupsView, { attachTo: document.body })
+
+    expect(wrapper.text()).toContain('旧版备份')
+    await wrapper.get('[aria-label="恢复备份 transaction-1"]').trigger('click')
+
+    expect(wrapper.text()).toContain('不包含命名地址、模型与推理偏好')
+    expect(wrapper.text()).toContain('恢复前会再次备份当前状态')
+  })
+
+  it('keeps unavailable backups visible and allows only their metadata to be opened', async () => {
+    const state = controller({ unavailable: true })
+    mockUseBackups.mockReturnValue(state)
+    const wrapper = mount(BackupsView)
+
+    expect(wrapper.text()).toContain('无法安全恢复的备份')
+    expect(wrapper.text()).toContain('无法读取此备份的元数据，已保留，无法安全恢复。')
+    expect(wrapper.find('[aria-label="恢复备份 unavailable-backup"]').exists()).toBe(false)
+
+    await wrapper.get('[aria-label="打开不可用备份 unavailable-backup 的元数据"]').trigger('click')
+    expect(state.openFile).toHaveBeenCalledWith('unavailable-backup', 'metadata.json')
+  })
+
+  it('shows unavailable backup guidance instead of an empty state when no backup is recoverable', () => {
+    const state = controller({ unavailable: true })
+    state.backups.value = []
+    mockUseBackups.mockReturnValue(state)
+    const wrapper = mount(BackupsView)
+
+    expect(wrapper.text()).toContain('无法安全恢复的备份')
+    expect(wrapper.text()).not.toContain('暂无可恢复的事务备份。')
+  })
+
+  it('hides stale backup sections while the inventory is refreshing', () => {
+    const state = controller({ loading: true, unavailable: true })
+    mockUseBackups.mockReturnValue(state)
+    const wrapper = mount(BackupsView)
+
+    expect(wrapper.find('[aria-label="正在加载备份"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('transaction-1')
+    expect(wrapper.text()).not.toContain('无法安全恢复的备份')
+  })
+
+  it('explains when unavailable backup metadata cannot be opened', () => {
+    const state = controller({ unavailable: true })
+    state.backups.value = []
+    state.unavailableBackups.value = [{ ...unavailableBackup, canOpenMetadata: false }]
+    mockUseBackups.mockReturnValue(state)
+    const wrapper = mount(BackupsView)
+
+    expect(wrapper.text()).toContain('元数据文件不可用，无法打开。')
+    expect(wrapper.find('[aria-label="打开不可用备份 unavailable-backup 的元数据"]').exists()).toBe(false)
   })
 
   it('shows an open failure and leaves restore available', async () => {

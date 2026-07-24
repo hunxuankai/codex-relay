@@ -124,6 +124,7 @@ async fn provider_workflow_preserves_unknown_config_and_restores_original_bytes(
     let original_snapshot = service
         .list_backups()
         .unwrap()
+        .backups
         .into_iter()
         .find(|backup| backup.metadata.operation == "create_provider")
         .expect("create backup should capture the original state");

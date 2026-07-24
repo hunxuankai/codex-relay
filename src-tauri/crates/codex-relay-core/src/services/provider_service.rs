@@ -1,7 +1,7 @@
 use crate::error::AppError;
 use crate::infrastructure::file_fingerprint::FileSetFingerprint;
 use crate::infrastructure::path_service::AppPaths;
-use crate::models::backup::{BackupFileName, BackupSummary};
+use crate::models::backup::{BackupFileName, BackupInventory};
 use crate::models::provider::{
     CreateProviderInput, ImportCurrentApiKeyInput, ModelCatalogItem, ProviderApiKeyManagementEntry,
     ProviderApiKeyManagementState, ProviderApiKeyStatus, ProviderApiKeySummary,
@@ -73,7 +73,7 @@ impl ProviderService {
         }
     }
 
-    pub fn list_backups(&self) -> Result<Vec<BackupSummary>, AppError> {
+    pub fn list_backups(&self) -> Result<BackupInventory, AppError> {
         self.backup_service.list_backups()
     }
 
