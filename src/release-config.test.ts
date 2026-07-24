@@ -127,9 +127,9 @@ describe('Windows release configuration', () => {
     expect(prepareDevData).not.toMatch(/&\s+npm\s+run\s+dev/)
   })
 
-  it('keeps the uncommon Vite development port aligned with the Tauri dev URL', () => {
-    expect(viteConfig).toMatch(/port:\s*43971/)
-    expect(tauri.build.devUrl).toBe('http://localhost:43971')
+  it('keeps the default Vite development port aligned with the Tauri dev URL', () => {
+    expect(viteConfig).toMatch(/port:\s*1420/)
+    expect(tauri.build.devUrl).toBe('http://localhost:1420')
   })
 
   it('uses the Windows GUI subsystem for release builds', () => {
