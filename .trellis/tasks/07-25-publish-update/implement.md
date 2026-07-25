@@ -132,6 +132,9 @@
   - `src-tauri/target/release/bundle/nsis/Codex Relay_0.2.0_x64-setup.exe`：4,573,253 字节，写入时间
     `2026-07-25T22:38:50.9765553+08:00`，SHA-256
     `5417BC319FDCDE4579BE89DE9150A6503EACABC095EAF8D303E744E1E7240289`。
+- 新候选提交 `71bf86f115a543bcb4b969502585f7e17e3eaf48`（`test(rust): 修正后代进程测试观察点`）已推送，
+  本地 `HEAD` 与 `origin/main` 精确一致，工作区干净；远端 `v0.2.0` Release/Tag 仍不存在，可以触发
+  下一轮单一工作流。
 
 ## 恢复步骤
 
