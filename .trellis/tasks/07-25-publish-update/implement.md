@@ -221,9 +221,50 @@
 - `git diff --check` 通过；提交前仅 `implement.md` 有差异，本地 `HEAD` 与 `origin/main` 均为
   `a15e310c8d5c0f851bc23894ee380e0dbfb07420`。差异中的高置信度 OpenAI Key、Bearer、Authorization、
   私钥块和真实宿主路径命中均为 0，Git 跟踪的真实 `auth.json`、`providers.json` 或备份路径数量为 0。
-- `trellis-update-spec` 判断：本轮真实 Sandbox 结果验证了既有发布、updater、路径安全和完成证据契约，
-  没有新增产品/API/环境变量行为；共享目录短暂占用属于一次性运行时序，现有规范已要求路径复核、如实记录
-  清理失败并确认目录不存在，因此无需再次修改长期规范。
+- `trellis-update-spec` 判断：本轮真实 Sandbox 结果验证了既有 updater、路径安全和完成证据契约，
+  没有新增产品/API/环境变量行为；共享目录短暂占用属于一次性运行时序，现有规范已覆盖路径复核、如实记录
+  清理失败和确认目录不存在。发布耗时复盘发现 Actions 外部排队、Job 执行和人工门禁仍需明确拆分，因此已在
+  `release/publishing.md` 增加状态页检查、单一活动 Run、时间戳记录、失败分类和新候选重试规则。
+
+## 发布耗时与 Actions 失败复盘
+
+- 从任务规划材料于 `2026-07-25 20:02 +08:00` 写入，到隔离升级证据提交 `febc69d` 于
+  `2026-07-26 00:27:59 +08:00` 创建，墙钟约 4 小时 26 分钟；正式 Release 在
+  `2026-07-25 23:04:38 +08:00` 公开，之后仍有约 29 分钟 Sandbox 升级和最终检查/人工确认。
+- 四个 Actions Run 从创建到结束合计约 90 分钟，其中第一轮因 GitHub Actions `major_outage` 从
+  `20:21:00` 排队到 `21:15:59`，单独消耗约 55 分钟外部等待；第一轮 Job 实际只运行约 2 分 22 秒。
+- 第二、三、四轮 Run 分别约 8 分 8 秒、9 分 11 秒和 15 分 36 秒。成功轮的完整检查约 7 分 24 秒，
+  Draft 构建约 7 分 2 秒；这是发布门禁本身的真实成本，不能通过跳过检查或放宽断言缩短。
+- 三次失败后的本地根因调查、专项回归、完整 `npm run check`、普通构建、提交和新候选推送分别占用约
+  15 分钟、36 分钟和 16 分钟。第二次修复期间还由完整前端检查发现并修复了卸载后焦点 timer 的未处理异常，
+  这不是 Actions 原始失败，但必须在下一候选前解决。
+
+### 根因分类
+
+1. **外部服务阻塞**：第一轮长时间 `queued` 来自 GitHub Actions 全局事故，不是仓库构建失败；没有重复触发
+   相同提交，但等待本身占据了本次发布最大的一段不可控时间。
+2. **D. 测试覆盖缺口 + E. 隐式假设**：PowerShell 在 `$ErrorActionPreference='Stop'` 下把退出 0 的
+   Cargo 正常 stderr 提升为 `NativeCommandError`；本机缓存命中没有产生 `Updating crates.io index`，
+   因而发布前未覆盖冷 runner 行为。
+3. **D. 测试覆盖缺口 + E. 隐式时序假设**：Windows 进程树测试把 PowerShell 冷启动、后代创建和大量
+   输出吞吐错误地限制在 5 秒内，第二轮因此出现一个 PID 等待失败和一个 `Timeout`。
+4. **心智模型/观察点错误**：第一次把预算扩大到 30 秒只解决了输出上限用例，没有解决取消用例；测试仍要求
+   子 PowerShell 完成冷启动后自行写 PID，而 Job Object 契约只需要父进程已创建后代。第三轮日志推翻该假设后，
+   改为父进程从 `Start-Process -PassThru` 立即记录 `$child.Id`，第四轮才成功。
+
+### 防复发记录
+
+- `478a094` 新增原生命令包装和 fake Cargo 回归测试：成功命令即使向 stderr 输出进度，也以
+  `$LASTEXITCODE` 判定；真实退出非 0 仍保留诊断并失败。
+- `fe6ed31` / `71bf86f` 为 Windows 冷 runner 使用 30 秒测试级有界预算、20 毫秒条件轮询和父进程 PID
+  观察点；生产超时与严格 `OutputTooLarge` / `Cancelled` 断言未放宽。
+- `.trellis/spec/testing/rust-build-feedback.md` 已包含“Windows PowerShell 原生命令诊断”和
+  “Windows 冷 runner 进程树测试”两个完整场景、错误矩阵、良好/错误示例和必需测试。
+- `.trellis/spec/release/publishing.md` 已新增外部状态与运行时长门禁：触发/重试前检查 GitHub Status，
+  只保留一个活动 Run，分开记录排队与执行时间，按外部服务、工具诊断、CI 时序和产品契约分类失败，并且只在
+  专项回归、完整检查和新候选提交完成后重试。
+- 这些机制能防止本次已知错误按相同方式复发，但不能消除 GitHub 服务事故或未来全新的冷环境差异；后者仍需
+  通过真实失败证据、最小根因修复和新回归测试处理。
 
 ## 最终剩余步骤
 
