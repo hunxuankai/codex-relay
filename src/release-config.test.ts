@@ -5,6 +5,7 @@ const tauri = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'))
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'))
 const packageLock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
 const cargoToml = readFileSync('src-tauri/Cargo.toml', 'utf8')
+const coreCargoToml = readFileSync('src-tauri/crates/codex-relay-core/Cargo.toml', 'utf8')
 const rustLibrary = readFileSync('src-tauri/src/lib.rs', 'utf8')
 const defaultCapability = JSON.parse(
   readFileSync('src-tauri/capabilities/default.json', 'utf8'),
@@ -92,25 +93,35 @@ describe('Windows release configuration', () => {
     expect(releaseWorkflow).toContain('TAURI_SIGNING_PRIVATE_KEY_PASSWORD:')
     expect(releaseWorkflow.match(/TAURI_SIGNING_PRIVATE_KEY:/g)).toHaveLength(1)
     expect(releaseWorkflow).toContain('releaseBody: |')
-    expect(releaseWorkflow).toContain('首次带 updater 的版本需要手动安装')
+    expect(releaseWorkflow).toContain('已安装 `v0.1.2` 的用户可在设置页点击“检查更新”')
     expect(releaseWorkflow).not.toContain('请在发布前补充本版本的变更说明')
     expect(releaseWorkflow).toContain(
       'tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f',
     )
   })
 
-  it('builds the 0.1.2 recovery-chain updater verification release', () => {
+  it('builds the 0.2.0 feature release from the latest public version', () => {
     const cargoPackageVersion = cargoToml.match(
       /\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
     )?.[1]
+    const coreCargoPackageVersion = coreCargoToml.match(
+      /\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
+    )?.[1]
 
-    expect(packageJson.version).toBe('0.1.2')
+    expect(packageJson.version).toBe('0.2.0')
     expect(packageLock.version).toBe(packageJson.version)
     expect(packageLock.packages[''].version).toBe(packageJson.version)
     expect(cargoPackageVersion).toBe(packageJson.version)
-    expect(releaseWorkflow).toContain('从 `v0.1.1` 应用内升级到 `v0.1.2`')
-    expect(releaseWorkflow).toContain('已手动安装 `v0.1.1`')
-    expect(releaseWorkflow).toContain('Windows Sandbox')
+    expect(coreCargoPackageVersion).toBe(packageJson.version)
+    expect(releaseWorkflow).toContain('从 `v0.1.2` 更新到 `v0.2.0`')
+    expect(releaseWorkflow).toContain('多命名 Base URL 与多命名 API Key')
+    expect(releaseWorkflow).toContain('Provider API 可用性与 Codex 兼容性测试')
+    expect(releaseWorkflow).toContain('应用网络代理')
+    expect(releaseWorkflow).toContain('Windows 可能显示“未知发布者”')
+    expect(releaseWorkflow).toContain(
+      '安装和升级不会删除 Codex 配置、Codex Relay 应用数据、日志或备份',
+    )
+    expect(releaseWorkflow).not.toContain('恢复可操作基线')
   })
 
   it('marks every generated development API key as explicitly non-real', () => {
