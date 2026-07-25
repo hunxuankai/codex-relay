@@ -96,6 +96,9 @@
   `node_modules/` 和 Cargo target，但未纳入 Git，受跟踪开发数据只有 `dev-data/.gitkeep`；当前差异中的
   高置信度真实 OpenAI Key、Authorization 值和 Bearer 值命中均为 0。GitHub 不存在 `v0.2.0`
   Release，远端也不存在同名 Tag，可在新候选推送后重新触发工作流。
+- 修复提交 `fe6ed317f2a375aade4123bf7f7f8d8569c10ba5`（`fix(release): 稳定发布候选检查`）已创建，
+  精确包含 Windows 冷启动进程测试预算、延迟焦点生命周期回归与实现、两项长期规范和本任务证据；
+  当前本地 `master` 领先 `origin/main` 1 个提交，尚未推送。
 
 ## 恢复步骤
 
@@ -160,4 +163,4 @@ python ./.trellis/scripts/task.py validate .trellis/tasks/07-25-publish-update
 
 ## 下一步
 
-重新运行无签名普通构建并记录产物元数据，完成提交前安全审计，提交并推送测试与焦点生命周期修复，然后重新触发并监控 `release.yml`。
+提交本次任务证据并推送新候选到远端 `main`，确认远端引用后重新触发并监控 `release.yml`。
