@@ -38,18 +38,20 @@ function select(value: string | number | boolean) {
         <p class="current-label" role="status">{{ currentLabel }}</p>
       </div>
       <ElButton
+        size="small"
         native-type="button"
         aria-label="管理 API Key"
         :disabled="busy"
         @click="emit('manage')"
       >
-        管理与查看
+        管理
       </ElButton>
     </header>
 
     <div class="segmented-scroll" role="group" aria-label="选择 API Key">
       <ElSegmented
         v-if="options.length > 0"
+        size="small"
         :model-value="provider.selectedApiKeyId ?? undefined"
         :options="options"
         :disabled="busy"
@@ -69,11 +71,11 @@ function select(value: string | number | boolean) {
 <style scoped>
 .provider-control {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.55rem;
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 0.8rem;
-  padding: 0.9rem;
+  border-radius: 0.7rem;
+  padding: 0.75rem;
   background: var(--surface);
 }
 
@@ -81,7 +83,12 @@ function select(value: string | number | boolean) {
   display: flex;
   align-items: start;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem;
+}
+
+.control-header :deep(.el-button) {
+  flex: 0 0 auto;
+  width: auto;
 }
 
 .control-title,
@@ -100,22 +107,23 @@ function select(value: string | number | boolean) {
 .empty-message,
 .secret-note {
   color: var(--text-secondary);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
 }
 
 .segmented-scroll {
   min-width: 0;
   overflow-x: auto;
-  padding-bottom: 0.2rem;
+  padding-bottom: 0.1rem;
+  scrollbar-width: thin;
 }
 
 .segmented-scroll :deep(.el-segmented) {
   width: max-content;
-  min-width: 100%;
+  min-height: 2rem;
 }
 
 .disabled-reason {
   color: var(--warning-text);
-  font-size: 0.86rem;
+  font-size: 0.82rem;
 }
 </style>

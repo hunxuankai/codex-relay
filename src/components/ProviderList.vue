@@ -123,7 +123,7 @@ const emit = defineEmits<{
 .provider-list {
   display: grid;
   align-content: start;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .provider-list-header,
@@ -151,7 +151,7 @@ const emit = defineEmits<{
 
 .provider-items {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.6rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -165,8 +165,8 @@ const emit = defineEmits<{
 
 .provider-card :deep(.el-card__body) {
   display: grid;
-  gap: 0.75rem;
-  padding: 0.9rem;
+  gap: 0.6rem;
+  padding: 0.75rem;
 }
 
 .provider-card.selected {
@@ -212,7 +212,7 @@ const emit = defineEmits<{
 
 .provider-details {
   display: grid;
-  gap: 0.4rem;
+  gap: 0.3rem;
   margin: 0;
 }
 
@@ -233,7 +233,8 @@ const emit = defineEmits<{
 }
 
 .provider-actions {
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
 .primary-button {

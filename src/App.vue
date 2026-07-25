@@ -201,7 +201,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <ElConfigProvider :locale="zhCn" size="large" :z-index="3000">
+  <ElConfigProvider :locale="zhCn" size="default" :z-index="3000">
     <div v-if="startupLoading" class="startup-screen" aria-live="polite">
       <strong>Codex Relay</strong>
       <span>正在加载本机配置…</span>
@@ -358,8 +358,8 @@ onUnmounted(() => {
 
 .app-notification-slot {
   grid-row: 4;
-  margin-block: 0.75rem;
-  margin-inline: 1.25rem;
+  margin-block: 0.5rem;
+  margin-inline: 1rem;
 }
 
 .app-content {
@@ -375,19 +375,24 @@ onUnmounted(() => {
 .status-bar {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.6rem;
 }
 
 .app-header {
   justify-content: space-between;
   border-bottom: 1px solid var(--border);
-  padding: 1rem 1.25rem;
+  padding: 0.75rem 1rem;
   background: var(--surface);
 }
 
 .app-header h1,
 .eyebrow {
   margin: 0;
+}
+
+.app-header h1 {
+  font-size: 1.5rem;
+  line-height: 1.2;
 }
 
 .eyebrow {
@@ -425,13 +430,13 @@ onUnmounted(() => {
 }
 
 .health-view {
-  padding: 1.25rem;
+  padding: 1rem;
 }
 
 .status-bar {
   flex-wrap: wrap;
   border-top: 1px solid var(--border);
-  padding: 0.65rem 1rem;
+  padding: 0.5rem 0.75rem;
   font-size: 0.82rem;
   background: var(--surface);
 }

@@ -25,4 +25,29 @@ describe('Element Plus layout integration', () => {
   it('applies navigation icon spacing to the content wrapper created by ElButton', () => {
     expect(readFileSync('src/App.vue', 'utf8')).toContain('.app-nav :deep(.el-button > span)')
   })
+
+  it('keeps the Provider detail summary and common switchers compact on desktop', () => {
+    const source = readFileSync('src/views/ProvidersView.vue', 'utf8')
+
+    expect(source).toMatch(
+      /\.selected-provider-fields\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
+    )
+    expect(source).toMatch(
+      /\.provider-switch-controls\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/,
+    )
+    expect(source).toMatch(/@media \(max-width:\s*620px\)[\s\S]*?\.provider-switch-controls/)
+  })
+
+  it('sizes Provider switchers by content instead of stretching every option', () => {
+    for (const path of [
+      'src/components/ProviderEndpointControls.vue',
+      'src/components/ProviderCredentialControls.vue',
+    ]) {
+      const source = readFileSync(path, 'utf8')
+      expect(source).toContain('size="small"')
+      expect(source).toMatch(/\.segmented-scroll :deep\(\.el-segmented\)\s*\{[\s\S]*?width:\s*max-content/)
+      expect(source).toMatch(/\.control-header :deep\(\.el-button\)\s*\{[\s\S]*?width:\s*auto/)
+      expect(source).not.toContain('min-width: 100%')
+    }
+  })
 })

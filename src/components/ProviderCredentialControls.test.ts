@@ -43,8 +43,10 @@ describe('ProviderCredentialControls', () => {
       { label: '主用密钥', value: 'key-primary' },
       { label: '备用密钥', value: 'key-backup' },
     ])
+    expect(segmented.props('size')).toBe('small')
     expect(wrapper.text()).toContain('当前密钥：主用密钥')
     expect(wrapper.text()).not.toContain('test-key')
+    expect(wrapper.get('[aria-label="管理 API Key"]').text()).toBe('管理')
 
     segmented.vm.$emit('change', 'key-backup')
     await wrapper.get('[aria-label="管理 API Key"]').trigger('click')

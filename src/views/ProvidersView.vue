@@ -461,13 +461,13 @@ watch(apiKeyManagerProvider, (provider) => {
 <style scoped>
 .providers-view {
   display: grid;
-  grid-template-columns: minmax(18rem, 0.9fr) minmax(24rem, 1.4fr);
+  grid-template-columns: minmax(17rem, 0.8fr) minmax(25rem, 1.5fr);
   min-height: 100%;
 }
 
 .providers-column,
 .provider-detail {
-  padding: 1.25rem;
+  padding: 1rem;
 }
 
 .providers-column {
@@ -478,7 +478,7 @@ watch(apiKeyManagerProvider, (provider) => {
 .provider-detail {
   display: grid;
   align-content: start;
-  gap: 0.9rem;
+  gap: 0.7rem;
 }
 
 .detail-placeholder {
@@ -491,7 +491,16 @@ watch(apiKeyManagerProvider, (provider) => {
 .selected-provider-fields,
 .provider-switch-controls {
   display: grid;
-  gap: 1rem;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.selected-provider-fields {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.provider-switch-controls {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .selected-provider-header,
@@ -500,7 +509,7 @@ watch(apiKeyManagerProvider, (provider) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .selected-provider-header h1,
@@ -508,16 +517,24 @@ watch(apiKeyManagerProvider, (provider) => {
   margin: 0;
 }
 
+.selected-provider-header h1 {
+  font-size: 1.75rem;
+  line-height: 1.15;
+}
+
 .selected-provider-fields div {
   display: grid;
-  grid-template-columns: 8rem minmax(0, 1fr);
-  gap: 1rem;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 0.75rem;
+  gap: 0.2rem;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  background: var(--surface);
 }
 
 .selected-provider-fields dt {
   color: var(--text-secondary);
+  font-size: 0.78rem;
 }
 
 .selected-provider-fields dd {
@@ -526,13 +543,14 @@ watch(apiKeyManagerProvider, (provider) => {
 }
 
 .detail-actions {
+  flex-wrap: wrap;
   justify-content: flex-start;
 }
 
 .import-key-callout {
   border: 1px solid var(--warning-border);
-  border-radius: 0.8rem;
-  padding: 0.8rem;
+  border-radius: 0.7rem;
+  padding: 0.7rem;
   background: var(--warning-soft);
 }
 
@@ -556,6 +574,19 @@ watch(apiKeyManagerProvider, (provider) => {
   .providers-column {
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 620px) {
+  .selected-provider-fields,
+  .provider-switch-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .selected-provider-header,
+  .import-key-callout {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 </style>

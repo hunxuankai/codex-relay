@@ -44,9 +44,11 @@ describe('ProviderEndpointControls', () => {
       { label: '备用地址', value: 'url-backup' },
     ])
     expect(segmented.props('modelValue')).toBe('url-primary')
+    expect(segmented.props('size')).toBe('small')
     expect(wrapper.text()).toContain('当前地址：主用地址')
     expect(wrapper.text()).toContain('https://primary.example.test/v1')
     expect(wrapper.get('.segmented-scroll').attributes('role')).toBe('group')
+    expect(wrapper.get('[aria-label="管理 Base URL"]').text()).toBe('管理')
 
     segmented.vm.$emit('change', 'url-backup')
     await wrapper.get('[aria-label="管理 Base URL"]').trigger('click')

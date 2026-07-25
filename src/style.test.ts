@@ -61,9 +61,11 @@ describe('global Windows visual system', () => {
     expect(confirmDialog).toContain("props.tone === 'danger' ? 'danger' : 'primary'")
   })
 
-  it('keeps interactive targets large and keyboard focus visible', () => {
-    expect(styles).toMatch(/\.el-button[\s\S]*min-height:\s*44px/)
-    expect(styles).toMatch(/\.el-input__wrapper[\s\S]*min-height:\s*44px/)
+  it('uses the compact desktop density while keeping keyboard focus visible', () => {
+    expect(app).toContain('<ElConfigProvider :locale="zhCn" size="default"')
+    expect(styles).toMatch(/\.el-button[\s\S]*min-height:\s*36px/)
+    expect(styles).toMatch(/\.el-input__wrapper[\s\S]*min-height:\s*36px/)
+    expect(styles).not.toContain('min-height: 44px')
     expect(styles).toContain(':focus-visible')
   })
 
@@ -97,8 +99,8 @@ describe('global Windows visual system', () => {
   })
 
   it('keeps the top notification inset from neighboring shell rows and window edges', () => {
-    expect(app).toMatch(/\.app-notification-slot\s*{[\s\S]*?margin-inline:\s*1\.25rem/)
-    expect(app).toMatch(/\.app-notification-slot\s*{[\s\S]*?margin-block:\s*0\.75rem/)
+    expect(app).toMatch(/\.app-notification-slot\s*{[\s\S]*?margin-inline:\s*1rem/)
+    expect(app).toMatch(/\.app-notification-slot\s*{[\s\S]*?margin-block:\s*0\.5rem/)
   })
 
   it('keeps Provider list tracks packed at the top of its pane', () => {

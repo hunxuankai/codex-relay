@@ -86,7 +86,11 @@ textarea {
 .el-button,
 .el-input__wrapper,
 .el-select__wrapper {
-  min-height: 44px;
+  min-height: 36px;
+}
+
+.el-button.el-button--small {
+  min-height: 32px;
 }
 
 .el-button + .el-button {
