@@ -63,6 +63,10 @@ defineEmits<{
           用于确认地址、认证、模型和响应格式，通常只产生少量 token 费用。
         </li>
         <li>
+          API 请求构造完成后可在详情弹窗查看实际请求地址、请求 JSON、HTTP 状态和有界响应正文；
+          不显示 Header、API Key 或代理地址，未收到响应和正文截断都会明确标记。
+        </li>
+        <li>
           <strong>Codex 兼容性测试</strong>：启动本机 Codex 并发送一次正常 Codex 回合，
           会比 API 测试消耗更多 token 并等待更久；测试不会修改当前 config.toml 或 auth.json。
         </li>

@@ -37,8 +37,12 @@ pub fn cancel_provider_test(
 
 ### 3. 请求/响应/环境契约
 
-- `ProviderAvailabilityResult` 使用 camelCase，字段仅包括 `providerId`、`kind`、`status`、`code`、
-  `message`、`model`、`durationMs`、`testedAt`、可选 `httpStatus` 和 `codexVersion`。
+- `ProviderAvailabilityResult` 使用 camelCase，字段包括 `providerId`、`kind`、`status`、`code`、
+  `message`、`model`、`durationMs`、`testedAt`、可选 `httpStatus`、`codexVersion` 和 `trace`。
+- `trace` 只用于 API 测试，并与同一次结果一起返回：`request` 包含实际 `method`、最终 URL 和
+  JSON body；URL 的 userinfo 与敏感查询值必须先移除。`response` 包含 HTTP `status`、有界文本
+  `body` 和 `bodyTruncated`，未收到 HTTP 响应时为 `null`。请求构造前失败和所有 Codex 结果的
+  `trace` 均为 `null`。
 - API 请求固定发送一次 `/responses`：当前 Provider、当前偏好模型、Bearer 密钥、无 `tools`、
   `stream=false`、最多 16 个输出 token；30 秒超时、256 KiB 响应上限、不跟随重定向、不重试。
 - 前端 IPC 使用 camelCase `useProxy: boolean`，Rust command 接收 `use_proxy: bool`。`false` 表示
@@ -60,8 +64,11 @@ pub fn cancel_provider_test(
 - preflight 通过需要两份独立证据同时成立：服务器得到的请求验证报告，以及 Codex 子进程的
   成功 JSONL 输出。响应写入/半关闭的本机收尾错误不得覆盖已经得到的验证报告；若 Codex 未
   收到完整 SSE，其进程输出验证仍会失败。
-- 状态固定为 `passed`、`failed`、`unsupported`、`cancelled`。结果不得包含原始请求/响应、命令行、
-  环境变量、临时路径、堆栈或密钥。
+- 状态固定为 `passed`、`failed`、`unsupported`、`cancelled`。只有用户显式 API 测试结果可在
+  `trace` 中包含实际请求 JSON 和最多 256 KiB 的响应正文；256 KiB 上限必须应用于 UTF-8 损失转换、
+  密钥移除和通用凭据清理后的最终公开文本，不只限制网络原始字节。不得包含 Header、API Key、代理地址、
+  命令行、环境变量、临时路径或堆栈。若正文意外回显当前真实密钥，必须在 Rust 网络边界移除；
+  日志、通知、事件、Debug 和 Codex 结果不得包含 trace 正文。
 
 ### 4. 验证与错误矩阵
 
@@ -70,7 +77,8 @@ pub fn cancel_provider_test(
 | Provider、模型或密钥缺失/配置无效 | `failed` | `PROVIDER_TEST_*` |
 | `use_proxy=true` 且网络代理未启用或地址为空 | command failure | `PROVIDER_TEST_PROXY_DISABLED` |
 | API 401/403/404/429/5xx、DNS/连接/TLS/超时 | `failed` | `API_HTTP_*` / `API_NETWORK_*` / `API_TIMEOUT` |
-| 非 JSON、非 Responses、正文超过 256 KiB | `failed` | `API_RESPONSE_INVALID` / `API_RESPONSE_TOO_LARGE` |
+| 非 JSON、非 Responses、正文超过 256 KiB | `failed`；保留已有有界 trace，超限标记 `bodyTruncated=true` | `API_RESPONSE_INVALID` / `API_RESPONSE_TOO_LARGE` |
+| DNS/连接/TLS/超时/取消且未收到 HTTP 响应 | 保留 request trace，`response=null` | 原稳定网络/超时/取消 code |
 | 找不到 Codex CLI | `unsupported` | `CODEX_CLI_MISSING` |
 | CLI 版本不在精确允许列表 | `unsupported` | `CODEX_VERSION_UNSUPPORTED` |
 | managed requirements、临时路径、工具预检或严格配置门禁失败 | `unsupported` | `CODEX_*_UNSUPPORTED` / `CODEX_PREFLIGHT_FAILED` |
@@ -85,7 +93,8 @@ CLI 缺失和版本漂移必须保持不同 code；不能用“版本不支持�
 
 ### 5. 良好/基线/错误用例
 
-- 良好：回环 Provider 返回完成的 Responses JSON；API 结果为 `passed`，请求只出现一次，Debug/日志/DTO 不含密钥。
+- 良好：回环 Provider 返回完成的 Responses JSON；API 结果为 `passed`，请求只出现一次，DTO trace
+  可展示同次请求/响应，而 Debug 与日志不含正文或密钥。
 - 良好：默认 `use_proxy=false` 在没有 `settings.json` 时仍直连成功且文件保持不存在；启用代理后 API
   与 Codex gateway 都使用同一已保存代理。
 - 基线：Provider 没有密钥、没有模型偏好或用户取消；不建立外部请求，返回稳定安全结果并释放活动注册项。
@@ -95,7 +104,9 @@ CLI 缺失和版本漂移必须保持不同 code；不能用“版本不支持�
 
 ### 6. 必需测试及断言点
 
-- Rust 单元：DTO 序列化、目标解析、API 请求构造/响应上限/错误分类、单活动取消、版本与 CLI 缺失分类。
+- Rust 单元：DTO camelCase 序列化、安全 Debug、目标解析、API 请求构造、URL userinfo/敏感查询清理、
+  HTTP 错误正文、无响应、原始与最终 UTF-8 文本的 256 KiB 有界前缀/截断标记、错误分类、单活动取消、
+  版本与 CLI 缺失分类。
 - Rust 服务/command：`use_proxy=false` 不创建设置且 API/Codex 都不使用代理；`use_proxy=true` 的禁用或空
   代理返回 `PROVIDER_TEST_PROXY_DISABLED`，camelCase `useProxy` 正确映射到 command 参数。
 - Rust 回环集成：预检核对 Provider/模型/Bearer 假密钥/工具集合；真实 gateway 只注入目标测试密钥，工具 SSE 到达 Codex 前被阻断。
@@ -103,7 +114,8 @@ CLI 缺失和版本漂移必须保持不同 code；不能用“版本不支持�
 - preflight 协议单元测试使用内存 `Read + Write`，断言传输 `Io` 不产生 400、完整非法请求仍产生
   400；服务集成测试保留真实 TCP，并分别覆盖正常 gateway 与工具调用阻断。
 - `path_safety`：默认 `.codex` 与 `CodexRelay` 哨兵递归快照前后一致；测试只使用 `AppPaths::for_test` 和回环边界。
-- Vitest：API/Codex 结果独立、确认门禁、取消、指纹失效、禁用原因、aria-label 和窄窗口布局。
+- Vitest：API/Codex 结果独立、trace 透传与失效、详情弹窗请求/响应/无响应/截断、关闭与焦点恢复、
+  确认门禁、取消、禁用原因、aria-label 和窄窗口布局。
 
 ### 7. 错误与正确做法
 
@@ -155,3 +167,13 @@ let gateway = CodexCompatibilityGateway::start(target, proxy.as_deref()).await?;
 
 两类测试都必须先解析目标 Provider 的密钥；但 API 密钥只在后端 HTTP 客户端短暂使用，Codex 密钥只在受监控 gateway 的上游
 Header 中使用，任何一层都不得把它放进 argv、临时文件、JSONL、日志或前端普通状态。
+
+API trace 必须来自实际网络边界，不能由前端根据 Provider 配置重建：
+
+```rust
+// 错误：只返回错误分类，或让前端重新拼装一个可能与实际请求不一致的详情。
+Err(map_http_status(status))
+
+// 正确：错误与同一次请求已形成的有界 trace 一起返回。
+Err(ApiProbeFailure::with_trace(map_http_status(status), trace))
+```

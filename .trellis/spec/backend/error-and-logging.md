@@ -41,7 +41,9 @@ Provider 测试错误或网络日志。
 ### 公开签名与契约
 
 后端返回 `ProviderAvailabilityResult` 的稳定 `status/code/message`，command 失败只表示无法
-建立安全测试上下文。公开结果不得带原始 HTTP 正文、SSE、JSONL、argv、环境变量、临时路径或堆栈。
+建立安全测试上下文。用户显式 API 测试结果可携带同次请求生成的有界 trace；除此之外，公开结果
+不得带 SSE、JSONL、argv、环境变量、临时路径或堆栈。trace 不含 Header、API Key 或代理地址，
+Codex 结果、日志、通知、事件与 Debug 不得包含 trace 正文。
 
 ### 验证与错误矩阵
 
@@ -54,13 +56,16 @@ Provider 测试错误或网络日志。
 ### 良好/基线/错误用例
 
 - 良好：日志只记录测试类型、Provider ID、稳定 code、耗时和 HTTP 状态/版本。
+- 良好：`ProviderAvailabilityTarget` 与 trace 的 Debug 只记录“已配置”、method、状态和长度等元数据，
+  不记录 Base URL、请求/响应正文或密钥。
 - 基线：远端 401/429/5xx 只记录分类，不记录响应正文。
 - 错误：将 `Debug` 的 `ProviderAvailabilityTarget`、Authorization 或 child stderr 原样写入日志。
 
 ### 必需测试
 
-单元测试断言每个错误映射的 code/message；序列化、Debug、日志捕获和前端 DTO 断言不包含
-`test-key`、Bearer 值、URL 查询 token、正文或临时路径。CLI 缺失回归必须与版本漂移回归分别断言。
+单元测试断言每个错误映射的 code/message；公开 API trace 序列化需包含约定的请求/响应正文，
+同时断言不含 `test-key`、Bearer 值、URL userinfo、查询 token、Header 或临时路径。Debug、日志捕获、通知、
+事件和 Codex DTO 仍必须断言不含正文。CLI 缺失回归必须与版本漂移回归分别断言。
 
 ### 错误与正确做法
 

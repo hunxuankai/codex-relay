@@ -37,6 +37,8 @@ describe('AboutView', () => {
     expect(wrapper.text()).toContain('只有用户显式点击测试时才访问 Provider 模型网络')
     expect(wrapper.text()).toContain('API 可用性测试')
     expect(wrapper.text()).toContain('无工具、非流式、最多 16 个输出 token')
+    expect(wrapper.text()).toContain('详情弹窗查看实际请求地址、请求 JSON、HTTP 状态和有界响应正文')
+    expect(wrapper.text()).toContain('不显示 Header、API Key 或代理地址')
     expect(wrapper.text()).toContain('Codex 兼容性测试')
     expect(wrapper.text()).toContain('一次正常 Codex 回合')
     expect(wrapper.text()).toContain('不会修改当前 config.toml 或 auth.json')

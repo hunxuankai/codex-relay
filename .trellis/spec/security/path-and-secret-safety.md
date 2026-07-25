@@ -66,6 +66,9 @@ API/Codex command 只接收 Provider ID 与 UUID request ID。密钥由 Rust 的
 - 真实 key 只可在 Rust gateway 的上游 Authorization Header 短暂存在；不得落盘或进入 argv/stdout/stderr。
 - Provider 目标解析和 API 代理读取必须采用只读加载；缺失的 `providers.json`/`settings.json` 不得
   因测试而自动创建，损坏文件也不得为了测试自动生成备份。
+- 用户显式 API 测试可把实际请求 JSON 和最多 256 KiB 的响应正文作为会话内 trace 返回，但不得
+  返回 Header、URL userinfo/敏感查询值、当前真实 key、代理地址或其他运行环境。响应意外回显当前 key 时在 Rust 网络边界
+  移除；trace 不写入磁盘、日志、通知、事件、快照或普通 Provider DTO，Codex 结果不携带 trace。
 
 ### 4. 验证与错误矩阵
 
@@ -73,7 +76,7 @@ API/Codex command 只接收 Provider ID 与 UUID request ID。密钥由 Rust 的
 |---|---|
 | 测试路径缺覆盖或指向真实用户目录 | `TEST_PATH_OVERRIDE_REQUIRED` / `UNSAFE_TEST_PATH`，立即停止 |
 | 临时根不在系统 temp 或命中受保护根 | `CODEX_PREFLIGHT_FAILED` |
-| key 出现在公开 DTO、日志、快照或命令行 | fail closed，并将泄漏视为测试失败 |
+| key 出现在公开 DTO（包括 API trace）、日志、快照或命令行 | fail closed，并将泄漏视为测试失败 |
 | 清理前路径验证失败或目录仍存在 | `CODEX_CLEANUP_FAILED`，不得声称已清理 |
 
 ### 5. 良好/基线/错误用例

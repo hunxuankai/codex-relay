@@ -15,7 +15,7 @@ Codex Relay 是面向 Windows 10/11、当前登录用户和个人可信计算机
 - 支持关键/扩展自检、文件监控、系统托盘、单实例、当前用户开机启动和 Windows 通知。
 - 支持用户在设置页显式检查公开 GitHub Releases 更新，并在 Tauri 签名校验后启动 NSIS 更新。
 - 支持为 Codex Relay 自身网络请求配置无认证 HTTP/HTTPS 代理，并由用户显式测试或检测固定本机代理端口；Provider 详情提供用户显式触发的 API 可用性测试和 Codex 兼容性测试。验证区域默认“不使用代理”，用户仅在设置页“网络代理”已启用时才能取消该选项；两类测试随后共同使用已保存的 Relay 代理。普通 Codex CLI 请求不受影响。
-- Provider 测试结果只保存在当前前端会话中，不写入 Provider DTO、应用数据、日志或通知；配置指纹变化后旧结果失效。
+- Provider 测试结果只保存在当前前端会话中，不写入 Provider DTO、应用数据、日志或通知；配置指纹变化后旧结果失效。API 结果可携带同次请求生成的有界请求/响应 trace 供详情弹窗查看，Codex 结果仍只包含安全摘要；trace 不含 Header、API Key 或代理地址。
 - 首次没有 Provider 时显示引导，不自动写入虚假 Provider。
 
 ## 明确非目标
