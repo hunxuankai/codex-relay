@@ -20,6 +20,9 @@
 - 候选提交 `930225a1a6ff7dd5b57a4b6026111d94863868bf` 已推送到远端 `main`，远端引用精确一致。
 - 已触发 GitHub Actions Run `30157828371`（`https://github.com/hunxuankai/codex-relay/actions/runs/30157828371`），head SHA 精确为候选提交。Run 当前保持 `queued`，未分配 `windows-latest` runner；GitHub Status 同期将 Actions 标记为 `major_outage`。因此 Draft 尚未生成，不能报告 Actions、签名或发布成功，也不重复触发 Run。
 - `gh run watch 30157828371 --exit-status` 等待约 30 分钟后因命令超时退出（退出码 124）；随后只读复核仍显示 Run/Job 为 `queued`、无 conclusion，GitHub Status 事故“Actions run failures and delays”仍为 `critical / investigating`（短链 `https://stspg.io/448g37mrq066`）。这是真实外部阻塞，不是构建失败。
+- 外部服务恢复后，同一 Run 于 `2026-07-25T13:15:59Z` 开始执行；检出、Node、Rust 和依赖安装均通过。Run `30157828371` 首次实际执行在 `2026-07-25T13:18:18Z` 的 `check-rust:deps` 因 Windows PowerShell 把 `cargo tree` 的 `Updating crates.io index` stderr 误判为 `NativeCommandError` 而失败；前端 37/175 项和 Trellis 8 项已先通过，Draft 构建未执行。
+- 根因调查：`scripts/check-rust-dependency-graph.ps1` 在全局 `Stop` 偏好下直接调用原生 Cargo；CI 冷缓存会产生正常 stderr，而本机缓存命中未暴露该边界。新增 fake `.cmd` 回归用例先复现退出 1，再以 `Invoke-CargoTree` 暂时使用 `Continue`、捕获 `$LASTEXITCODE`、`finally` 恢复偏好；`npm run test:rust-deps` 现为 6/6 通过。
+- 修复后的本地 `npm run check` 于本轮退出 0，用时约 205.2 秒：Trellis 8 项、前端 37/175 项、Rust 主 crate 40 项、core crate 172 项、路径安全 3 项、Provider 工作流 1 项均通过。
 
 ## 恢复步骤
 

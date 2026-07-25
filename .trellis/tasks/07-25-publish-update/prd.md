@@ -7,7 +7,7 @@
 ## 已确认事实
 
 - 当前公开正式版本为 `v0.1.2`，发布时间为 2026-07-21，且 `draft=false`、`prerelease=false`。
-- 当前源码版本为 `0.1.2`；`package.json`、`package-lock.json`、`src-tauri/Cargo.toml` 和 `src-tauri/Cargo.lock` 一致。
+- 当前公开版本仍为 `0.1.2`；候选源码版本已统一为 `0.2.0`，包括 npm、主 Tauri crate、`codex-relay-core` crate 和 Cargo lock。
 - 本地 `master` 与最新 `origin/main` 无反向差异，并领先 66 个提交；工作区在创建本任务前干净。
 - 发布工作流是 `.github/workflows/release.yml` 的手动 `workflow_dispatch`，先创建 Draft Release。
 - GitHub Actions 已配置 `TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 两个 Secret 名称；本任务不读取或记录其值。

@@ -42,6 +42,30 @@ function Invoke-DependencyCheck {
   }
 }
 
+function Invoke-DependencyCheckWithCargo {
+  param(
+    [string]$CargoExecutable
+  )
+
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $output = & powershell.exe `
+      -NoProfile `
+      -ExecutionPolicy Bypass `
+      -File $checkScript `
+      -CargoExecutable $CargoExecutable 2>&1
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+
+  [pscustomobject]@{
+    ExitCode = $exitCode
+    Output = ($output -join [Environment]::NewLine)
+  }
+}
+
 function Assert-Equal {
   param(
     $Actual,
@@ -102,4 +126,42 @@ rustls v0.23.42
 '@
 Assert-Equal $coreWithoutTauri.ExitCode 0 'A Tauri-free core dependency graph should pass.'
 
-Write-Host 'rust-dependency-graph: 5 tests passed'
+$tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+$tempRoot = [IO.Path]::GetFullPath(
+  (Join-Path $tempBase ("codex-relay-rust-deps-" + [guid]::NewGuid().ToString('N')))
+)
+if (-not $tempRoot.StartsWith($tempBase + '\', [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'The fake Cargo directory must stay under the system temporary directory.'
+}
+
+New-Item -ItemType Directory -Path $tempRoot | Out-Null
+$fakeCargo = Join-Path $tempRoot 'cargo.cmd'
+$fakeCargoLog = Join-Path $tempRoot 'invocations.log'
+Set-Content -LiteralPath $fakeCargo -Encoding Ascii -Value @'
+@echo off
+echo invoked>>"%CODEX_RELAY_FAKE_CARGO_LOG%"
+echo Updating crates.io index 1>&2
+echo rustls v0.23.42 [ring,std,tls12]
+exit /b 0
+'@
+
+$previousFakeCargoLog = $env:CODEX_RELAY_FAKE_CARGO_LOG
+$env:CODEX_RELAY_FAKE_CARGO_LOG = $fakeCargoLog
+try {
+  $benignStderr = Invoke-DependencyCheckWithCargo -CargoExecutable $fakeCargo
+  Assert-Equal $benignStderr.ExitCode 0 'Benign Cargo stderr with exit code zero should not fail the dependency graph check.'
+  Assert-Contains $benignStderr.Output 'ring provider' 'The real dependency graph path should still complete successfully.'
+  $invocations = @(Get-Content -LiteralPath $fakeCargoLog)
+  Assert-Equal $invocations.Count 2 'The workspace and core dependency graphs should both invoke Cargo.'
+} finally {
+  if ($null -eq $previousFakeCargoLog) {
+    Remove-Item Env:CODEX_RELAY_FAKE_CARGO_LOG -ErrorAction SilentlyContinue
+  } else {
+    $env:CODEX_RELAY_FAKE_CARGO_LOG = $previousFakeCargoLog
+  }
+  if (Test-Path -LiteralPath $tempRoot) {
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force
+  }
+}
+
+Write-Host 'rust-dependency-graph: 6 tests passed'

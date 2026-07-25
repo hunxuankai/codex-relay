@@ -1,10 +1,31 @@
 ﻿[CmdletBinding()]
 param(
   [string]$EncodedTreeOutput,
-  [string]$EncodedCoreTreeOutput
+  [string]$EncodedCoreTreeOutput,
+  [string]$CargoExecutable = 'cargo'
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Invoke-CargoTree {
+  param(
+    [string[]]$Arguments
+  )
+
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $lines = & $CargoExecutable @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+
+  [pscustomobject]@{
+    Lines = @($lines)
+    ExitCode = $exitCode
+  }
+}
 
 if ($PSBoundParameters.ContainsKey('EncodedTreeOutput')) {
   try {
@@ -18,13 +39,20 @@ if ($PSBoundParameters.ContainsKey('EncodedTreeOutput')) {
 } else {
   $workspace = Split-Path -Parent $PSScriptRoot
   $manifest = Join-Path $workspace 'src-tauri/Cargo.toml'
-  $treeLines = & cargo tree `
-    --manifest-path $manifest `
-    -e features `
-    --prefix none `
-    --format '{p} [{f}]' 2>&1
+  $treeResult = Invoke-CargoTree -Arguments @(
+    'tree',
+    '--manifest-path',
+    $manifest,
+    '-e',
+    'features',
+    '--prefix',
+    'none',
+    '--format',
+    '{p} [{f}]'
+  )
+  $treeLines = $treeResult.Lines
 
-  if ($LASTEXITCODE -ne 0) {
+  if ($treeResult.ExitCode -ne 0) {
     $treeLines | ForEach-Object { Write-Host $_ }
     Write-Error '无法生成 Rust 依赖图。'
     exit 1
@@ -43,14 +71,22 @@ if ($PSBoundParameters.ContainsKey('EncodedCoreTreeOutput')) {
     exit 1
   }
 } elseif (-not $PSBoundParameters.ContainsKey('EncodedTreeOutput')) {
-  $coreTreeLines = & cargo tree `
-    --manifest-path $manifest `
-    -p codex-relay-core `
-    -e normal,build `
-    --prefix none `
-    --format '{p}' 2>&1
+  $coreTreeResult = Invoke-CargoTree -Arguments @(
+    'tree',
+    '--manifest-path',
+    $manifest,
+    '-p',
+    'codex-relay-core',
+    '-e',
+    'normal,build',
+    '--prefix',
+    'none',
+    '--format',
+    '{p}'
+  )
+  $coreTreeLines = $coreTreeResult.Lines
 
-  if ($LASTEXITCODE -ne 0) {
+  if ($coreTreeResult.ExitCode -ne 0) {
     $coreTreeLines | ForEach-Object { Write-Host $_ }
     Write-Error '无法生成 codex-relay-core 依赖图。'
     exit 1

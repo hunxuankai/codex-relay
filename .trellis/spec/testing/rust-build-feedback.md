@@ -119,3 +119,64 @@ npm run test:rust:lib -- provider_http
 ```
 
 需要观察最新 Rust 应用行为时，主动重启安全 no-watch 应用；完整 fmt/Clippy/集成测试留到阶段门禁。
+
+## Scenario：Windows PowerShell 原生命令诊断
+
+### 1. 范围/触发条件
+
+- 触发条件：PowerShell 脚本在 `$ErrorActionPreference = 'Stop'` 下包装 `cargo`、`npm` 或其它原生命令，并把 stdout/stderr 合并为结构检查输入。
+- 目标是区分“原生命令退出失败”和“成功命令向 stderr 输出进度/诊断信息”，避免 Windows runner 首次更新 crates.io index 时误报失败。
+
+### 2. 签名
+
+- `scripts/check-rust-dependency-graph.ps1 -CargoExecutable <command>`：默认执行 `cargo`，测试可注入位于安全临时目录的等价命令。
+- 内部 `Invoke-CargoTree -Arguments <string[]>` 返回 `{ Lines, ExitCode }`，不把原始 stderr 当作业务成功标志。
+
+### 3. 契约
+
+- 调用原生命令前暂时把 `$ErrorActionPreference` 设为 `Continue`，使用 `2>&1` 收集诊断行，并立即保存 `$LASTEXITCODE`；`finally` 中恢复调用方原值。
+- 退出码为 `0` 时，即使 stderr 有 `Updating crates.io index` 等进度行，也继续解析 stdout 并完成依赖图校验。
+- 退出码非 `0`、命令找不到或参数错误时，打印收集到的诊断并返回失败；不得把 stderr 静默吞掉，也不得仅凭输出文本判断成功。
+
+### 4. 验证与错误矩阵
+
+| 条件 | 必需结果 |
+|---|---|
+| stdout 正常、stderr 为空、退出码 0 | 依赖图检查通过 |
+| stdout 正常、stderr 有进度信息、退出码 0 | 依赖图检查通过，保留诊断供调试 |
+| stderr 有错误且退出码非 0 | 依赖图检查失败并保留诊断 |
+| workspace 或 core 任一 Cargo 调用失败 | 立即失败，不继续使用不完整依赖图 |
+
+### 5. 良好/基线/错误用例
+
+- 良好：安全临时 `.cmd` 输出 `Updating crates.io index` 到 stderr、输出 ring 依赖图并退出 0，脚本返回 0。
+- 基线：本机 Cargo 缓存命中且没有 stderr，脚本仍按相同 `{ Lines, ExitCode }` 契约运行。
+- 错误：在 `Stop` 偏好下直接执行 `& cargo tree ... 2>&1`，把退出 0 的 stderr 记录提升为 `NativeCommandError`。
+
+### 6. 必需测试
+
+- `scripts/tests/rust-dependency-graph.tests.ps1` 必须注入临时 fake Cargo，断言 stderr+退出 0 通过、workspace/core 两次调用均被执行，且真实成功摘要仍出现。
+- 同一测试必须保留 aws-lc、缺 ring、core 含 Tauri、core 不含 Tauri 的退出码断言；测试结束验证并删除临时目录。
+- CI 真实 `npm run check:rust:deps` 必须在冷 Cargo index 和缓存命中两种情况下都依据退出码判定，不依据 stderr 是否为空判定。
+
+### 7. 错误与正确做法
+
+#### 错误
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$lines = & cargo tree ... 2>&1
+```
+
+#### 正确
+
+```powershell
+$previous = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+  $lines = & $CargoExecutable @Arguments 2>&1
+  $exitCode = $LASTEXITCODE
+} finally {
+  $ErrorActionPreference = $previous
+}
+```
