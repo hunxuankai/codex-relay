@@ -33,6 +33,7 @@ describe('AboutView', () => {
     expect(wrapper.text()).toContain('明文')
     expect(wrapper.text()).toContain('启动时及运行期间每小时自动检查一次更新')
     expect(wrapper.text()).toContain('自动下载或安装')
+    expect(wrapper.text()).toContain('已安装版本升级会沿用原安装目录')
     expect(wrapper.text()).toContain('只有用户显式点击测试时才访问 Provider 模型网络')
     expect(wrapper.text()).toContain('API 可用性测试')
     expect(wrapper.text()).toContain('无工具、非流式、最多 16 个输出 token')

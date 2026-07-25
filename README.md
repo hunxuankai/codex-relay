@@ -59,7 +59,7 @@ AGENTS.md                    每轮必须加载的最高优先级规则
 
 ## 安装与首次使用
 
-Release 构建完成后，运行 `src-tauri/target/release/bundle/nsis/` 下实际生成的 `.exe` 安装器。安装模式是所有用户（per-machine），需要管理员权限。首次安装时，如果 `D:` 是固定磁盘，默认目录为 `D:\Program Files\Codex Relay`；否则使用与构建目标架构匹配的系统 Program Files 目录，当前交付的 x64 安装包通常回退到 `C:\Program Files\Codex Relay`。后续 per-machine 版本升级优先沿用上次目录，安装界面也允许用户修改目录。开始菜单项位于“Codex Relay”目录。若电脑上安装过旧的 current-user 版本，请先从 Windows“已安装的应用”卸载旧版，再运行新的 per-machine 安装器，避免 AppData 与 Program Files 中同时保留两套程序；卸载不会删除 Codex 配置和应用数据。
+Release 构建完成后，运行 `src-tauri/target/release/bundle/nsis/` 下实际生成的 `.exe` 安装器。安装模式是所有用户（per-machine），需要管理员权限。首次安装时，如果 `D:` 是固定磁盘，默认目录为 `D:\Program Files\Codex Relay`；否则使用与构建目标架构匹配的系统 Program Files 目录，当前交付的 x64 安装包通常回退到 `C:\Program Files\Codex Relay`。新鲜安装可以选择目录；已登记的 per-machine 版本升级（包括手动运行安装器和应用内更新）固定沿用上次目录，不允许在升级流程中并存安装。若要更换位置，请先从 Windows“已安装的应用”卸载旧版，再重新运行安装器；卸载不会删除 Codex 配置和应用数据。开始菜单项位于“Codex Relay”目录。若电脑上安装过旧的 current-user 版本，也请先卸载旧版，避免 AppData 与 Program Files 中同时保留两套程序。
 
 首次启动且 `config.toml` 不存在或没有 Provider 时，会出现引导页。可打开配置目录、新增第一个 Provider、稍后设置或退出。应用不会自动创建带虚假地址的 Provider。
 

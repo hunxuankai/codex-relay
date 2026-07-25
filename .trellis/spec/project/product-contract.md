@@ -30,6 +30,7 @@ Codex Relay 是面向 Windows 10/11、当前登录用户和个人可信计算机
 - `config.toml` 是 Codex 官方 Provider/顶层选择和实际 Base URL 真相；`provider-preferences.json` 是 Relay 命名 URL 与模型偏好真相；`providers.json` 是命名密钥与密钥预选存储；`auth.json` 是当前生效认证。
 - 普通 Provider 列表只暴露命名 URL、密钥名称/状态和配置完整性，不得返回密钥值。完整密钥只在用户显式打开管理器后进入短生命周期前端状态。
 - 卸载器只移除程序和快捷方式，不删除 `.codex`、Codex Relay 应用数据、密钥、日志或备份。
+- 新鲜 NSIS 安装可以选择目录；已登记安装的升级固定原目录，不提供并存安装或自动跨盘迁移。需要更换位置时先卸载旧版，再重新安装。
 - 怀疑泄漏时，删除或替换本地命名密钥不等于远端吊销；用户必须在 Provider 平台轮换凭据。
 
 ## 发布契约

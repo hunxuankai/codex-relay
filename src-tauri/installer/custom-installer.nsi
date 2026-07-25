@@ -72,6 +72,7 @@ ${StrLoc}
 
 Var PassiveMode
 Var UpdateMode
+Var UpgradeMode
 Var NoShortcutMode
 Var WixMode
 Var OldMainBinaryName
@@ -181,8 +182,8 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
   !insertmacro MULTIUSER_PAGE_INSTALLMODE
 !endif
 
-; 4. Custom page to ask user if he wants to reinstall/uninstall
-;    only if a previous installation was detected
+; 4. Existing installation page. Regular NSIS installations upgrade in place;
+;    the WiX migration branch below retains the upstream maintenance controls.
 Var ReinstallPageCheck
 Page custom PageReinstall PageLeaveReinstall
 Function PageReinstall
@@ -210,6 +211,7 @@ Function PageReinstall
     ${StrLoc} $R0 $R1 "msiexec" ">"
     StrCmp $R0 0 0 wix_loop_done
     StrCpy $WixMode 1
+    StrCpy $UpgradeMode 0
     StrCpy $R6 "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$1"
     Goto compare_version
   wix_loop_done:
@@ -258,12 +260,28 @@ Function PageReinstall
     Abort
   ${EndIf}
 
-  ; Skip showing the page if passive
-  ;
-  ; Note that we don't call this earlier at the begining
-  ; of this function because we need to populate some variables
-  ; related to current installed version if detected and whether
-  ; we are downgrading or not.
+  ; Regular NSIS installs are upgraded in place. The page is informational
+  ; and deliberately has no "do not uninstall" side-by-side option.
+  ${If} $WixMode = 0
+    !insertmacro MUI_HEADER_TEXT "$(existingInstallTitle)" "$(upgradeInPlaceHeader)"
+    ${If} $PassiveMode = 1
+      Call PageLeaveReinstall
+    ${Else}
+      nsDialogs::Create 1018
+      Pop $R4
+      ${IfThen} $(^RTL) = 1 ${|} nsDialogs::SetRTL $(^RTL) ${|}
+
+      ${NSD_CreateLabel} 0 0 100% 80u "$(upgradeInPlaceMessage)"
+      Pop $R1
+      ${NSD_SetFocus} $R1
+      nsDialogs::Show
+    ${EndIf}
+    Goto page_reinstall_done
+  ${EndIf}
+
+  ; WiX migration keeps the upstream maintenance controls.
+  ; Skip showing the page if passive. We still populate the version state above
+  ; because the legacy branch uses it to select its maintenance text.
   ${If} $PassiveMode = 1
     Call PageLeaveReinstall
   ${Else}
@@ -298,6 +316,8 @@ Function PageReinstall
     ${NSD_SetFocus} $R2
     nsDialogs::Show
   ${EndIf}
+
+  page_reinstall_done:
 FunctionEnd
 Function PageReinstallUpdateSelection
   ${NSD_GetState} $R2 $R1
@@ -308,6 +328,12 @@ Function PageReinstallUpdateSelection
   ${EndIf}
 FunctionEnd
 Function PageLeaveReinstall
+  ; Registered NSIS installations are updated in place. Do not invoke the
+  ; ordinary uninstaller before the user reaches the actual install phase.
+  ${If} $WixMode = 0
+    Goto reinst_done
+  ${EndIf}
+
   ${NSD_GetState} $R2 $R1
 
   ; If migrating from Wix, always uninstall
@@ -385,7 +411,7 @@ Function PageLeaveReinstall
 FunctionEnd
 
 ; 5. Choose install directory page
-!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfUpgrade
 !insertmacro MUI_PAGE_DIRECTORY
 
 ; 6. Start menu shortcut page
@@ -474,6 +500,16 @@ FunctionEnd
   !include "{{this}}"
 {{/each}}
 
+; Regular NSIS upgrades stay in the registered directory. These strings are
+; defined after the generated language files so both supported UI languages
+; can use the same source template.
+LangString existingInstallTitle ${LANG_SIMPCHINESE} "已检测到现有安装"
+LangString existingInstallTitle ${LANG_ENGLISH} "Existing installation detected"
+LangString upgradeInPlaceHeader ${LANG_SIMPCHINESE} "在原目录中升级"
+LangString upgradeInPlaceHeader ${LANG_ENGLISH} "Upgrade in place"
+LangString upgradeInPlaceMessage ${LANG_SIMPCHINESE} "${PRODUCTNAME} 将在当前安装目录中升级：$\n$INSTDIR$\n如需更换目录，请先从 Windows 卸载当前版本，再重新运行安装程序。"
+LangString upgradeInPlaceMessage ${LANG_ENGLISH} "${PRODUCTNAME} will be upgraded in its current installation folder:$\n$INSTDIR$\nTo change the folder, uninstall the current version from Windows first, then run this installer again."
+
 Function .onInit
   ${GetOptions} $CMDLINE "/P" $PassiveMode
   ${IfNot} ${Errors}
@@ -519,9 +555,11 @@ Function .onInit
     !else if "${INSTALLMODE}" == "currentUser"
       StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"
     !endif
-
-    Call RestorePreviousInstallLocation
   ${EndIf}
+
+  ; Always consult the registered NSIS path after choosing the fresh-install
+  ; default. This also prevents /D= from creating a second install on upgrade.
+  Call RestorePreviousInstallLocation
 
 
   !if "${INSTALLMODE}" == "both"
@@ -902,8 +940,12 @@ SectionEnd
 
 Function RestorePreviousInstallLocation
   ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-  StrCmp $4 "" +2 0
+  ReadRegStr $5 SHCTX "${UNINSTKEY}" "UninstallString"
+  ${If} $4 != ""
+  ${AndIf} $5 != ""
     StrCpy $INSTDIR $4
+    StrCpy $UpgradeMode 1
+  ${EndIf}
 FunctionEnd
 
 Function Skip
@@ -911,6 +953,12 @@ Function Skip
 FunctionEnd
 
 Function SkipIfPassive
+  ${IfThen} $PassiveMode = 1  ${|} Abort ${|}
+FunctionEnd
+Function SkipIfUpgrade
+  ${If} $UpgradeMode = 1
+    Abort
+  ${EndIf}
   ${IfThen} $PassiveMode = 1  ${|} Abort ${|}
 FunctionEnd
 Function un.SkipIfPassive

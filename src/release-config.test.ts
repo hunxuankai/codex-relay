@@ -150,4 +150,52 @@ describe('Windows release configuration', () => {
     )
     expect(nsisTemplate).toContain('!insertmacro MUI_PAGE_DIRECTORY')
   })
+
+  it('keeps registered NSIS upgrades in place and defers legacy uninstall decisions', () => {
+    expect(nsisTemplate).toContain('Var UpgradeMode')
+    expect(nsisTemplate).toContain('StrCpy $UpgradeMode 1')
+    expect(nsisTemplate).toContain('$(upgradeInPlaceMessage)')
+    expect(nsisTemplate).toContain('!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfUpgrade')
+    expect(nsisTemplate).toContain('Function SkipIfUpgrade')
+
+    const pageStart = nsisTemplate.indexOf('Function PageReinstall')
+    const pageEnd = nsisTemplate.indexOf('Function PageReinstallUpdateSelection', pageStart)
+    const reinstallPageUi = nsisTemplate.slice(pageStart, pageEnd)
+    const regularUiStart = reinstallPageUi.indexOf('${If} $WixMode = 0')
+    const legacyUiStart = reinstallPageUi.indexOf('; WiX migration keeps the upstream maintenance controls.')
+
+    expect(regularUiStart).toBeGreaterThanOrEqual(0)
+    expect(legacyUiStart).toBeGreaterThan(regularUiStart)
+    expect(reinstallPageUi.slice(regularUiStart, legacyUiStart)).toContain(
+      '$(upgradeInPlaceMessage)',
+    )
+    expect(reinstallPageUi.slice(regularUiStart, legacyUiStart)).not.toContain(
+      'NSD_CreateRadioButton',
+    )
+
+    const reinstallStart = nsisTemplate.indexOf('Function PageLeaveReinstall')
+    const reinstallEnd = nsisTemplate.indexOf('FunctionEnd', reinstallStart)
+    const reinstallPage = nsisTemplate.slice(reinstallStart, reinstallEnd)
+    const inPlaceBranch = reinstallPage.indexOf('${If} $WixMode = 0')
+    const legacyUninstall = reinstallPage.indexOf('reinst_uninstall:')
+
+    expect(inPlaceBranch).toBeGreaterThanOrEqual(0)
+    expect(legacyUninstall).toBeGreaterThan(inPlaceBranch)
+    expect(reinstallPage.slice(inPlaceBranch, legacyUninstall)).toContain('Goto reinst_done')
+
+    const onInitStart = nsisTemplate.indexOf('Function .onInit')
+    const onInitEnd = nsisTemplate.indexOf('FunctionEnd', onInitStart)
+    const onInit = nsisTemplate.slice(onInitStart, onInitEnd)
+    expect(onInit.indexOf('Call RestorePreviousInstallLocation')).toBeGreaterThan(
+      onInit.indexOf('${EndIf}', onInit.indexOf('PLACEHOLDER_INSTALL_DIR')),
+    )
+
+    const restoreStart = nsisTemplate.indexOf('Function RestorePreviousInstallLocation')
+    const restoreEnd = nsisTemplate.indexOf('FunctionEnd', restoreStart)
+    const restorePreviousLocation = nsisTemplate.slice(restoreStart, restoreEnd)
+    expect(restorePreviousLocation).toContain(
+      'ReadRegStr $5 SHCTX "${UNINSTKEY}" "UninstallString"',
+    )
+    expect(restorePreviousLocation).toContain('${AndIf} $5 != ""')
+  })
 })
