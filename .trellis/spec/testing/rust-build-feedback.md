@@ -120,6 +120,83 @@ npm run test:rust:lib -- provider_http
 
 需要观察最新 Rust 应用行为时，主动重启安全 no-watch 应用；完整 fmt/Clippy/集成测试留到阶段门禁。
 
+## Scenario：Windows 冷 runner 进程树测试
+
+### 1. 范围/触发条件
+
+- 触发条件：Windows Rust 测试启动 PowerShell、创建后代进程、等待 PID 文件，或通过大量 stdout
+  触发进程输出上限。
+- 目标是让测试验证 Job Object 的取消与输出限制语义，而不是把 GitHub 冷 runner 的进程启动和
+  管道吞吐误当成 5 秒产品 SLA。
+
+### 2. 签名
+
+- Windows 测试模块使用 `PROCESS_TREE_TEST_TIMEOUT: Duration = Duration::from_secs(30)` 作为有界的
+  测试级总预算。
+- `wait_for_process_id(path: &Path) -> u32` 每 20 毫秒重新读取 PID 文件，直到条件满足或测试预算
+  到期。
+- `SystemCodexProcessBackend::run(..., PROCESS_TREE_TEST_TIMEOUT, ...)` 只用于需要等待 PowerShell
+  启动、后代创建或输出上限的测试；生产调用方的显式超时不因此改变。
+
+### 3. 契约
+
+- 等待后代进程时必须轮询“PID 文件已写入且可解析”这一真实条件，不能用固定 sleep 猜测启动时间。
+- 轮询必须有清晰的总 deadline；条件始终不满足时在 deadline 后失败，不能无限等待。
+- 后代取消测试只能在已取得子 PID 后发送取消信号，再断言运行结果为 `Cancelled` 且子进程已退出。
+- 输出上限测试必须给冷 PowerShell 和管道足够的测试预算，再断言错误为 `OutputTooLarge`；若先得到
+  `Timeout`，应视为测试预算或实现退化的真实失败，不能放宽断言。
+- 30 秒仅是 CI 测试的冷启动容差，不是产品行为、性能承诺或默认运行超时。
+
+### 4. 验证与错误矩阵
+
+| 条件 | 必需结果 |
+|---|---|
+| 冷 runner 在 5 秒后、30 秒内写入有效 PID | 继续发送取消并验证整个进程树终止 |
+| deadline 内始终没有有效 PID | 测试以“child process id was not written in time”失败 |
+| 超限输出在 deadline 内被读取 | 返回 `OutputTooLarge`，并终止进程树 |
+| 超限输出测试先返回 `Timeout` | 保留失败并调查吞吐、读取或预算，不把 `Timeout` 接受为等价结果 |
+| 普通产品调用传入更短超时 | 仍按调用方超时返回 `Timeout`，不受测试常量影响 |
+
+### 5. 良好/基线/错误用例
+
+- 良好：按 20 毫秒轮询 PID 文件，在冷 runner 实际完成子进程启动后立即继续，不额外等待满 30 秒。
+- 基线：缓存命中的本机在数百毫秒内满足条件，测试仍快速结束。
+- 错误：`for _ in 0..250` 把 20 毫秒轮询隐式限制为 5 秒，或给 4 MiB 以上 PowerShell 输出只留
+  5 秒，然后把 CI 的 `Timeout` 误判为生产逻辑缺陷。
+
+### 6. 必需测试
+
+- Windows `codex_process` 5 项专项测试必须全部通过。
+- `cancellation_terminates_descendant_processes_in_the_job` 和
+  `output_limit_terminates_the_process_tree` 在修复时各连续运行至少 3 次，确认没有偶然缓存命中。
+- 完成前运行 `npm run check`；GitHub Actions 的冷 runner 也必须通过相同 172 项 core 测试后才能
+  进入 Draft 构建。
+
+### 7. 错误与正确做法
+
+#### 错误
+
+```rust
+for _ in 0..250 {
+    if let Ok(pid) = read_pid(path) {
+        return pid;
+    }
+    tokio::time::sleep(Duration::from_millis(20)).await;
+}
+```
+
+#### 正确
+
+```rust
+let deadline = Instant::now() + PROCESS_TREE_TEST_TIMEOUT;
+while Instant::now() < deadline {
+    if let Ok(pid) = read_pid(path) {
+        return pid;
+    }
+    tokio::time::sleep(Duration::from_millis(20)).await;
+}
+```
+
 ## Scenario：Windows PowerShell 原生命令诊断
 
 ### 1. 范围/触发条件

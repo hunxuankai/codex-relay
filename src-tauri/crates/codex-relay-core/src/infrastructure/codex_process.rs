@@ -583,6 +583,8 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
+    const PROCESS_TREE_TEST_TIMEOUT: Duration = Duration::from_secs(30);
+
     struct CreateFailingJobFactory;
 
     impl JobFactory for CreateFailingJobFactory {
@@ -657,7 +659,8 @@ mod tests {
     }
 
     async fn wait_for_process_id(path: &Path) -> u32 {
-        for _ in 0..250 {
+        let deadline = Instant::now() + PROCESS_TREE_TEST_TIMEOUT;
+        while Instant::now() < deadline {
             if let Ok(value) = fs::read_to_string(path)
                 && let Ok(process_id) = value.trim().parse::<u32>()
             {
@@ -735,7 +738,7 @@ mod tests {
                         MAX_PROCESS_OUTPUT_BYTES + 1
                     ),
                 ),
-                Duration::from_secs(5),
+                PROCESS_TREE_TEST_TIMEOUT,
                 cancel,
             )
             .await
@@ -813,7 +816,7 @@ mod tests {
         };
         let run = tokio::spawn(async move {
             SystemCodexProcessBackend::default()
-                .run(run_invocation, Duration::from_secs(10), cancel)
+                .run(run_invocation, PROCESS_TREE_TEST_TIMEOUT, cancel)
                 .await
         });
         let child_pid = wait_for_process_id(&pid_file).await;

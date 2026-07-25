@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { ElDialog } from 'element-plus'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ProviderAvailabilityTrace } from '../types/providerAvailability'
 import ProviderAvailabilityTraceDialog from './ProviderAvailabilityTraceDialog.vue'
 
@@ -92,5 +92,32 @@ describe('ProviderAvailabilityTraceDialog', () => {
     dialog.vm.$emit('update:modelValue', false)
     expect(escapeWrapper.emitted('close')).toEqual([[]])
     escapeWrapper.unmount()
+  })
+
+  it('cancels deferred focus when the dialog is unmounted', async () => {
+    vi.useFakeTimers()
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout')
+
+    try {
+      const wrapper = mount(ProviderAvailabilityTraceDialog, {
+        attachTo: document.body,
+        props: { open: true, providerName: 'Provider A', trace, durationMs: 1 },
+      })
+      await flushPromises()
+
+      const focusTimerIndex = setTimeoutSpy.mock.calls.findIndex(
+        ([handler]) => typeof handler === 'function' && handler.name === 'focusCloseButton',
+      )
+      expect(focusTimerIndex).toBeGreaterThanOrEqual(0)
+      const focusTimerId = setTimeoutSpy.mock.results[focusTimerIndex]?.value
+
+      wrapper.unmount()
+
+      expect(clearTimeoutSpy.mock.calls.some(([timerId]) => timerId === focusTimerId)).toBe(true)
+    } finally {
+      vi.restoreAllMocks()
+      vi.useRealTimers()
+    }
   })
 })

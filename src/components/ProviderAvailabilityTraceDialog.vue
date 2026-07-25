@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, shallowRef, useTemplateRef, watch } from 'vue'
+import { nextTick, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
 import { ElButton, ElDialog } from 'element-plus'
 import type { ButtonInstance } from 'element-plus'
 import type { ProviderAvailabilityTrace } from '../types/providerAvailability'
@@ -17,6 +17,8 @@ const emit = defineEmits<{
 
 const closeButton = useTemplateRef<ButtonInstance>('closeButton')
 const previousFocus = shallowRef<HTMLElement | null>(null)
+let focusTimer: ReturnType<typeof setTimeout> | undefined
+let componentActive = true
 
 function formatDuration(durationMs: number) {
   if (durationMs < 1_000) return `${Math.max(0, Math.round(durationMs))} ms`
@@ -24,13 +26,24 @@ function formatDuration(durationMs: number) {
 }
 
 function focusCloseButton() {
+  focusTimer = undefined
+  if (!componentActive || typeof HTMLButtonElement === 'undefined') return
   const element = closeButton.value?.$el
   if (element instanceof HTMLButtonElement) element.focus()
 }
 
 function scheduleFocus() {
-  setTimeout(focusCloseButton, 0)
+  if (!componentActive) return
+  if (focusTimer !== undefined) clearTimeout(focusTimer)
+  focusTimer = setTimeout(focusCloseButton, 0)
 }
+
+onBeforeUnmount(() => {
+  componentActive = false
+  if (focusTimer !== undefined) clearTimeout(focusTimer)
+  focusTimer = undefined
+  previousFocus.value = null
+})
 
 watch(
   () => props.open,
@@ -40,10 +53,12 @@ watch(
         ? document.activeElement
         : null
       await nextTick()
+      if (!componentActive || !props.open) return
       scheduleFocus()
       return
     }
     await nextTick()
+    if (!componentActive) return
     previousFocus.value?.focus()
     previousFocus.value = null
   },
