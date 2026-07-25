@@ -42,7 +42,7 @@
 - [x] typed service 使用精确的 camelCase `useProxy` 参数；Tauri command 与 Rust service 将该参数传递到 API 探针和 Codex 网关。
 - [x] 后端对 `useProxy=true` 的禁用/无地址代理返回稳定安全错误；`useProxy=false` 始终不使用代理，且不会写入设置或真实默认路径。
 - [x] API Key 保存成功后对话框关闭、管理器清空完整密钥，并显示不含密钥的成功反馈；失败时对话框不关闭。
-- [ ] 新增或调整的前端、Rust 和跨层测试均通过；类型检查、格式检查与本任务要求的质量检查有本轮证据。功能级测试、类型检查、格式检查、隔离 core/path-safety 测试和依赖图均有本轮通过证据；标准 `npm run check` 仍受运行中的 Rust watcher 门禁阻止。
+- [x] 新增或调整的前端、Rust 和跨层测试均通过；类型检查、格式检查与本任务要求的质量检查有本轮证据。2026-07-25 本轮标准 `npm run check` 已在 watcher 阻塞解除后退出 0，覆盖 Trellis 测试、前端 typecheck/Vitest、Rust 依赖图、fmt、Clippy、workspace 测试、路径安全与 Provider workflow。
 
 ## 范围外
 
