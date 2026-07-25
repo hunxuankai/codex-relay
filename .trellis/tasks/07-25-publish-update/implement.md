@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-任务已激活。版本与最终发布说明切片已经完成 RED→GREEN；尚未运行 typecheck、全量检查、普通构建、提交、推送、Actions、Draft 审计、公开 Release 或隔离升级。
+任务已激活。版本与最终发布说明切片、typecheck、全量检查、普通构建、候选提交和推送已完成；当前阻塞在 GitHub Actions runner，Draft 审计、公开 Release 和隔离升级尚未执行。
 
 ## 当前进度与证据
 
@@ -17,6 +17,16 @@
   - 当前进程的两个 Tauri 签名环境变量均不存在；Release 目录未生成 `.sig` 或 `latest.json`。同目录中的 `0.1.0`、`0.1.1`、`0.1.2` 安装器是历史构建残留，未作为本候选产物。
 - `trellis-check` 发布前审查：改动仅涉及版本、发布说明、结构测试和任务材料；`cargo metadata --locked` 返回 `codex-relay` 与 `codex-relay-core` 均为 `0.2.0`；任务校验通过；未发现需要新增长期规范的模式或缺陷。
 - 安全审计：`git diff --check` 通过；Git 跟踪文件只保留 `dev-data/.gitkeep`，没有真实 `auth.json`、`providers.json`、备份、签名资产或 target；高置信度 `OPENAI_API_KEY`/Authorization/Bearer 命中均位于既有测试或脱敏实现，未发现凭据值。
+- 候选提交 `930225a1a6ff7dd5b57a4b6026111d94863868bf` 已推送到远端 `main`，远端引用精确一致。
+- 已触发 GitHub Actions Run `30157828371`（`https://github.com/hunxuankai/codex-relay/actions/runs/30157828371`），head SHA 精确为候选提交。Run 当前保持 `queued`，未分配 `windows-latest` runner；GitHub Status 同期将 Actions 标记为 `major_outage`。因此 Draft 尚未生成，不能报告 Actions、签名或发布成功，也不重复触发 Run。
+- `gh run watch 30157828371 --exit-status` 等待约 30 分钟后因命令超时退出（退出码 124）；随后只读复核仍显示 Run/Job 为 `queued`、无 conclusion，GitHub Status 事故“Actions run failures and delays”仍为 `critical / investigating`（短链 `https://stspg.io/448g37mrq066`）。这是真实外部阻塞，不是构建失败。
+
+## 恢复步骤
+
+1. GitHub Actions 事故恢复后，先读取 Run `30157828371` 的状态；若它开始执行，继续等待同一 Run，不重复触发。
+2. 只有该 Run 成功并生成 `v0.2.0` Draft 后，按步骤 9 审计版本、目标提交、说明、NSIS、`.sig` 与 `latest.json`。
+3. Draft 审计通过后公开 Release，执行公开端点复核，再进入隔离 `v0.1.2 → v0.2.0` 升级验证。
+4. 若 GitHub 自动取消或报告失败，保留真实原因；在确认没有同版本 Draft/Tag 冲突后，才以新提交或同一候选按发布指南重试。
 
 ## 实施顺序
 
