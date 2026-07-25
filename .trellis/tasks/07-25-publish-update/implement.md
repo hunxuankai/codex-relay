@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-任务已激活。版本与最终发布说明切片、typecheck、全量检查、普通构建、候选提交和推送已完成。三轮 GitHub Actions 均在完整检查阶段失败：第一轮已修复 Cargo 正常 stderr 被 PowerShell 误判的问题；第二轮暴露冷 Windows runner 上进程树测试的 5 秒预算不足；第三轮证明只扩大到 30 秒仍不足以解决“由子 PowerShell 自行报告 PID”的错误等待条件。父进程 PID 修复后的第四轮工作流已成功，Draft 审计、公开 Release 和公开端点复核均已完成；当前只剩隔离 `v0.1.2 → v0.2.0` 应用内升级验证与最终收尾。
+任务已激活。版本与最终发布说明切片、typecheck、全量检查、普通构建、候选提交和推送已完成。三轮 GitHub Actions 均在完整检查阶段失败：第一轮已修复 Cargo 正常 stderr 被 PowerShell 误判的问题；第二轮暴露冷 Windows runner 上进程树测试的 5 秒预算不足；第三轮证明只扩大到 30 秒仍不足以解决“由子 PowerShell 自行报告 PID”的错误等待条件。父进程 PID 修复后的第四轮工作流已成功，Draft 审计、公开 Release、公开端点复核、隔离 `v0.1.2 → v0.2.0` 应用内升级验证、最终全范围检查和规范更新判断均已完成；当前只剩证据提交、推送和任务归档。
 
 ## 当前进度与证据
 
@@ -175,13 +175,60 @@
   `948c27533335876c3e5b1fbd9084fa880539e74d30974faeae0a7fa4c206f557`；独立 `.sig` 仍为 424 字节，
   SHA-256 `d499f14b01f52433d77b42d605f88f7c4676d50e2e76efda7b30aec718d44798`。未发现 Draft 到公开的资产漂移。
 
-## 恢复步骤
+## 隔离应用内升级证据
 
-1. 补齐第二轮 CI 失败与测试预算契约，运行 Trellis check、差异检查和任务校验。
-2. 精确提交并推送测试预算调整到远端 `main`，确认远端引用与新候选提交一致。
-3. 确认不存在 `v0.2.0` Draft/Tag 冲突后重新触发发布工作流，监控同一新 Run 直至结束；失败时保留真实步骤与日志边界。
-4. 只有新 Run 成功生成 `v0.2.0` Draft 后，按步骤 9 审计版本、目标提交、说明、NSIS、`.sig` 与 `latest.json`。
-5. Draft 审计通过后公开 Release，执行公开端点复核，再进入隔离 `v0.1.2 → v0.2.0` 升级验证。
+- Windows Sandbox staging 位于系统临时目录的真子路径，宿主机复核 staging 及其现有父路径均不是
+  reparse point；输入映射只读、结果映射可写，未使用真实 `.codex`、真实 Relay 应用数据或仓库目录。
+- 基线安装器来自公开正式 Release `v0.1.2`，Release 与 staging 文件均为 3,976,952 字节，SHA-256
+  `944F55AABACD1615ECEDF95A1D715F11A15DFD6FD8C8CA344341139FFD203D70`；`v0.1.2` 为
+  `draft=false`、`prerelease=false`。
+- `before.json` 在基线安装前写回；用户从 `v0.1.2` 设置页执行应用内更新并完成安装。用户在
+  Windows Sandbox 中人工观察到：未出现 UAC，安装后应用自动重启。
+- `guest-verify.ps1` 于 `2026-07-25T15:39:27.0167673Z` 写出 `after.json`，结果为：
+  `expectedVersion=0.2.0`、`installedVersion=0.2.0`、`versionMatched=true`、
+  `executablePresent=true`、`dataPreserved=true`、`success=true`。
+- 升级后登记安装目录为 `C:\Program Files\Codex Relay`，可执行文件为
+  `C:\Program Files\Codex Relay\CodexRelay.exe`；应用内升级沿用已登记目录，没有生成第二套安装。
+- 三项白名单 fixture 均存在，长度与 SHA-256 前后一致：
+
+| 相对路径 | 长度 | SHA-256 |
+|---|---:|---|
+| `codex/auth.json` | 56 | `2EAF2CA9850326AE844E2BE84455EAA246461C523A50A46D5CC97D7239355E81` |
+| `codex/config.toml` | 273 | `753D51E4C045937E1EDB169BA6D6088E15BFDC20B78968C72C668539F1173267` |
+| `app-data/providers.json` | 180 | `E7B0872EA3A97EB0740D9B53496FBA6B21329BBB41CDE6C12D17D6AD1725342A` |
+
+- `before.json` / `after.json` 只包含相对路径、长度、SHA-256 和安装元数据；扫描未发现
+  `test-key-*`、`OPENAI_API_KEY`、Authorization 或 Bearer 内容。
+- 本轮未执行更新取消、断网、错误签名和下载失败场景，均明确标记为未验证；未安装本地
+  `minisign`，仍不声称完成独立本地密码学验签。
+- 关闭 Sandbox 后首次清理 staging 时，Sandbox 共享目录的异步卸载仍占用空 `input` 目录，
+  `Remove-Item` 真实失败；确认 `WindowsSandbox` / `WindowsSandboxClient` 均已退出、目标仍为系统临时
+  目录真子路径且无 reparse point 后，第二次受保护清理退出 0，staging 已不存在。
+
+## 最终全范围检查与提交前审计
+
+- 最终 `npm run check` 退出 0，用时约 106.7 秒：Trellis 8 项、前端 37 个测试文件/176 项、Rust
+  主 crate 40 项、`codex-relay-core` 172 项、路径安全 3 项和 Provider workflow 1 项全部通过；依赖图、
+  typecheck、fmt、Clippy 和 workspace 测试均通过。
+- 版本复核通过：`package.json`、`package-lock.json`、lock 根包、`codex-relay` 和
+  `codex-relay-core` 均为 `0.2.0`；任务校验通过。
+- 首次聚合审计因 Windows PowerShell `ConvertFrom-Json` 默认不支持 `package-lock.json` 的空字符串属性而
+  失败；改用 `-AsHashtable` 读取 lock 根包后，同一审计退出 0。该失败属于审计命令兼容性，不是项目检查失败。
+- 最终公开端点复核仍返回 `v0.2.0`、`draft=false`、`prerelease=false`、目标提交
+  `d745f285e4d0d12301a31a5f318b30952b3fba33`；`releases/latest`、Tag 和 `latest.json.version`
+  一致，Release body 与 notes 一致，平台仍为 `windows-x86_64` 与 `windows-x86_64-nsis`，三个资产的
+  数量、大小和 digest 与 Draft/公开初次审计相同。
+- `git diff --check` 通过；提交前仅 `implement.md` 有差异，本地 `HEAD` 与 `origin/main` 均为
+  `a15e310c8d5c0f851bc23894ee380e0dbfb07420`。差异中的高置信度 OpenAI Key、Bearer、Authorization、
+  私钥块和真实宿主路径命中均为 0，Git 跟踪的真实 `auth.json`、`providers.json` 或备份路径数量为 0。
+- `trellis-update-spec` 判断：本轮真实 Sandbox 结果验证了既有发布、updater、路径安全和完成证据契约，
+  没有新增产品/API/环境变量行为；共享目录短暂占用属于一次性运行时序，现有规范已要求路径复核、如实记录
+  清理失败并确认目录不存在，因此无需再次修改长期规范。
+
+## 最终剩余步骤
+
+1. 提交并推送最终发布证据。
+2. 归档任务并记录开发日志。
 
 ## 实施顺序
 
@@ -238,4 +285,4 @@ python ./.trellis/scripts/task.py validate .trellis/tasks/07-25-publish-update
 
 ## 下一步
 
-准备安全 Windows Sandbox staging，核对公开 `v0.1.2` 安装器后执行应用内升级；若 Windows 自动化不可用，则保留已完成的脚本准备并请求用户完成必要的 GUI 点击，不虚报升级成功。
+提交并推送最终发布证据；随后归档任务并记录开发日志。
