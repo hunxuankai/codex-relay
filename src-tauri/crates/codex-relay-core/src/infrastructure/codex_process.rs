@@ -658,7 +658,7 @@ mod tests {
         }
     }
 
-    async fn wait_for_process_id(path: &Path) -> u32 {
+    async fn wait_for_process_id(path: &Path, status_path: &Path, error_path: &Path) -> u32 {
         let deadline = Instant::now() + PROCESS_TREE_TEST_TIMEOUT;
         while Instant::now() < deadline {
             if let Ok(value) = fs::read_to_string(path)
@@ -668,7 +668,15 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        panic!("child process id was not written in time");
+        let status = fs::read_to_string(status_path)
+            .map(|value| value.trim().to_owned())
+            .unwrap_or_else(|_| "<missing>".to_owned());
+        let error = fs::read_to_string(error_path)
+            .map(|value| value.trim().to_owned())
+            .unwrap_or_else(|_| "<missing>".to_owned());
+        panic!(
+            "child process id was not written in time; parent status: {status}; parent error: {error}"
+        );
     }
 
     #[tokio::test]
@@ -788,13 +796,28 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let parent_script = directory.path().join("parent.ps1");
         let pid_file = directory.path().join("child.pid");
+        let status_file = directory.path().join("parent.status");
+        let error_file = directory.path().join("parent.error");
         fs::write(
             &parent_script,
-            r#"param([string]$PidFile)
+            r#"param([string]$PidFile, [string]$StatusFile, [string]$ErrorFile)
 $ErrorActionPreference = 'Stop'
-$child = Start-Process -FilePath "$PSHOME\powershell.exe" -ArgumentList '-NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 120"' -WindowStyle Hidden -PassThru
-Set-Content -LiteralPath $PidFile -Value $child.Id
-Wait-Process -Id $child.Id
+try {
+    Set-Content -LiteralPath $StatusFile -Value 'before-start'
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = "$PSHOME\powershell.exe"
+    $startInfo.Arguments = '-NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 120"'
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $child = [System.Diagnostics.Process]::Start($startInfo)
+    Set-Content -LiteralPath $StatusFile -Value 'after-start'
+    Set-Content -LiteralPath $PidFile -Value $child.Id
+    Set-Content -LiteralPath $StatusFile -Value 'pid-written'
+    $child.WaitForExit()
+} catch {
+    Set-Content -LiteralPath $ErrorFile -Value ($_ | Out-String)
+    throw
+}
 "#,
         )
         .unwrap();
@@ -808,6 +831,8 @@ Wait-Process -Id $child.Id
                 "-File".into(),
                 parent_script.as_os_str().to_owned(),
                 pid_file.as_os_str().to_owned(),
+                status_file.as_os_str().to_owned(),
+                error_file.as_os_str().to_owned(),
             ],
             env: Vec::new(),
             workdir: directory.path().to_owned(),
@@ -817,7 +842,7 @@ Wait-Process -Id $child.Id
                 .run(run_invocation, PROCESS_TREE_TEST_TIMEOUT, cancel)
                 .await
         });
-        let child_pid = wait_for_process_id(&pid_file).await;
+        let child_pid = wait_for_process_id(&pid_file, &status_file, &error_file).await;
         sender.send(true).unwrap();
 
         assert_eq!(

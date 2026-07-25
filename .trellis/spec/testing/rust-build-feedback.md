@@ -133,16 +133,24 @@ npm run test:rust:lib -- provider_http
 
 - Windows 测试模块使用 `PROCESS_TREE_TEST_TIMEOUT: Duration = Duration::from_secs(30)` 作为有界的
   测试级总预算。
-- 父 PowerShell 在 `Start-Process` 返回后立即把 `$child.Id` 写入 PID 文件；
-  `wait_for_process_id(path: &Path) -> u32` 每 20 毫秒重新读取该文件，直到条件满足或测试预算到期。
+- 父 PowerShell 必须使用 `.NET System.Diagnostics.ProcessStartInfo` 直接创建后代，设置
+  `UseShellExecute = false` 与 `CreateNoWindow = true`；不要在“挂起后加入 Job Object 再恢复”的
+  启动链中依赖 `Start-Process` 的 ShellExecute 包装。
+- 父进程创建后代后立即把返回的 `$child.Id` 写入 PID 文件；
+  `wait_for_process_id(path, status_path, error_path) -> u32` 每 20 毫秒重新读取该文件，直到条件满足
+  或测试预算到期。
+- 父脚本在创建前、创建后和写入 PID 后写入临时状态文件；捕获异常时写入临时错误文件，超时消息必须带上
+  这些非秘密诊断，不能只报告一个无区分度的超时。
 - `SystemCodexProcessBackend::run(..., PROCESS_TREE_TEST_TIMEOUT, ...)` 只用于需要等待 PowerShell
   启动、后代创建或输出上限的测试；生产调用方的显式超时不因此改变。
 
 ### 3. 契约
 
 - 等待后代进程时必须轮询“PID 文件已写入且可解析”这一真实条件，不能用固定 sleep 猜测启动时间。
-- PID 必须由创建后代的父进程从 `Start-Process -PassThru` 返回值写入；不能要求子 PowerShell 先完成
+- PID 必须由创建后代的父进程从 `ProcessStartInfo` 返回的 `Process` 对象写入；不能要求子 PowerShell 先完成
   自身冷启动并执行脚本后再写 PID，因为那验证的是子运行时就绪，不是 Job Object 所需的“后代已创建”。
+- `Start-Process` 在本机缓存环境可能通过，但其 ShellExecute 包装在冷 runner 的挂起/Job Object 嵌套链中
+  可能阻塞；不得把本机通过视为该启动边界在 CI 中稳定。
 - 轮询必须有清晰的总 deadline；条件始终不满足时在 deadline 后失败，不能无限等待。
 - 后代取消测试只能在已取得子 PID 后发送取消信号，再断言运行结果为 `Cancelled` 且子进程已退出。
 - 输出上限测试必须给冷 PowerShell 和管道足够的测试预算，再断言错误为 `OutputTooLarge`；若先得到
@@ -154,19 +162,20 @@ npm run test:rust:lib -- provider_http
 | 条件 | 必需结果 |
 |---|---|
 | 冷 runner 在 5 秒后、30 秒内创建后代并由父进程写入有效 PID | 继续发送取消并验证整个进程树终止 |
-| 子 PowerShell 用户代码启动很慢，但 `Start-Process` 已返回 | 父进程仍立即记录 PID，不等待子脚本就绪 |
-| deadline 内始终没有有效 PID | 测试以“child process id was not written in time”失败 |
+| 子 PowerShell 用户代码启动很慢，但 `ProcessStartInfo` 已返回 | 父进程仍立即记录 PID，不等待子脚本就绪 |
+| deadline 内始终没有有效 PID | 测试失败消息同时包含父脚本最后阶段和异常诊断（若存在） |
 | 超限输出在 deadline 内被读取 | 返回 `OutputTooLarge`，并终止进程树 |
 | 超限输出测试先返回 `Timeout` | 保留失败并调查吞吐、读取或预算，不把 `Timeout` 接受为等价结果 |
 | 普通产品调用传入更短超时 | 仍按调用方超时返回 `Timeout`，不受测试常量影响 |
 
 ### 5. 良好/基线/错误用例
 
-- 良好：父进程在 `Start-Process` 返回时写入 `$child.Id`，测试按 20 毫秒轮询并立即继续，不等待
-  子 PowerShell 执行用户脚本。
+- 良好：父进程用 `ProcessStartInfo` 直接创建后代，在返回时写入 `$child.Id`，测试按 20 毫秒轮询并立即
+  继续，不等待子 PowerShell 执行用户脚本；启动阶段和异常写入临时诊断文件。
 - 基线：缓存命中的本机在数百毫秒内满足条件，测试仍快速结束。
-- 错误：让子脚本执行 `Set-Content -Value $PID`，把“已创建后代”错误提升为“后代 PowerShell 已完成
-  冷启动”；或用 `for _ in 0..250` 把轮询隐式限制为 5 秒。
+- 错误：在该启动链中使用 `Start-Process` ShellExecute 包装、让子脚本执行 `Set-Content -Value $PID`，
+  把“已创建后代”错误提升为“后代 PowerShell 已完成冷启动”；或用 `for _ in 0..250` 把轮询隐式限制
+  为 5 秒。
 
 ### 6. 必需测试
 
@@ -198,9 +207,14 @@ for _ in 0..250 {
 #### 正确
 
 ```powershell
-$child = Start-Process ... -PassThru
+$startInfo = New-Object System.Diagnostics.ProcessStartInfo
+$startInfo.FileName = "$PSHOME\powershell.exe"
+$startInfo.Arguments = '-NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 120"'
+$startInfo.UseShellExecute = $false
+$startInfo.CreateNoWindow = $true
+$child = [System.Diagnostics.Process]::Start($startInfo)
 Set-Content -LiteralPath $PidFile -Value $child.Id
-Wait-Process -Id $child.Id
+$child.WaitForExit()
 ```
 
 ```rust
@@ -212,6 +226,18 @@ while Instant::now() < deadline {
     tokio::time::sleep(Duration::from_millis(20)).await;
 }
 ```
+
+### 8. 失败复盘与防复发
+
+- **根因类别**：D（测试覆盖缺口）+ E（隐式时序/启动边界假设）。第一个修复把轮询预算从 5 秒扩大到
+  30 秒，第二个修复把 PID 观察点移到父进程，但仍保留 `Start-Process` ShellExecute 启动边界；本地缓存
+  命中不能覆盖冷 runner 的挂起与 Job Object 嵌套环境。
+- **本次证据**：Run `30167838439` 的前端 178 项和 core 171 项通过，唯一失败为
+  `cancellation_terminates_descendant_processes_in_the_job`，30 秒内 PID 文件为空；本地改用
+  `ProcessStartInfo` 后后代取消和输出上限测试各连续 3 次通过。
+- **预防机制**：测试夹具使用无 ShellExecute 的直接创建 API；阶段/异常诊断仅写入安全临时目录，并在
+  deadline 错误中呈现；专项测试和完整 `npm run check` 必须在进入发布 Draft 前通过。该修复不改变生产
+  Job Object、取消、超时或输出上限逻辑。
 
 ## Scenario：Windows PowerShell 原生命令诊断
 
