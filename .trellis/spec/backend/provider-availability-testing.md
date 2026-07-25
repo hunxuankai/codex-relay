@@ -15,12 +15,14 @@ pub async fn test_provider_api(
     state: State<'_, AppState>,
     provider_id: String,
     request_id: String,
+    use_proxy: bool,
 ) -> Result<CommandResult<ProviderAvailabilityResult>, ()>;
 
 pub async fn test_provider_codex_compatibility(
     state: State<'_, AppState>,
     provider_id: String,
     request_id: String,
+    use_proxy: bool,
 ) -> Result<CommandResult<ProviderAvailabilityResult>, ()>;
 
 pub fn cancel_provider_test(
@@ -29,8 +31,8 @@ pub fn cancel_provider_test(
 ) -> CommandResult<bool>;
 ```
 
-服务边界为 `ProviderAvailabilityService::test_api(provider_id, request_id)` 和
-`ProviderAvailabilityService::test_codex(provider_id, request_id)`。command 只负责 UUID/参数解析、
+服务边界为 `ProviderAvailabilityService::test_api(provider_id, request_id, use_proxy)` 和
+`ProviderAvailabilityService::test_codex(provider_id, request_id, use_proxy)`。command 只负责 UUID/参数解析、
 一次服务调用和 `CommandResult<T>` 映射；密钥不出现在 command 参数或返回值。
 
 ### 3. 请求/响应/环境契约
@@ -39,8 +41,14 @@ pub fn cancel_provider_test(
   `message`、`model`、`durationMs`、`testedAt`、可选 `httpStatus` 和 `codexVersion`。
 - API 请求固定发送一次 `/responses`：当前 Provider、当前偏好模型、Bearer 密钥、无 `tools`、
   `stream=false`、最多 16 个输出 token；30 秒超时、256 KiB 响应上限、不跟随重定向、不重试。
-- 目标解析和 API 测试读取密钥、Provider 偏好与网络代理时使用只读边界；缺少
-  `providers.json` 或 `settings.json` 只能在内存使用默认空值，不得创建、备份或改写应用数据。
+- 前端 IPC 使用 camelCase `useProxy: boolean`，Rust command 接收 `use_proxy: bool`。`false` 表示
+  默认直连：不读取网络代理设置，API 客户端与 Codex gateway 都保持 `.no_proxy()`；`true` 表示请求
+  使用已保存的 Relay 代理。
+- 目标解析和测试读取密钥、Provider 偏好与网络代理时使用只读边界。`use_proxy=true` 只能在
+  `network_proxy.enabled=true` 且地址非空时取得代理；缺失、禁用或空地址返回稳定错误，绝不静默
+  回退直连。缺少 `providers.json` 或 `settings.json` 不得创建、备份或改写应用数据。
+- API 探针与 Codex 兼容性 gateway 必须接收同一个已解析代理值；不得继承环境代理，也不得把代理
+  地址记录到公开结果、日志或通知。
 - Codex 请求先探测精确允许版本 `0.144.4`，再创建位于系统临时目录内的唯一 `CODEX_HOME`、
   `CODEX_SQLITE_HOME`、工作目录和纯文本 catalog。子进程只继承显式环境白名单和一次性假密钥；
   Rust 监控 gateway 才向目标 Provider 注入真实密钥。
@@ -60,6 +68,7 @@ pub fn cancel_provider_test(
 | 条件 | 状态 | 稳定 code |
 |---|---|---|
 | Provider、模型或密钥缺失/配置无效 | `failed` | `PROVIDER_TEST_*` |
+| `use_proxy=true` 且网络代理未启用或地址为空 | command failure | `PROVIDER_TEST_PROXY_DISABLED` |
 | API 401/403/404/429/5xx、DNS/连接/TLS/超时 | `failed` | `API_HTTP_*` / `API_NETWORK_*` / `API_TIMEOUT` |
 | 非 JSON、非 Responses、正文超过 256 KiB | `failed` | `API_RESPONSE_INVALID` / `API_RESPONSE_TOO_LARGE` |
 | 找不到 Codex CLI | `unsupported` | `CODEX_CLI_MISSING` |
@@ -77,14 +86,18 @@ CLI 缺失和版本漂移必须保持不同 code；不能用“版本不支持�
 ### 5. 良好/基线/错误用例
 
 - 良好：回环 Provider 返回完成的 Responses JSON；API 结果为 `passed`，请求只出现一次，Debug/日志/DTO 不含密钥。
+- 良好：默认 `use_proxy=false` 在没有 `settings.json` 时仍直连成功且文件保持不存在；启用代理后 API
+  与 Codex gateway 都使用同一已保存代理。
 - 基线：Provider 没有密钥、没有模型偏好或用户取消；不建立外部请求，返回稳定安全结果并释放活动注册项。
 - 基线：测试目录中缺少 `providers.json`/`settings.json` 时，测试结束后两文件仍不存在。
 - 错误：Codex 预检工具集合漂移、真实 SSE 含 function/custom tool call、stdout/stderr 超限、派生进程未退出或清理失败；
-  必须在相应边界 fail closed，不得把部分成功显示为通过。
+  必须在相应边界 fail closed，不得把部分成功显示为通过。请求已启用但不存在的代理后悄然改走直连同样禁止。
 
 ### 6. 必需测试及断言点
 
 - Rust 单元：DTO 序列化、目标解析、API 请求构造/响应上限/错误分类、单活动取消、版本与 CLI 缺失分类。
+- Rust 服务/command：`use_proxy=false` 不创建设置且 API/Codex 都不使用代理；`use_proxy=true` 的禁用或空
+  代理返回 `PROVIDER_TEST_PROXY_DISABLED`，camelCase `useProxy` 正确映射到 command 参数。
 - Rust 回环集成：预检核对 Provider/模型/Bearer 假密钥/工具集合；真实 gateway 只注入目标测试密钥，工具 SSE 到达 Codex 前被阻断。
 - Windows 进程专项：Job Object 加入、父子树终止、1 MiB stdout/stderr 上限、超时/取消、清理前路径校验和清理失败。
 - preflight 协议单元测试使用内存 `Read + Write`，断言传输 `Io` 不产生 400、完整非法请求仍产生
@@ -125,6 +138,19 @@ match parsed_request {
         Ok(report)
     }
 }
+```
+
+代理选择必须在 service 统一完成，不能只由 UI 或某一个测试路径决定：
+
+```rust
+// 错误：API 与 Codex 对代理模式采用不同默认值，或禁用代理后静默直连。
+let api_proxy = settings.network_proxy.enabled.then_some(settings.network_proxy.url);
+let gateway = CodexCompatibilityGateway::start(target, None).await?;
+
+// 正确：两个路径使用相同的只读解析结果。
+let proxy = self.resolve_test_proxy(use_proxy)?;
+provider_http::probe_api(&target, proxy.as_deref(), &self.app_version, &mut active.cancel).await;
+let gateway = CodexCompatibilityGateway::start(target, proxy.as_deref()).await?;
 ```
 
 两类测试都必须先解析目标 Provider 的密钥；但 API 密钥只在后端 HTTP 客户端短暂使用，Codex 密钥只在受监控 gateway 的上游

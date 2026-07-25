@@ -190,6 +190,14 @@ pub struct ProviderAvailabilityService {
     codex_runtime: Arc<dyn CodexRuntime>,
 }
 
+fn proxy_disabled_error() -> AppError {
+    AppError::new(
+        "PROVIDER_TEST_PROXY_DISABLED",
+        "设置中的“网络代理”尚未启用，无法使用代理测试。",
+        "provider test requested a disabled network proxy",
+    )
+}
+
 impl ProviderAvailabilityService {
     pub fn new(
         provider_service: ProviderService,
@@ -223,6 +231,7 @@ impl ProviderAvailabilityService {
         &self,
         provider_id: &str,
         request_id: Uuid,
+        use_proxy: bool,
     ) -> Result<ProviderAvailabilityResult, AppError> {
         let mut active = self.registry.begin(request_id)?;
         let started = Instant::now();
@@ -241,14 +250,14 @@ impl ProviderAvailabilityService {
                 ));
             }
         };
-        let settings = self.settings_service.load_read_only()?;
-        let proxy = settings
-            .network_proxy
-            .enabled
-            .then_some(settings.network_proxy.url.as_str())
-            .filter(|url| !url.is_empty());
-        let probe =
-            provider_http::probe_api(&target, proxy, &self.app_version, &mut active.cancel).await;
+        let proxy = self.resolve_test_proxy(use_proxy)?;
+        let probe = provider_http::probe_api(
+            &target,
+            proxy.as_deref(),
+            &self.app_version,
+            &mut active.cancel,
+        )
+        .await;
         let result = match probe {
             Ok(report) => ProviderAvailabilityResult {
                 provider_id: target.provider_id,
@@ -276,6 +285,7 @@ impl ProviderAvailabilityService {
         &self,
         provider_id: &str,
         request_id: Uuid,
+        use_proxy: bool,
     ) -> Result<ProviderAvailabilityResult, AppError> {
         let active = self.registry.begin(request_id)?;
         let started = Instant::now();
@@ -294,6 +304,7 @@ impl ProviderAvailabilityService {
                 ));
             }
         };
+        let proxy = self.resolve_test_proxy(use_proxy)?;
 
         let version = match self
             .codex_runtime
@@ -330,7 +341,13 @@ impl ProviderAvailabilityService {
             }
         };
         let execution = self
-            .execute_codex(&target, &version, &layout, active.cancel.clone())
+            .execute_codex(
+                &target,
+                &version,
+                &layout,
+                proxy.as_deref(),
+                active.cancel.clone(),
+            )
             .await;
         let cleanup = layout.cleanup();
         let execution = match cleanup {
@@ -346,11 +363,23 @@ impl ProviderAvailabilityService {
         ))
     }
 
+    fn resolve_test_proxy(&self, use_proxy: bool) -> Result<Option<String>, AppError> {
+        if !use_proxy {
+            return Ok(None);
+        }
+        let settings = self.settings_service.load_read_only()?;
+        if !settings.network_proxy.enabled || settings.network_proxy.url.is_empty() {
+            return Err(proxy_disabled_error());
+        }
+        Ok(Some(settings.network_proxy.url))
+    }
+
     async fn execute_codex(
         &self,
         target: &ProviderAvailabilityTarget,
         version: &CodexRuntimeVersion,
         layout: &CodexTempLayout,
+        proxy: Option<&str>,
         cancel: watch::Receiver<bool>,
     ) -> CodexExecutionOutcome {
         if let Err(error) = write_model_catalog(layout.catalog_path(), &target.model) {
@@ -407,7 +436,7 @@ impl ProviderAvailabilityService {
             return CodexExecutionOutcome::preflight_failed();
         }
 
-        let gateway = match CodexCompatibilityGateway::start(target.clone(), None).await {
+        let gateway = match CodexCompatibilityGateway::start(target.clone(), proxy).await {
             Ok(gateway) => gateway,
             Err(_) => return CodexExecutionOutcome::preflight_failed(),
         };
@@ -1077,7 +1106,7 @@ mod tests {
         );
 
         let result = service
-            .test_api("provider-a", Uuid::new_v4())
+            .test_api("provider-a", Uuid::new_v4(), false)
             .await
             .unwrap();
 
@@ -1140,7 +1169,7 @@ mod tests {
         );
 
         let result = service
-            .test_api("provider-a", Uuid::new_v4())
+            .test_api("provider-a", Uuid::new_v4(), false)
             .await
             .unwrap();
 
@@ -1191,7 +1220,7 @@ mod tests {
         );
 
         let result = service
-            .test_api("provider-a", Uuid::new_v4())
+            .test_api("provider-a", Uuid::new_v4(), false)
             .await
             .unwrap();
 
@@ -1223,6 +1252,40 @@ mod tests {
             "{\"version\":1,\"providers\":{\"provider-a\":{\"models\":[\"gpt-5.6-sol\"],\"selectedModel\":\"gpt-5.6-sol\",\"reasoningEfforts\":{\"gpt-5.6-sol\":\"medium\"}}}}\n",
         )
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn proxy_mode_requires_an_enabled_network_proxy_without_writing_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_test(
+            directory.path().join("codex"),
+            directory.path().join("app-data"),
+        )
+        .unwrap();
+        fs::create_dir_all(&paths.codex_home).unwrap();
+        fs::create_dir_all(&paths.app_data_dir).unwrap();
+        write_provider_state(&paths, "http://127.0.0.1:9/v1");
+        assert!(!paths.settings_file.exists());
+        let service = ProviderAvailabilityService::new(
+            ProviderService::new(paths.clone(), "0.1.0"),
+            SettingsService::new(paths.clone()),
+            "0.1.0",
+        );
+
+        let api_error = service
+            .test_api("provider-a", Uuid::new_v4(), true)
+            .await
+            .unwrap_err();
+        let codex_error = service
+            .test_codex("provider-a", Uuid::new_v4(), true)
+            .await
+            .unwrap_err();
+
+        assert_eq!(api_error.code(), "PROVIDER_TEST_PROXY_DISABLED");
+        assert_eq!(codex_error.code(), "PROVIDER_TEST_PROXY_DISABLED");
+        assert!(!paths.settings_file.exists());
+        assert!(!api_error.public_message().contains("127.0.0.1"));
+        assert!(!codex_error.public_message().contains("127.0.0.1"));
     }
 
     #[tokio::test]
@@ -1284,7 +1347,7 @@ mod tests {
         );
         let before_config = fs::read(&paths.config_file).unwrap();
         let result = service
-            .test_codex("provider-a", Uuid::new_v4())
+            .test_codex("provider-a", Uuid::new_v4(), false)
             .await
             .unwrap();
 
@@ -1328,7 +1391,7 @@ mod tests {
             unsupported_runtime,
         );
         let unsupported = unsupported_service
-            .test_codex("provider-a", Uuid::new_v4())
+            .test_codex("provider-a", Uuid::new_v4(), false)
             .await
             .unwrap();
         assert_eq!(unsupported.status, ProviderTestStatus::Unsupported);
@@ -1350,7 +1413,7 @@ mod tests {
             managed_runtime,
         );
         let managed = managed_service
-            .test_codex("provider-a", Uuid::new_v4())
+            .test_codex("provider-a", Uuid::new_v4(), false)
             .await
             .unwrap();
         assert_eq!(managed.status, ProviderTestStatus::Unsupported);
@@ -1383,7 +1446,7 @@ mod tests {
         );
 
         let result = service
-            .test_codex("provider-a", Uuid::new_v4())
+            .test_codex("provider-a", Uuid::new_v4(), false)
             .await
             .unwrap();
 
@@ -1434,7 +1497,7 @@ mod tests {
         );
 
         let result = service
-            .test_codex("provider-a", Uuid::new_v4())
+            .test_codex("provider-a", Uuid::new_v4(), false)
             .await
             .unwrap();
 

@@ -129,15 +129,17 @@ export function importCurrentAuthKey(
 export function testProviderApi(
   providerId: string,
   requestId: string,
+  useProxy: boolean,
 ): Promise<ProviderAvailabilityResult> {
-  return call('test_provider_api', { providerId, requestId })
+  return call('test_provider_api', { providerId, requestId, useProxy })
 }
 
 export function testProviderCodexCompatibility(
   providerId: string,
   requestId: string,
+  useProxy: boolean,
 ): Promise<ProviderAvailabilityResult> {
-  return call('test_provider_codex_compatibility', { providerId, requestId })
+  return call('test_provider_codex_compatibility', { providerId, requestId, useProxy })
 }
 
 export function cancelProviderTest(requestId: string): Promise<boolean> {

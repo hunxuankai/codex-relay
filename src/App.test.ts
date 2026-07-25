@@ -137,9 +137,9 @@ function updaterController(): UpdaterController {
 
 const stubs = {
   ProvidersView: {
-    props: ['startCreating'],
+    props: ['startCreating', 'networkProxyEnabled'],
     emits: ['providerCreated', 'createCancelled'],
-    template: '<div data-view="providers">Providers {{ startCreating ? "create" : "list" }}<button aria-label="模拟首个 Provider 创建成功" @click="$emit(\'providerCreated\')">created</button><button aria-label="模拟取消首个 Provider" @click="$emit(\'createCancelled\')">cancel</button></div>',
+    template: '<div data-view="providers" :data-proxy-enabled="String(networkProxyEnabled)">Providers {{ startCreating ? "create" : "list" }}<button aria-label="模拟首个 Provider 创建成功" @click="$emit(\'providerCreated\')">created</button><button aria-label="模拟取消首个 Provider" @click="$emit(\'createCancelled\')">cancel</button></div>',
   },
   BackupsView: {
     emits: ['restored'],
@@ -277,6 +277,7 @@ describe('App', () => {
     expect(updater.checkSilently).toHaveBeenCalledOnce()
     const options = mocks.useUpdater.mock.calls[0]?.[0] as UseUpdaterOptions
     expect(options.getProxy?.()).toBe('http://127.0.0.1:7890')
+    expect(wrapper.get('[data-view="providers"]').attributes('data-proxy-enabled')).toBe('true')
 
     state.settingsState.state.value = {
       ...state.settingsState.state.value,

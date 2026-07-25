@@ -60,29 +60,38 @@ DTO、localStorage 或应用数据。
 ### 2. 签名
 
 composable 暴露只读 `results`、`runningKind`、`busy` 和显式 `testApi`、`testCodex`、
-`cancel`、`invalidateAll`；组件通过 typed service 调用三个固定 command。
+`cancel`、`invalidateAll`；测试动作签名为 `testApi(providerId, useProxy)` 和
+`testCodex(providerId, useProxy)`，组件通过 typed service 调用三个固定 command。
 
 ### 3. 请求/响应/环境契约
 
 每个结果以 `providerId + kind` 为键保存，保留后端 `status/code/message`；请求序列号或 UUID
-使取消、指纹变化后的晚响应无法覆盖新状态。Codex 测试只能从确认对话框进入。
+使取消、指纹变化后的晚响应无法覆盖新状态。Provider 可用性面板默认传入
+`useProxy=false`，并且只能在应用根部唯一 `useSettings` 状态中的
+`networkProxy.enabled=true` 时传入 `true`；不得在 Provider 页面重新加载或复制设置状态。
+Codex 测试只能从确认对话框进入，确认状态必须保留本次 `useProxy` 值，不能在确认期间重新读取
+复选框。
 
 ### 4. 验证与错误矩阵
 
 - 同一时间已有测试：按钮显示取消态，重复启动被阻止。
 - Provider 指纹变化、CRUD 成功或 `providers-changed`：调用 `invalidateAll` 清除旧结果。
 - 后端稳定错误码原样映射为安全中文消息；不得在组件中解析原始响应正文。
+- 用户取消“不使用代理”但网络代理未启用：显示可见原因、禁用两类测试按钮，且不发起 IPC；后端
+  `PROVIDER_TEST_PROXY_DISABLED` 仍作为过期 UI 或直接 IPC 的防御门禁。
 
 ### 5. 良好/基线/错误用例
 
 - 良好：API 通过不替换 Codex 结果，切换 Provider 仍可查看其他详情但不能编辑/删除/改偏好。
+- 良好：默认直连的 API/Codex 操作都传递 `useProxy=false`；启用代理后，确认的 Codex 操作仍使用
+  点击时保存的 `true`。
 - 基线：缺少密钥、无模型或 busy 时按钮有可见禁用原因和 aria-label。
-- 错误：把测试结果写入 `useProviders` 或让列表卡片再展示一份状态。
+- 错误：把测试结果写入 `useProviders`、让列表卡片再展示一份状态，或由局部组件猜测/复制网络代理设置。
 
 ### 6. 必需测试
 
-Vitest 断言两类结果独立、确认后才发起 Codex、取消态、晚响应丢弃、指纹失效、稳定错误消息、
-键盘可达性和 760px 单列布局。
+Vitest 断言两类结果独立、默认直连和已启用代理的 `useProxy` 透传、确认后才发起 Codex 且保留
+模式、代理未启用门禁、取消态、晚响应丢弃、指纹失效、稳定错误消息、键盘可达性和 760px 单列布局。
 
 ### 7. 错误与正确做法
 
@@ -97,6 +106,6 @@ localStorage.setItem('provider-test', JSON.stringify(provider.lastHealth))
 
 ```ts
 const availability = useProviderAvailability()
-await availability.testApi(provider.id)
+await availability.testApi(provider.id, false)
 // 结果仅在 availability 会话内存中，Provider DTO 不变
 ```

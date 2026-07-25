@@ -82,8 +82,52 @@ describe('ProviderAvailabilityPanel', () => {
 
     await apiButton?.trigger('click')
     await codexButton?.trigger('click')
-    expect(wrapper.emitted('testApi')).toHaveLength(1)
-    expect(wrapper.emitted('requestCodexTest')).toHaveLength(1)
+    expect(wrapper.emitted('testApi')).toEqual([[false]])
+    expect(wrapper.emitted('requestCodexTest')).toEqual([[false]])
+  })
+
+  it('defaults to bypassing proxies and blocks proxy tests until network proxy is enabled', async () => {
+    const wrapper = mount(ProviderAvailabilityPanel, {
+      props: {
+        provider,
+        apiResult: null,
+        codexResult: null,
+        runningKind: null,
+        disabled: false,
+        cancelling: false,
+        networkProxyEnabled: false,
+      },
+    })
+
+    const skipProxy = wrapper.get('[name="provider-test-skip-proxy"]')
+    expect((skipProxy.element as HTMLInputElement).checked).toBe(true)
+
+    await skipProxy.setValue(false)
+
+    expect(wrapper.text()).toContain('设置中的“网络代理”尚未启用，无法使用代理测试。')
+    expect(wrapper.get('[aria-label="测试 Provider A 的 API 可用性"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[aria-label="运行 Provider A 的 Codex 兼容性测试"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('requests the configured proxy for both tests when enabled', async () => {
+    const wrapper = mount(ProviderAvailabilityPanel, {
+      props: {
+        provider,
+        apiResult: null,
+        codexResult: null,
+        runningKind: null,
+        disabled: false,
+        cancelling: false,
+        networkProxyEnabled: true,
+      },
+    })
+
+    await wrapper.get('[name="provider-test-skip-proxy"]').setValue(false)
+    await wrapper.get('[aria-label="测试 Provider A 的 API 可用性"]').trigger('click')
+    await wrapper.get('[aria-label="运行 Provider A 的 Codex 兼容性测试"]').trigger('click')
+
+    expect(wrapper.emitted('testApi')).toEqual([[true]])
+    expect(wrapper.emitted('requestCodexTest')).toEqual([[true]])
   })
 
   it('shows API and Codex outcomes independently with visible status and bounded metadata', () => {

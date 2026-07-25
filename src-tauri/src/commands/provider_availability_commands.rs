@@ -18,6 +18,7 @@ pub(crate) async fn test_provider_api_inner(
     state: &AppState,
     provider_id: String,
     request_id: String,
+    use_proxy: bool,
 ) -> CommandResult<ProviderAvailabilityResult> {
     let request_id = match parse_request_id(&request_id) {
         Ok(request_id) => request_id,
@@ -26,7 +27,7 @@ pub(crate) async fn test_provider_api_inner(
     command_result(
         state
             .provider_availability_service
-            .test_api(&provider_id, request_id)
+            .test_api(&provider_id, request_id, use_proxy)
             .await,
     )
 }
@@ -36,14 +37,16 @@ pub async fn test_provider_api(
     state: tauri::State<'_, AppState>,
     provider_id: String,
     request_id: String,
+    use_proxy: bool,
 ) -> Result<CommandResult<ProviderAvailabilityResult>, ()> {
-    Ok(test_provider_api_inner(&state, provider_id, request_id).await)
+    Ok(test_provider_api_inner(&state, provider_id, request_id, use_proxy).await)
 }
 
 pub(crate) async fn test_provider_codex_compatibility_inner(
     state: &AppState,
     provider_id: String,
     request_id: String,
+    use_proxy: bool,
 ) -> CommandResult<ProviderAvailabilityResult> {
     let request_id = match parse_request_id(&request_id) {
         Ok(request_id) => request_id,
@@ -52,7 +55,7 @@ pub(crate) async fn test_provider_codex_compatibility_inner(
     command_result(
         state
             .provider_availability_service
-            .test_codex(&provider_id, request_id)
+            .test_codex(&provider_id, request_id, use_proxy)
             .await,
     )
 }
@@ -62,8 +65,9 @@ pub async fn test_provider_codex_compatibility(
     state: tauri::State<'_, AppState>,
     provider_id: String,
     request_id: String,
+    use_proxy: bool,
 ) -> Result<CommandResult<ProviderAvailabilityResult>, ()> {
-    Ok(test_provider_codex_compatibility_inner(&state, provider_id, request_id).await)
+    Ok(test_provider_codex_compatibility_inner(&state, provider_id, request_id, use_proxy).await)
 }
 
 pub(crate) fn cancel_provider_test_inner(

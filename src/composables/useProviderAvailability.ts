@@ -7,10 +7,15 @@ import type {
 } from '../types/providerAvailability'
 
 export interface ProviderAvailabilityClient {
-  testProviderApi(providerId: string, requestId: string): Promise<ProviderAvailabilityResult>
+  testProviderApi(
+    providerId: string,
+    requestId: string,
+    useProxy: boolean,
+  ): Promise<ProviderAvailabilityResult>
   testProviderCodexCompatibility(
     providerId: string,
     requestId: string,
+    useProxy: boolean,
   ): Promise<ProviderAvailabilityResult>
   cancelProviderTest(requestId: string): Promise<boolean>
 }
@@ -78,7 +83,11 @@ export function useProviderAvailability(options: UseProviderAvailabilityOptions 
     }
   }
 
-  async function test(providerId: string, kind: ProviderTestKind): Promise<void> {
+  async function test(
+    providerId: string,
+    kind: ProviderTestKind,
+    useProxy: boolean,
+  ): Promise<void> {
     if (running.value) return
     const requestId = createRequestId()
     const current: RunningTest = {
@@ -94,8 +103,8 @@ export function useProviderAvailability(options: UseProviderAvailabilityOptions 
     try {
       const result =
         kind === 'api'
-          ? await client.testProviderApi(providerId, requestId)
-          : await client.testProviderCodexCompatibility(providerId, requestId)
+          ? await client.testProviderApi(providerId, requestId, useProxy)
+          : await client.testProviderCodexCompatibility(providerId, requestId, useProxy)
       if (
         running.value?.token !== current.token ||
         generation !== current.generation ||
@@ -123,12 +132,12 @@ export function useProviderAvailability(options: UseProviderAvailabilityOptions 
     }
   }
 
-  function testApi(providerId: string) {
-    return test(providerId, 'api')
+  function testApi(providerId: string, useProxy = false) {
+    return test(providerId, 'api', useProxy)
   }
 
-  function testCodex(providerId: string) {
-    return test(providerId, 'codex')
+  function testCodex(providerId: string, useProxy = false) {
+    return test(providerId, 'codex', useProxy)
   }
 
   async function cancel(): Promise<boolean> {

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProviderProfile } from '../types/provider'
 import type { ProviderAvailabilityResult, ProviderTestKind } from '../types/providerAvailability'
 import ProviderApiKeyManagerDialog from '../components/ProviderApiKeyManagerDialog.vue'
+import ProviderAvailabilityPanel from '../components/ProviderAvailabilityPanel.vue'
 import ProviderBaseUrlManagerDialog from '../components/ProviderBaseUrlManagerDialog.vue'
 import ProviderCredentialControls from '../components/ProviderCredentialControls.vue'
 import ProviderEndpointControls from '../components/ProviderEndpointControls.vue'
@@ -285,8 +286,27 @@ describe('ProvidersView', () => {
     wrapper.getComponent(ProviderApiKeyManagerDialog).vm.$emit('save')
     await flushPromises()
     expect(keyManager.save).toHaveBeenCalledOnce()
-    wrapper.getComponent(ProviderApiKeyManagerDialog).vm.$emit('close')
+    expect(wrapper.findComponent(ProviderApiKeyManagerDialog).exists()).toBe(false)
     expect(keyManager.clear).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('API Key 已保存。')
+  })
+
+  it('keeps the API Key manager open when saving does not succeed', async () => {
+    const state = controller()
+    const keyManager = apiKeyManagerController()
+    keyManager.save.mockResolvedValue(undefined)
+    mockUseProviders.mockReturnValue(state)
+    mockUseProviderApiKeyManager.mockReturnValue(keyManager)
+    const wrapper = mount(ProvidersView)
+
+    wrapper.getComponent(ProviderCredentialControls).vm.$emit('manage')
+    await flushPromises()
+    wrapper.getComponent(ProviderApiKeyManagerDialog).vm.$emit('save')
+    await flushPromises()
+
+    expect(keyManager.save).toHaveBeenCalledOnce()
+    expect(wrapper.findComponent(ProviderApiKeyManagerDialog).exists()).toBe(true)
+    expect(keyManager.clear).not.toHaveBeenCalled()
   })
 
   it('confirms before importing the current auth.json key', async () => {
@@ -336,7 +356,7 @@ describe('ProvidersView', () => {
     const wrapper = mount(ProvidersView, { attachTo: document.body })
 
     await wrapper.get('[aria-label="测试 Provider A 的 API 可用性"]').trigger('click')
-    expect(availability.testApi).toHaveBeenCalledWith('provider-a')
+    expect(availability.testApi).toHaveBeenCalledWith('provider-a', false)
 
     await wrapper.get('[aria-label="运行 Provider A 的 Codex 兼容性测试"]').trigger('click')
     expect(availability.testCodex).not.toHaveBeenCalled()
@@ -344,7 +364,29 @@ describe('ProvidersView', () => {
     expect(wrapper.text()).toContain('token 消耗')
 
     await wrapper.get('[aria-label="确认操作"]').trigger('click')
-    expect(availability.testCodex).toHaveBeenCalledWith('provider-a')
+    expect(availability.testCodex).toHaveBeenCalledWith('provider-a', false)
+  })
+
+  it('uses the enabled network proxy mode for API and confirmed Codex tests', async () => {
+    const state = controller()
+    const availability = availabilityController()
+    mockUseProviders.mockReturnValue(state)
+    mockUseProviderAvailability.mockReturnValue(availability)
+    const wrapper = mount(ProvidersView, {
+      attachTo: document.body,
+      props: { networkProxyEnabled: true },
+    })
+
+    const panel = wrapper.getComponent(ProviderAvailabilityPanel)
+    expect(panel.props('networkProxyEnabled')).toBe(true)
+
+    panel.vm.$emit('testApi', true)
+    expect(availability.testApi).toHaveBeenCalledWith('provider-a', true)
+
+    panel.vm.$emit('requestCodexTest', true)
+    await nextTick()
+    await wrapper.get('[aria-label="确认操作"]').trigger('click')
+    expect(availability.testCodex).toHaveBeenCalledWith('provider-a', true)
   })
 
   it('shares the availability busy state with Provider mutations while keeping selection available', () => {

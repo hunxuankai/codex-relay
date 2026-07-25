@@ -248,8 +248,8 @@ describe('Tauri service boundary', () => {
     await deleteProvider('provider-a', fingerprints)
     await switchProvider('provider-a')
     await importCurrentAuthKey(importInput)
-    await testProviderApi('provider-a', 'request-api')
-    await testProviderCodexCompatibility('provider-a', 'request-codex')
+    await testProviderApi('provider-a', 'request-api', false)
+    await testProviderCodexCompatibility('provider-a', 'request-codex', true)
     await cancelProviderTest('request-codex')
     await getSettings()
     await saveSettings(settings)
@@ -274,8 +274,8 @@ describe('Tauri service boundary', () => {
       ['delete_provider', { providerId: 'provider-a', expectedFiles: fingerprints }],
       ['switch_provider', { providerId: 'provider-a' }],
       ['import_current_auth_key', { input: importInput }],
-      ['test_provider_api', { providerId: 'provider-a', requestId: 'request-api' }],
-      ['test_provider_codex_compatibility', { providerId: 'provider-a', requestId: 'request-codex' }],
+      ['test_provider_api', { providerId: 'provider-a', requestId: 'request-api', useProxy: false }],
+      ['test_provider_codex_compatibility', { providerId: 'provider-a', requestId: 'request-codex', useProxy: true }],
       ['cancel_provider_test', { requestId: 'request-codex' }],
       ['get_settings'],
       ['save_settings', { settings }],

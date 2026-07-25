@@ -24,8 +24,12 @@ import type {
 } from '../types/provider'
 import type { ProviderTestKind } from '../types/providerAvailability'
 
-const props = withDefaults(defineProps<{ startCreating?: boolean }>(), {
+const props = withDefaults(defineProps<{
+  startCreating?: boolean
+  networkProxyEnabled?: boolean
+}>(), {
   startCreating: false,
+  networkProxyEnabled: false,
 })
 const emit = defineEmits<{
   providerCreated: []
@@ -48,9 +52,14 @@ const editorMode = shallowRef<'create' | 'edit' | null>(props.startCreating ? 'c
 const editingProviderId = shallowRef<string | null>(null)
 const deleteProviderId = shallowRef<string | null>(null)
 const confirmImportCurrentKey = shallowRef(false)
-const confirmCodexProviderId = shallowRef<string | null>(null)
+const confirmCodexTestRequest = shallowRef<{
+  providerId: string
+  useProxy: boolean
+} | null>(null)
 const baseUrlManagerProviderId = shallowRef<string | null>(null)
 const apiKeyManagerProviderId = shallowRef<string | null>(null)
+const apiKeyManagerSuccessMessage = shallowRef<string | null>(null)
+const apiKeyManagerSuccessMessageId = shallowRef(0)
 
 const interactionBusy = computed(() =>
   providerState.busy.value ||
@@ -142,6 +151,7 @@ async function saveBaseUrls(entries: ProviderBaseUrlDraft[]) {
 }
 
 async function openApiKeyManager(providerId: string) {
+  apiKeyManagerSuccessMessage.value = null
   apiKeyManagerProviderId.value = providerId
   await apiKeyManager.load(providerId)
 }
@@ -151,8 +161,12 @@ function closeApiKeyManager() {
   apiKeyManager.clear()
 }
 
-function saveApiKeys() {
-  void apiKeyManager.save()
+async function saveApiKeys() {
+  const outcome = await apiKeyManager.save()
+  if (!outcome) return
+  apiKeyManagerSuccessMessage.value = outcome.message
+  apiKeyManagerSuccessMessageId.value += 1
+  closeApiKeyManager()
 }
 
 function updateSelectedPreference(model: string, reasoningEffort: string) {
@@ -189,21 +203,23 @@ const availabilityDisabledReason = computed(() => {
   return null
 })
 
-function startApiTest() {
+function startApiTest(useProxy: boolean) {
   const providerId = providerState.selectedProvider.value?.id
-  if (providerId) void availabilityState.testApi(providerId)
+  if (providerId) void availabilityState.testApi(providerId, useProxy)
 }
 
-function requestCodexTest() {
+function requestCodexTest(useProxy: boolean) {
   const providerId = providerState.selectedProvider.value?.id
-  if (providerId) confirmCodexProviderId.value = providerId
+  if (providerId) confirmCodexTestRequest.value = { providerId, useProxy }
 }
 
 async function confirmCodexTest() {
-  const providerId = confirmCodexProviderId.value
-  confirmCodexProviderId.value = null
-  if (!providerId || !providerState.providers.value.some((provider) => provider.id === providerId)) return
-  await availabilityState.testCodex(providerId)
+  const request = confirmCodexTestRequest.value
+  confirmCodexTestRequest.value = null
+  if (!request || !providerState.providers.value.some((provider) => provider.id === request.providerId)) {
+    return
+  }
+  await availabilityState.testCodex(request.providerId, request.useProxy)
 }
 
 function cancelAvailabilityTest() {
@@ -243,6 +259,11 @@ watch(apiKeyManagerProvider, (provider) => {
     <section class="provider-detail" aria-label="Provider 详情">
       <AppNotification
         :message="providerState.successMessage.value"
+        level="success"
+      />
+      <AppNotification
+        :message="apiKeyManagerSuccessMessage"
+        :message-id="apiKeyManagerSuccessMessageId"
         level="success"
       />
       <AppNotification
@@ -321,6 +342,7 @@ watch(apiKeyManagerProvider, (provider) => {
           :disabled="interactionBusy"
           :disabled-reason="availabilityDisabledReason"
           :cancelling="availabilityState.cancelling.value"
+          :network-proxy-enabled="networkProxyEnabled"
           @test-api="startApiTest"
           @request-codex-test="requestCodexTest"
           @cancel="cancelAvailabilityTest"
@@ -425,13 +447,13 @@ watch(apiKeyManagerProvider, (provider) => {
       @close="confirmImportCurrentKey = false"
     />
     <ConfirmDialog
-      :open="Boolean(confirmCodexProviderId)"
+      :open="Boolean(confirmCodexTestRequest)"
       title="确认运行 Codex 兼容性测试"
       message="这会在本机启动 Codex 并向 Provider 发送一次正常 Codex 回合，可能产生高于 API 测试的 token 消耗；不会修改当前 config.toml 或 auth.json。是否继续？"
       confirm-label="继续测试"
       tone="neutral"
       @confirm="confirmCodexTest"
-      @cancel="confirmCodexProviderId = null"
+      @cancel="confirmCodexTestRequest = null"
     />
   </main>
 </template>

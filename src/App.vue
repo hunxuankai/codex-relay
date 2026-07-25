@@ -292,6 +292,7 @@ onUnmounted(() => {
         v-if="activeView === 'providers'"
         :key="startCreatingProvider ? 'providers-create' : 'providers-list'"
         :start-creating="startCreatingProvider"
+        :network-proxy-enabled="settingsState.settings.value?.networkProxy.enabled ?? false"
         @provider-created="handleProviderCreated"
         @create-cancelled="handleCreateCancelled"
       />

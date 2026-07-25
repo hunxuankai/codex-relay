@@ -319,7 +319,7 @@ async fn provider_availability_api_keeps_default_path_sentinels_unchanged() {
         "0.1.0",
     );
     let result = availability
-        .test_api("provider-a", uuid::Uuid::new_v4())
+        .test_api("provider-a", uuid::Uuid::new_v4(), false)
         .await
         .unwrap();
     server.join().unwrap();

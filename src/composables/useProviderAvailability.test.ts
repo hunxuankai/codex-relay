@@ -40,18 +40,25 @@ function client(overrides: Partial<ProviderAvailabilityClient> = {}): ProviderAv
 
 describe('useProviderAvailability', () => {
   it('keeps API and Codex results independent', async () => {
+    const api = client()
     const availability = useProviderAvailability({
-      client: client(),
+      client: api,
       createRequestId: vi.fn()
         .mockReturnValueOnce('request-api')
         .mockReturnValueOnce('request-codex'),
     })
 
-    await availability.testApi('provider-a')
-    await availability.testCodex('provider-a')
+    await availability.testApi('provider-a', false)
+    await availability.testCodex('provider-a', true)
 
     expect(availability.resultFor('provider-a', 'api')).toEqual(result('api'))
     expect(availability.resultFor('provider-a', 'codex')).toEqual(result('codex'))
+    expect(api.testProviderApi).toHaveBeenCalledWith('provider-a', 'request-api', false)
+    expect(api.testProviderCodexCompatibility).toHaveBeenCalledWith(
+      'provider-a',
+      'request-codex',
+      true,
+    )
   })
 
   it('allows only one active test and exposes cancellable state', async () => {
@@ -66,8 +73,8 @@ describe('useProviderAvailability', () => {
       createRequestId: () => 'request-api',
     })
 
-    const first = availability.testApi('provider-a')
-    const duplicate = availability.testCodex('provider-a')
+    const first = availability.testApi('provider-a', false)
+    const duplicate = availability.testCodex('provider-a', false)
 
     expect(availability.busy.value).toBe(true)
     expect(availability.runningKind.value).toBe('api')
@@ -93,7 +100,7 @@ describe('useProviderAvailability', () => {
       createRequestId: () => 'request-api',
     })
 
-    const running = availability.testApi('provider-a')
+    const running = availability.testApi('provider-a', false)
     await availability.cancel()
     expect(availability.cancelling.value).toBe(true)
     expect(cancelProviderTest).toHaveBeenCalledWith('request-api')
@@ -115,7 +122,7 @@ describe('useProviderAvailability', () => {
       createRequestId: () => 'request-api',
     })
 
-    const running = availability.testApi('provider-a')
+    const running = availability.testApi('provider-a', false)
     availability.invalidateAll()
     finish(result('api'))
     await running
@@ -133,7 +140,7 @@ describe('useProviderAvailability', () => {
       createRequestId: () => 'request-api',
     })
 
-    await availability.testApi('provider-a')
+    await availability.testApi('provider-a', false)
     await flushPromises()
 
     expect(availability.error.value).toEqual({

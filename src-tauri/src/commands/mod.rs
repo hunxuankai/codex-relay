@@ -235,12 +235,14 @@ mod tests {
             &state,
             "provider-a".into(),
             "not-a-uuid".into(),
+            false,
         )
         .await;
         let codex = provider_availability_commands::test_provider_codex_compatibility_inner(
             &state,
             "provider-a".into(),
             "not-a-uuid".into(),
+            true,
         )
         .await;
         let cancel =

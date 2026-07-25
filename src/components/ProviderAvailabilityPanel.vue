@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ElButton, ElTag } from 'element-plus'
+import { computed, shallowRef } from 'vue'
+import { ElButton, ElCheckbox, ElTag } from 'element-plus'
 import type { TagProps } from 'element-plus'
 import type { ProviderProfile } from '../types/provider'
 import type {
@@ -8,7 +9,7 @@ import type {
   ProviderTestStatus,
 } from '../types/providerAvailability'
 
-defineProps<{
+const props = withDefaults(defineProps<{
   provider: ProviderProfile
   apiResult: ProviderAvailabilityResult | null
   codexResult: ProviderAvailabilityResult | null
@@ -16,13 +17,23 @@ defineProps<{
   disabled: boolean
   cancelling: boolean
   disabledReason?: string | null
-}>()
+  networkProxyEnabled?: boolean
+}>(), {
+  networkProxyEnabled: false,
+})
 
 const emit = defineEmits<{
-  testApi: []
-  requestCodexTest: []
+  testApi: [useProxy: boolean]
+  requestCodexTest: [useProxy: boolean]
   cancel: []
 }>()
+
+const skipProxy = shallowRef(true)
+const proxyUnavailableReason = computed(() =>
+  !skipProxy.value && !props.networkProxyEnabled
+    ? '设置中的“网络代理”尚未启用，无法使用代理测试。'
+    : null,
+)
 
 const statusPresentation: Record<
   ProviderTestStatus,
@@ -69,7 +80,10 @@ function isTestDisabled(
   disabled: boolean,
   runningKind: ProviderTestKind | null,
 ) {
-  return disabled || runningKind !== null || providerReadinessReason(provider) !== null
+  return disabled ||
+    runningKind !== null ||
+    providerReadinessReason(provider) !== null ||
+    proxyUnavailableReason.value !== null
 }
 
 function blockedReason(
@@ -81,7 +95,7 @@ function blockedReason(
   if (runningKind) return null
   if (reason) return reason
   if (disabled) return '当前有其他操作进行中，暂时不能开始测试。'
-  return providerReadinessReason(provider)
+  return providerReadinessReason(provider) ?? proxyUnavailableReason.value
 }
 </script>
 
@@ -92,7 +106,16 @@ function blockedReason(
         <p class="eyebrow">可用性测试</p>
         <h2 class="availability-title">验证当前 Provider 配置</h2>
       </div>
-      <p class="availability-summary">仅在你点击后发起请求，测试结果不会持久化。</p>
+      <div class="availability-options">
+        <p class="availability-summary">仅在你点击后发起请求，测试结果不会持久化。</p>
+        <ElCheckbox
+          v-model="skipProxy"
+          name="provider-test-skip-proxy"
+          aria-label="不使用代理"
+        >
+          不使用代理
+        </ElCheckbox>
+      </div>
     </header>
 
     <p v-if="runningKind" class="running-status" role="status" aria-live="polite">
@@ -152,7 +175,7 @@ function blockedReason(
           native-type="button"
           :aria-label="`测试 ${provider.name} 的 API 可用性`"
           :disabled="isTestDisabled(provider, disabled, runningKind) || cancelling"
-          @click="emit('testApi')"
+          @click="emit('testApi', !skipProxy)"
         >
           测试 API 可用性
         </ElButton>
@@ -205,7 +228,7 @@ function blockedReason(
           native-type="button"
           :aria-label="`运行 ${provider.name} 的 Codex 兼容性测试`"
           :disabled="isTestDisabled(provider, disabled, runningKind) || cancelling"
-          @click="emit('requestCodexTest')"
+          @click="emit('requestCodexTest', !skipProxy)"
         >
           运行 Codex 兼容性测试
         </ElButton>
@@ -247,6 +270,12 @@ function blockedReason(
 .test-copy h3,
 .test-copy p {
   margin: 0;
+}
+
+.availability-options {
+  display: grid;
+  justify-items: end;
+  gap: 0.45rem;
 }
 
 .availability-summary,
@@ -324,6 +353,10 @@ function blockedReason(
   .availability-summary {
     max-width: none;
     text-align: left;
+  }
+
+  .availability-options {
+    justify-items: start;
   }
 
   .availability-test-card :deep(.el-button) {
