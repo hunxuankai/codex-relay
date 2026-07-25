@@ -42,8 +42,9 @@ jobs:
           gh api "repos/$repo/releases/latest" > "$latest_file"
           keep_id="$(jq -r '.id // empty' "$latest_file")"
           keep_tag="$(jq -r '.tag_name // empty' "$latest_file")"
-          keep_draft="$(jq -r '.draft // true' "$latest_file")"
-          keep_prerelease="$(jq -r '.prerelease // true' "$latest_file")"
+          # 显式转字符串，保留 API 返回的 false；jq 的 // 会把 false 当作缺失值。
+          keep_draft="$(jq -r '.draft | tostring' "$latest_file")"
+          keep_prerelease="$(jq -r '.prerelease | tostring' "$latest_file")"
 
           if [[ -z "$keep_id" || -z "$keep_tag" || "$keep_draft" != "false" || "$keep_prerelease" != "false" ]]; then
             echo "::error::releases/latest 不是可保留的正式 Release，停止清理。"

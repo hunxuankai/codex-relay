@@ -30,6 +30,13 @@ describe('GitHub Release 历史版本清理契约', () => {
     expect(cleanupWorkflow).toMatch(/draft|prerelease/i)
   })
 
+  it('保留 GitHub API 的 false 布尔值，不用 jq 的 // 把它误判为 true', () => {
+    expect(cleanupWorkflow).toContain("keep_draft=\"$(jq -r '.draft | tostring'")
+    expect(cleanupWorkflow).toContain("keep_prerelease=\"$(jq -r '.prerelease | tostring'")
+    expect(cleanupWorkflow).not.toContain(".draft // true")
+    expect(cleanupWorkflow).not.toContain(".prerelease // true")
+  })
+
   it('分页读取候选并同时删除旧 Release、资产和对应 tag，失败可见', () => {
     expect(cleanupWorkflow).toContain('GH_TOKEN: ${{ github.token }}')
     expect(cleanupWorkflow).toContain('--paginate')

@@ -84,5 +84,10 @@ gh api --paginate repos/hunxuankai/codex-relay/tags --jq '.[].name'
   16 项通过。
 - 结构检查：workflow 的 `bash -n` 通过，PyYAML 解析通过，`git diff --check` 通过
   （仅有 Git 的 LF/CRLF 提示）；完整检查待执行。
+- 远端首次手动 Run `30177039434` 于 `2026-07-25T22:09:53Z` 失败且未删除资源。日志显示
+  API 返回的 `draft=false`、`prerelease=false` 被 `.draft // true` / `.prerelease // true`
+  误判为 `true`；新增布尔值回归测试先复现 1 项失败，随后改用 `| tostring`，专项 4/4、
+  Bash 语法、Actionlint 和公开 Latest 字段模拟均通过。该次失败是实现缺陷，不能记为
+  远端清理成功。
 - 真实 GitHub Actions 和远端删除：待工作流进入默认分支后执行；未执行前不得声称
   历史资源已清理。
