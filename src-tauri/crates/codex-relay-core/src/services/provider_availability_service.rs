@@ -17,7 +17,7 @@ use crate::infrastructure::codex_runner::{
     default_managed_requirements_path, parse_codex_version, resolve_codex_executable,
     write_model_catalog,
 };
-use crate::infrastructure::provider_http::{self, ApiProbeError};
+use crate::infrastructure::provider_http::{self, ApiProbeError, ApiProbeFailure};
 use crate::models::provider_availability::{
     ProviderAvailabilityResult, ProviderAvailabilityTarget, ProviderTestKind, ProviderTestStatus,
 };
@@ -270,6 +270,7 @@ impl ProviderAvailabilityService {
                 tested_at: Utc::now().to_rfc3339(),
                 http_status: Some(report.http_status),
                 codex_version: None,
+                trace: Some(report.trace),
             },
             Err(error) => result_from_api_error(&target, started, error),
         };
@@ -732,15 +733,21 @@ fn result_from_codex_execution(
         tested_at: Utc::now().to_rfc3339(),
         http_status,
         codex_version,
+        trace: None,
     }
 }
 
 fn result_from_api_error(
     target: &ProviderAvailabilityTarget,
     started: Instant,
-    error: ApiProbeError,
+    failure: ApiProbeFailure,
 ) -> ProviderAvailabilityResult {
-    let (status, code, message, http_status) = match error {
+    let ApiProbeFailure {
+        error,
+        trace,
+        http_status: observed_http_status,
+    } = failure;
+    let (status, code, message, mapped_http_status) = match error {
         ApiProbeError::InvalidEndpoint => (
             ProviderTestStatus::Failed,
             "API_INVALID_ENDPOINT",
@@ -829,8 +836,9 @@ fn result_from_api_error(
         model: target.model.clone(),
         duration_ms: started.elapsed().as_millis() as u64,
         tested_at: Utc::now().to_rfc3339(),
-        http_status,
+        http_status: observed_http_status.or(mapped_http_status),
         codex_version: None,
+        trace,
     }
 }
 
@@ -852,6 +860,7 @@ fn result_from_target_error(
         tested_at: Utc::now().to_rfc3339(),
         http_status: None,
         codex_version: None,
+        trace: None,
     }
 }
 
@@ -1177,11 +1186,73 @@ mod tests {
         assert_eq!(result.code, "API_TEST_PASSED");
         assert_eq!(result.http_status, Some(200));
         assert_eq!(result.model, "gpt-5.6-sol");
+        let trace = result.trace.as_ref().expect("API trace");
+        assert_eq!(trace.request.method, "POST");
+        assert!(trace.request.url.ends_with("/v1/responses"));
+        assert!(trace.request.body.contains("\"stream\":false"));
+        assert_eq!(
+            trace.response.as_ref().map(|response| response.status),
+            Some(200)
+        );
+        assert!(
+            trace
+                .response
+                .as_ref()
+                .is_some_and(|response| response.body.contains("resp_test"))
+        );
         assert!(
             !serde_json::to_string(&result)
                 .unwrap()
                 .contains("test-key-api-not-real")
         );
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn api_test_returns_http_error_trace_without_exposing_key() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).unwrap();
+            let body = r#"{"error":{"message":"test-key-target-not-real rejected"}}"#;
+            write!(
+                stream,
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_test(
+            directory.path().join("codex"),
+            directory.path().join("app-data"),
+        )
+        .unwrap();
+        fs::create_dir_all(&paths.codex_home).unwrap();
+        fs::create_dir_all(&paths.app_data_dir).unwrap();
+        write_provider_state(&paths, &format!("http://{address}/v1"));
+        let service = ProviderAvailabilityService::new(
+            ProviderService::new(paths.clone(), "0.1.0"),
+            SettingsService::new(paths),
+            "0.1.0",
+        );
+
+        let result = service
+            .test_api("provider-a", Uuid::new_v4(), false)
+            .await
+            .unwrap();
+
+        assert_eq!(result.status, ProviderTestStatus::Failed);
+        assert_eq!(result.code, "API_AUTH_FAILED");
+        assert_eq!(result.http_status, Some(401));
+        let trace = result.trace.expect("HTTP error trace");
+        let response = trace.response.expect("HTTP error response");
+        assert_eq!(response.status, 401);
+        assert!(response.body.contains("[API Key 已隐藏]"));
+        assert!(!response.body.contains("test-key-target-not-real"));
         server.join().unwrap();
     }
 

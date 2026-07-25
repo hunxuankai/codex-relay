@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, shallowRef } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import { ElButton, ElCheckbox, ElTag } from 'element-plus'
 import type { TagProps } from 'element-plus'
 import type { ProviderProfile } from '../types/provider'
@@ -8,6 +8,7 @@ import type {
   ProviderTestKind,
   ProviderTestStatus,
 } from '../types/providerAvailability'
+import ProviderAvailabilityTraceDialog from './ProviderAvailabilityTraceDialog.vue'
 
 const props = withDefaults(defineProps<{
   provider: ProviderProfile
@@ -29,6 +30,24 @@ const emit = defineEmits<{
 }>()
 
 const skipProxy = shallowRef(true)
+const traceDialogOpen = shallowRef(false)
+const apiTrace = computed(() => props.apiResult?.trace ?? null)
+
+watch(
+  [() => props.provider.id, () => props.apiResult],
+  () => {
+    traceDialogOpen.value = false
+  },
+)
+
+function openTraceDialog() {
+  if (apiTrace.value) traceDialogOpen.value = true
+}
+
+function closeTraceDialog() {
+  traceDialogOpen.value = false
+}
+
 const proxyUnavailableReason = computed(() =>
   !skipProxy.value && !props.networkProxyEnabled
     ? '设置中的“网络代理”尚未启用，无法使用代理测试。'
@@ -154,6 +173,17 @@ function blockedReason(
               <span>{{ formatTestedAt(apiResult.testedAt) }}</span>
               <span v-if="apiResult.httpStatus !== null">HTTP {{ apiResult.httpStatus }}</span>
             </div>
+            <ElButton
+              v-if="apiResult.trace"
+              type="primary"
+              plain
+              size="small"
+              native-type="button"
+              :aria-label="`查看 ${provider.name} 的 API 请求与响应`"
+              @click="openTraceDialog"
+            >
+              查看请求与响应
+            </ElButton>
           </div>
         </div>
         <ElButton
@@ -235,6 +265,15 @@ function blockedReason(
       </section>
     </div>
   </section>
+
+  <ProviderAvailabilityTraceDialog
+    v-if="apiTrace"
+    :open="traceDialogOpen"
+    :provider-name="provider.name"
+    :trace="apiTrace"
+    :duration-ms="apiResult?.durationMs ?? 0"
+    @close="closeTraceDialog"
+  />
 </template>
 
 <style scoped>
@@ -323,6 +362,10 @@ function blockedReason(
 .test-result {
   display: grid;
   gap: 0.45rem;
+}
+
+.test-result :deep(.el-button) {
+  justify-self: start;
 }
 
 .result-heading {

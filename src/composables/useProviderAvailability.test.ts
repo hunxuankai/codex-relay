@@ -11,6 +11,19 @@ import {
   type ProviderAvailabilityClient,
 } from './useProviderAvailability'
 
+const apiTrace = {
+  request: {
+    method: 'POST',
+    url: 'https://provider-a.example.test/v1/responses',
+    body: '{"stream":false}',
+  },
+  response: {
+    status: 200,
+    body: '{"status":"completed"}',
+    bodyTruncated: false,
+  },
+}
+
 function result(
   kind: ProviderTestKind,
   status: ProviderTestStatus = 'passed',
@@ -26,6 +39,7 @@ function result(
     testedAt: '2026-07-23T00:00:00Z',
     httpStatus: kind === 'api' ? 200 : null,
     codexVersion: kind === 'codex' ? '0.144.4' : null,
+    trace: null,
   }
 }
 
@@ -40,7 +54,9 @@ function client(overrides: Partial<ProviderAvailabilityClient> = {}): ProviderAv
 
 describe('useProviderAvailability', () => {
   it('keeps API and Codex results independent', async () => {
-    const api = client()
+    const api = client({
+      testProviderApi: vi.fn().mockResolvedValue({ ...result('api'), trace: apiTrace }),
+    })
     const availability = useProviderAvailability({
       client: api,
       createRequestId: vi.fn()
@@ -51,8 +67,9 @@ describe('useProviderAvailability', () => {
     await availability.testApi('provider-a', false)
     await availability.testCodex('provider-a', true)
 
-    expect(availability.resultFor('provider-a', 'api')).toEqual(result('api'))
+    expect(availability.resultFor('provider-a', 'api')).toEqual({ ...result('api'), trace: apiTrace })
     expect(availability.resultFor('provider-a', 'codex')).toEqual(result('codex'))
+    expect(availability.resultFor('provider-a', 'codex')?.trace).toBeNull()
     expect(api.testProviderApi).toHaveBeenCalledWith('provider-a', 'request-api', false)
     expect(api.testProviderCodexCompatibility).toHaveBeenCalledWith(
       'provider-a',

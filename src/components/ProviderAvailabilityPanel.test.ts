@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import type { ProviderProfile } from '../types/provider'
 import type {
+  ProviderAvailabilityTrace,
   ProviderAvailabilityResult,
   ProviderTestKind,
   ProviderTestStatus,
@@ -47,8 +48,22 @@ function result(
     testedAt: '2026-07-23T00:00:00Z',
     httpStatus: kind === 'api' ? 401 : null,
     codexVersion: kind === 'codex' ? '0.144.4' : null,
+    trace: null,
     ...overrides,
   }
+}
+
+const apiTrace: ProviderAvailabilityTrace = {
+  request: {
+    method: 'POST',
+    url: 'https://provider-a.example.test/v1/responses',
+    body: '{\n  "model": "gpt-5.6-sol",\n  "stream": false\n}',
+  },
+  response: {
+    status: 200,
+    body: '{\n  "status": "completed"\n}',
+    bodyTruncated: false,
+  },
 }
 
 describe('ProviderAvailabilityPanel', () => {
@@ -155,6 +170,30 @@ describe('ProviderAvailabilityPanel', () => {
     expect(codexResult.text()).toContain('测试通过。')
     expect(codexResult.text()).toContain('Codex 0.144.4')
     expect(codexResult.getComponent({ name: 'ElTag' }).props('type')).toBe('success')
+  })
+
+  it('opens the API request and response trace in a separate dialog', async () => {
+    const wrapper = mount(ProviderAvailabilityPanel, {
+      attachTo: document.body,
+      props: {
+        provider,
+        apiResult: result('api', 'passed', { trace: apiTrace }),
+        codexResult: null,
+        runningKind: null,
+        disabled: false,
+        cancelling: false,
+      },
+    })
+
+    const openTrace = wrapper.get('[aria-label="查看 Provider A 的 API 请求与响应"]')
+    await openTrace.trigger('click')
+
+    expect(document.body.textContent).toContain('请求')
+    expect(document.body.textContent).toContain('POST')
+    expect(document.body.textContent).toContain('/v1/responses')
+    expect(document.body.textContent).toContain('响应')
+    expect(document.body.textContent).toContain('HTTP 200')
+    expect(document.body.textContent).toContain('"status": "completed"')
   })
 
   it('turns the active test into an explicit cancel action and disables the other test', async () => {

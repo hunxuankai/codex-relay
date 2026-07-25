@@ -14,7 +14,7 @@ impl fmt::Debug for ProviderAvailabilityTarget {
         formatter
             .debug_struct("ProviderAvailabilityTarget")
             .field("provider_id", &self.provider_id)
-            .field("base_url", &self.base_url)
+            .field("base_url_configured", &!self.base_url.is_empty())
             .field("model", &self.model)
             .field("api_key_configured", &!self.api_key.is_empty())
             .finish()
@@ -50,6 +50,57 @@ pub struct ProviderAvailabilityResult {
     pub tested_at: String,
     pub http_status: Option<u16>,
     pub codex_version: Option<String>,
+    #[serde(default)]
+    pub trace: Option<ProviderAvailabilityTrace>,
+}
+
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAvailabilityTrace {
+    pub request: ProviderAvailabilityRequestTrace,
+    pub response: Option<ProviderAvailabilityResponseTrace>,
+}
+
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAvailabilityRequestTrace {
+    pub method: String,
+    pub url: String,
+    pub body: String,
+}
+
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAvailabilityResponseTrace {
+    pub status: u16,
+    pub body: String,
+    pub body_truncated: bool,
+}
+
+impl fmt::Debug for ProviderAvailabilityTrace {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProviderAvailabilityTrace")
+            .field("request_method", &self.request.method)
+            .field("request_url_configured", &!self.request.url.is_empty())
+            .field("request_body_bytes", &self.request.body.len())
+            .field(
+                "response_status",
+                &self.response.as_ref().map(|response| response.status),
+            )
+            .field(
+                "response_body_bytes",
+                &self.response.as_ref().map(|response| response.body.len()),
+            )
+            .field(
+                "response_body_truncated",
+                &self
+                    .response
+                    .as_ref()
+                    .is_some_and(|response| response.body_truncated),
+            )
+            .finish()
+    }
 }
 
 #[cfg(test)]
@@ -69,6 +120,18 @@ mod tests {
             tested_at: "2026-07-23T12:00:00Z".into(),
             http_status: Some(200),
             codex_version: None,
+            trace: Some(ProviderAvailabilityTrace {
+                request: ProviderAvailabilityRequestTrace {
+                    method: "POST".into(),
+                    url: "https://provider.example.test/v1/responses".into(),
+                    body: r#"{"model":"gpt-5.6-sol","stream":false}"#.into(),
+                },
+                response: Some(ProviderAvailabilityResponseTrace {
+                    status: 200,
+                    body: r#"{"status":"completed"}"#.into(),
+                    body_truncated: false,
+                }),
+            }),
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -77,8 +140,12 @@ mod tests {
         assert!(json.contains(r#""kind":"api""#));
         assert!(json.contains(r#""status":"passed""#));
         assert!(json.contains(r#""durationMs":42"#));
+        assert!(json.contains(r#""bodyTruncated":false"#));
         assert!(!json.contains("apiKey"));
-        assert!(!format!("{result:?}").contains("test-key-a-not-real"));
+        let debug = format!("{result:?}");
+        assert!(!debug.contains("completed"));
+        assert!(!debug.contains("provider.example.test"));
+        assert!(!debug.contains("test-key-a-not-real"));
     }
 
     #[test]
@@ -93,6 +160,7 @@ mod tests {
         let debug = format!("{target:?}");
 
         assert!(debug.contains("api_key_configured: true"));
+        assert!(!debug.contains("provider.example.test"));
         assert!(!debug.contains("test-key-target-not-real"));
     }
 }

@@ -134,6 +134,20 @@ const availabilityResult: ProviderAvailabilityResult = {
   testedAt: '2026-07-23T00:00:00Z',
   httpStatus: 200,
   codexVersion: null,
+  trace: null,
+}
+
+const availabilityTrace = {
+  request: {
+    method: 'POST',
+    url: 'https://provider-a.example.test/v1/responses',
+    body: '{"stream":false}',
+  },
+  response: {
+    status: 200,
+    body: '{"status":"completed"}',
+    bodyTruncated: false,
+  },
 }
 
 function success<T>(data: T) {
@@ -172,7 +186,7 @@ describe('Tauri service boundary', () => {
       .mockResolvedValueOnce(success(mutation))
       .mockResolvedValueOnce(success(switched))
       .mockResolvedValueOnce(success(mutation))
-      .mockResolvedValueOnce(success(availabilityResult))
+      .mockResolvedValueOnce(success({ ...availabilityResult, trace: availabilityTrace }))
       .mockResolvedValueOnce(success({ ...availabilityResult, kind: 'codex' }))
       .mockResolvedValueOnce(success(true))
       .mockResolvedValueOnce(success(settingsState))
@@ -248,8 +262,8 @@ describe('Tauri service boundary', () => {
     await deleteProvider('provider-a', fingerprints)
     await switchProvider('provider-a')
     await importCurrentAuthKey(importInput)
-    await testProviderApi('provider-a', 'request-api', false)
-    await testProviderCodexCompatibility('provider-a', 'request-codex', true)
+    const apiResult = await testProviderApi('provider-a', 'request-api', false)
+    const codexResult = await testProviderCodexCompatibility('provider-a', 'request-codex', true)
     await cancelProviderTest('request-codex')
     await getSettings()
     await saveSettings(settings)
@@ -288,6 +302,8 @@ describe('Tauri service boundary', () => {
       ['run_extended_self_check'],
       ['exit_application'],
     ])
+    expect(apiResult.trace).toEqual(availabilityTrace)
+    expect(codexResult.trace).toBeNull()
     const createArgs = invokeMock.mock.calls[2]?.[1] as { input: CreateProviderInput }
     const saveKeysArgs = invokeMock.mock.calls[6]?.[1] as { input: SaveProviderApiKeysInput }
     expect(createArgs.input.apiKey === createInput.apiKey).toBe(true)

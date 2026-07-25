@@ -1,5 +1,9 @@
 use crate::infrastructure::rustls_provider::ensure_ring_crypto_provider;
-use crate::models::provider_availability::ProviderAvailabilityTarget;
+use crate::infrastructure::safe_log::redact;
+use crate::models::provider_availability::{
+    ProviderAvailabilityRequestTrace, ProviderAvailabilityResponseTrace,
+    ProviderAvailabilityTarget, ProviderAvailabilityTrace,
+};
 use reqwest::{Client, Proxy, StatusCode, redirect::Policy};
 use serde_json::Value;
 use std::time::Duration;
@@ -12,6 +16,14 @@ const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ApiProbeReport {
     pub(crate) http_status: u16,
+    pub(crate) trace: ProviderAvailabilityTrace,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ApiProbeFailure {
+    pub(crate) error: ApiProbeError,
+    pub(crate) trace: Option<ProviderAvailabilityTrace>,
+    pub(crate) http_status: Option<u16>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -31,14 +43,35 @@ pub(crate) enum ApiProbeError {
     Cancelled,
 }
 
+impl From<ApiProbeError> for ApiProbeFailure {
+    fn from(error: ApiProbeError) -> Self {
+        Self {
+            error,
+            trace: None,
+            http_status: None,
+        }
+    }
+}
+
+impl ApiProbeFailure {
+    fn with_trace(error: ApiProbeError, trace: ProviderAvailabilityTrace) -> Self {
+        let http_status = trace.response.as_ref().map(|response| response.status);
+        Self {
+            error,
+            trace: Some(trace),
+            http_status,
+        }
+    }
+}
+
 pub(crate) async fn probe_api(
     target: &ProviderAvailabilityTarget,
     proxy: Option<&str>,
     app_version: &str,
     cancel: &mut tokio::sync::watch::Receiver<bool>,
-) -> Result<ApiProbeReport, ApiProbeError> {
+) -> Result<ApiProbeReport, ApiProbeFailure> {
     if *cancel.borrow() {
-        return Err(ApiProbeError::Cancelled);
+        return Err(ApiProbeError::Cancelled.into());
     }
     let endpoint = responses_endpoint(&target.base_url)?;
     ensure_ring_crypto_provider().map_err(|_| ApiProbeError::RequestBuild)?;
@@ -58,43 +91,130 @@ pub(crate) async fn probe_api(
         "max_output_tokens": 16,
         "stream": false,
     });
+    let request_body = serde_json::to_string(&payload).map_err(|_| ApiProbeError::RequestBuild)?;
+    let request_trace = ProviderAvailabilityRequestTrace {
+        method: "POST".into(),
+        url: sanitize_trace_url(&endpoint),
+        body: request_body,
+    };
 
     let send = client
-        .post(endpoint)
+        .post(endpoint.clone())
         .bearer_auth(&target.api_key)
         .json(&payload)
         .send();
     tokio::pin!(send);
     let response = loop {
         tokio::select! {
-            result = &mut send => break result.map_err(map_request_error)?,
+            result = &mut send => break result.map_err(|error| {
+                ApiProbeFailure::with_trace(
+                    map_request_error(error),
+                    ProviderAvailabilityTrace {
+                        request: request_trace.clone(),
+                        response: None,
+                    },
+                )
+            })?,
             changed = cancel.changed() => {
                 if changed.is_ok() && *cancel.borrow() {
-                    return Err(ApiProbeError::Cancelled);
+                    return Err(ApiProbeFailure::with_trace(
+                        ApiProbeError::Cancelled,
+                        ProviderAvailabilityTrace {
+                            request: request_trace.clone(),
+                            response: None,
+                        },
+                    ));
                 }
                 if changed.is_err() {
-                    break send.await.map_err(map_request_error)?;
+                    break send.await.map_err(|error| {
+                        ApiProbeFailure::with_trace(
+                            map_request_error(error),
+                            ProviderAvailabilityTrace {
+                                request: request_trace.clone(),
+                                response: None,
+                            },
+                        )
+                    })?;
                 }
             }
         }
     };
     let status = response.status();
+    let body = read_bounded_body(response, cancel).await.map_err(|error| {
+        ApiProbeFailure::with_trace(
+            error,
+            ProviderAvailabilityTrace {
+                request: request_trace.clone(),
+                response: Some(ProviderAvailabilityResponseTrace {
+                    status: status.as_u16(),
+                    body: String::new(),
+                    body_truncated: false,
+                }),
+            },
+        )
+    })?;
+    let (response_body, response_body_truncated) =
+        sanitize_trace_body(&body.bytes, &target.api_key);
+    let response_trace = ProviderAvailabilityResponseTrace {
+        status: status.as_u16(),
+        body: response_body,
+        body_truncated: body.truncated || response_body_truncated,
+    };
+    let trace = ProviderAvailabilityTrace {
+        request: request_trace,
+        response: Some(response_trace),
+    };
+    if body.truncated {
+        return Err(ApiProbeFailure::with_trace(
+            ApiProbeError::ResponseTooLarge,
+            trace,
+        ));
+    }
     if !status.is_success() {
-        return Err(map_http_status(status));
+        return Err(ApiProbeFailure::with_trace(map_http_status(status), trace));
     }
 
-    let body = read_bounded_body(response, cancel).await?;
-    let document: Value =
-        serde_json::from_slice(&body).map_err(|_| ApiProbeError::ResponseInvalid)?;
+    let document: Value = serde_json::from_slice(&body.bytes)
+        .map_err(|_| ApiProbeFailure::with_trace(ApiProbeError::ResponseInvalid, trace.clone()))?;
     let completed = document.get("status").and_then(Value::as_str) == Some("completed");
     let has_output = document.get("output").is_some_and(Value::is_array);
     if !completed || !has_output {
-        return Err(ApiProbeError::ResponseInvalid);
+        return Err(ApiProbeFailure::with_trace(
+            ApiProbeError::ResponseInvalid,
+            trace,
+        ));
     }
 
     Ok(ApiProbeReport {
         http_status: status.as_u16(),
+        trace,
     })
+}
+
+fn sanitize_trace_body(body: &[u8], api_key: &str) -> (String, bool) {
+    let body = String::from_utf8_lossy(body);
+    let replaced = if api_key.is_empty() {
+        body.into_owned()
+    } else {
+        body.replace(api_key, "[API Key 已隐藏]")
+    };
+    let mut sanitized = redact(&replaced);
+    if sanitized.len() <= MAX_RESPONSE_BYTES {
+        return (sanitized, false);
+    }
+    let mut end = MAX_RESPONSE_BYTES;
+    while !sanitized.is_char_boundary(end) {
+        end -= 1;
+    }
+    sanitized.truncate(end);
+    (sanitized, true)
+}
+
+fn sanitize_trace_url(endpoint: &Url) -> String {
+    let mut sanitized = endpoint.clone();
+    let _ = sanitized.set_username("");
+    let _ = sanitized.set_password(None);
+    redact(sanitized.as_str())
 }
 
 pub(crate) fn responses_endpoint(base_url: &str) -> Result<Url, ApiProbeError> {
@@ -117,18 +237,24 @@ pub(crate) fn responses_endpoint(base_url: &str) -> Result<Url, ApiProbeError> {
     Ok(url)
 }
 
+struct BoundedBody {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
 async fn read_bounded_body(
     mut response: reqwest::Response,
     cancel: &mut tokio::sync::watch::Receiver<bool>,
-) -> Result<Vec<u8>, ApiProbeError> {
-    if response
+) -> Result<BoundedBody, ApiProbeError> {
+    let declared_too_large = response
         .content_length()
-        .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
-    {
-        return Err(ApiProbeError::ResponseTooLarge);
-    }
-
-    let mut body = Vec::new();
+        .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64);
+    let mut body = Vec::with_capacity(
+        response
+            .content_length()
+            .map(|length| (length as usize).min(MAX_RESPONSE_BYTES))
+            .unwrap_or_default(),
+    );
     loop {
         let chunk = tokio::select! {
             result = response.chunk() => result.map_err(map_request_error)?,
@@ -147,11 +273,19 @@ async fn read_bounded_body(
             break;
         };
         if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
-            return Err(ApiProbeError::ResponseTooLarge);
+            let remaining = MAX_RESPONSE_BYTES.saturating_sub(body.len());
+            body.extend_from_slice(&chunk[..remaining]);
+            return Ok(BoundedBody {
+                bytes: body,
+                truncated: true,
+            });
         }
         body.extend_from_slice(&chunk);
     }
-    Ok(body)
+    Ok(BoundedBody {
+        bytes: body,
+        truncated: declared_too_large,
+    })
 }
 
 fn map_request_error(error: reqwest::Error) -> ApiProbeError {
@@ -268,6 +402,19 @@ mod tests {
             .unwrap();
 
         assert_eq!(report.http_status, 200);
+        assert_eq!(report.trace.request.method, "POST");
+        assert_eq!(
+            report.trace.request.url,
+            format!("http://{address}/v1/responses")
+        );
+        let request_body: Value = serde_json::from_str(&report.trace.request.body).unwrap();
+        assert_eq!(request_body["model"], "gpt-5.6-sol");
+        assert_eq!(request_body["stream"], false);
+        let response = report.trace.response.expect("successful response trace");
+        assert_eq!(response.status, 200);
+        assert!(response.body.contains("resp_test"));
+        assert!(!response.body.contains("test-key-api-not-real"));
+        assert!(!response.body_truncated);
         server.join().unwrap();
     }
 
@@ -297,8 +444,35 @@ mod tests {
         );
     }
 
+    #[test]
+    fn trace_url_omits_userinfo_and_query_secrets() {
+        let endpoint = Url::parse(
+            "https://test-key-user-not-real:test-key-password-not-real@provider.example.test/v1/responses?api_key=test-key-query-not-real&region=cn",
+        )
+        .unwrap();
+
+        let trace_url = sanitize_trace_url(&endpoint);
+
+        assert!(trace_url.contains("provider.example.test/v1/responses"));
+        assert!(trace_url.contains("region=cn"));
+        assert!(!trace_url.contains("test-key-user-not-real"));
+        assert!(!trace_url.contains("test-key-password-not-real"));
+        assert!(!trace_url.contains("test-key-query-not-real"));
+    }
+
+    #[test]
+    fn final_trace_body_remains_within_utf8_limit_after_sanitizing() {
+        let raw = vec![0xff; MAX_RESPONSE_BYTES];
+
+        let (body, truncated) = sanitize_trace_body(&raw, "test-key-body-not-real");
+
+        assert!(truncated);
+        assert!(body.len() <= MAX_RESPONSE_BYTES);
+        assert!(body.is_char_boundary(body.len()));
+    }
+
     #[tokio::test]
-    async fn classifies_http_failures_without_reading_provider_error_body() {
+    async fn classifies_http_failures_and_captures_provider_error_body() {
         for (status, expected) in [
             (401, ApiProbeError::Auth),
             (429, ApiProbeError::RateLimited),
@@ -311,7 +485,12 @@ mod tests {
             let error = probe_api(&target(base_url), None, "0.1.0", &mut cancel)
                 .await
                 .unwrap_err();
-            assert_eq!(error, expected);
+            assert_eq!(error.error, expected);
+            let trace = error.trace.expect("HTTP error trace");
+            let response = trace.response.expect("HTTP error response");
+            assert_eq!(response.status, status);
+            assert!(response.body.contains("secret body"));
+            assert!(!response.body.contains("test-key-api-not-real"));
             let request = server.join().unwrap();
             assert!(!request.contains("secret body"));
         }
@@ -321,22 +500,39 @@ mod tests {
     async fn rejects_non_responses_body_and_oversized_body() {
         let (base_url, server) = response_server(200, r#"{"choices":[]}"#.into());
         let (_cancel_sender, mut cancel) = tokio::sync::watch::channel(false);
-        assert_eq!(
-            probe_api(&target(base_url), None, "0.1.0", &mut cancel)
-                .await
-                .unwrap_err(),
-            ApiProbeError::ResponseInvalid
+        let error = probe_api(&target(base_url), None, "0.1.0", &mut cancel)
+            .await
+            .unwrap_err();
+        assert_eq!(error.error, ApiProbeError::ResponseInvalid);
+        assert!(
+            error
+                .trace
+                .as_ref()
+                .and_then(|trace| trace.response.as_ref())
+                .is_some_and(|response| response.body.contains("choices"))
         );
         server.join().unwrap();
 
         let (base_url, server) = response_server(200, "x".repeat(MAX_RESPONSE_BYTES + 1));
         let (_cancel_sender, mut cancel) = tokio::sync::watch::channel(false);
-        assert_eq!(
-            probe_api(&target(base_url), None, "0.1.0", &mut cancel)
-                .await
-                .unwrap_err(),
-            ApiProbeError::ResponseTooLarge
+        let error = probe_api(&target(base_url), None, "0.1.0", &mut cancel)
+            .await
+            .unwrap_err();
+        assert_eq!(error.error, ApiProbeError::ResponseTooLarge);
+        assert!(
+            error
+                .trace
+                .as_ref()
+                .and_then(|trace| trace.response.as_ref())
+                .is_some_and(|response| response.body_truncated)
         );
+        let response = error
+            .trace
+            .as_ref()
+            .and_then(|trace| trace.response.as_ref())
+            .expect("oversized response trace");
+        assert_eq!(response.body.len(), MAX_RESPONSE_BYTES);
+        assert!(response.body.chars().all(|character| character == 'x'));
         server.join().unwrap();
     }
 
@@ -345,11 +541,17 @@ mod tests {
         let (base_url, server) =
             response_server(302, r#"{"location":"https://outside.test"}"#.into());
         let (_cancel_sender, mut cancel) = tokio::sync::watch::channel(false);
+        let error = probe_api(&target(base_url), None, "0.1.0", &mut cancel)
+            .await
+            .unwrap_err();
+        assert_eq!(error.error, ApiProbeError::Http(302));
         assert_eq!(
-            probe_api(&target(base_url), None, "0.1.0", &mut cancel)
-                .await
-                .unwrap_err(),
-            ApiProbeError::Http(302)
+            error
+                .trace
+                .as_ref()
+                .and_then(|trace| trace.response.as_ref())
+                .map(|response| response.status),
+            Some(302)
         );
         server.join().unwrap();
     }
@@ -374,9 +576,13 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
         cancel_sender.send(true).unwrap();
 
-        assert_eq!(
-            request.await.unwrap().unwrap_err(),
-            ApiProbeError::Cancelled
+        let error = request.await.unwrap().unwrap_err();
+        assert_eq!(error.error, ApiProbeError::Cancelled);
+        assert!(
+            error
+                .trace
+                .as_ref()
+                .is_some_and(|trace| trace.response.is_none())
         );
         server.join().unwrap();
     }
