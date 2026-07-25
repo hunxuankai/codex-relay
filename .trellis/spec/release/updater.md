@@ -24,6 +24,9 @@
 - “测试代理”与本机代理发现必须通过候选代理实际请求并解析固定 `latest.json`，不能把 TCP 端口开放等同于代理可用。固定 loopback 候选为 `7890`、`7897`、`10809`、`1080`、`8080`、`3128`，每项 5 秒超时并行检测。
 - 公钥是可公开提交的 minisign 信任根；私钥和密码只存在于 GitHub Actions Secrets 与开发者控制的离线备份中。
 - 发布工作流只能由 `workflow_dispatch` 触发，先运行 `npm run check`，再生成 Windows x64 NSIS、`.sig` 和 `latest.json`。
+- 正式 Release 公开后由 `.github/workflows/cleanup-old-releases.yml` 处理历史保留策略：
+  以 `releases/latest` 为唯一保留对象，删除其他 Release、资产和对应 Git tag；Draft
+  阶段不触发清理，事件与 Latest 不一致时必须失败而不是删除。
 - Release 必须先为 Draft；版本、说明、资产 URL 和签名核对完成后才可发布。
 - `tauri-action` 的 `releaseBody` 会同时写入 Release 描述和 `latest.json.notes`，因此工作流中必须直接提供可公开的最终说明，不能使用“稍后补充”占位文案。事后只编辑 Draft 描述不会重写已上传清单。
 - `tauri-action` 生成的 `latest.json` 可以把平台 URL 写成 GitHub REST asset API（`https://api.github.com/repos/<owner>/<repo>/releases/assets/<id>`）。当前锁定的 `tauri-plugin-updater 2.10.1` 在下载包时会在缺少 `Accept` 的情况下自动加入 `Accept: application/octet-stream`，因此不应仅凭浏览器或普通 GET 返回资产元数据就判定清单失效。
@@ -48,6 +51,8 @@
 | 多个本机候选可用 | 列出全部结果并由用户选择，不自动采用第一个 |
 | updater 资产签名无效 | 不启动 NSIS，不报告更新成功 |
 | Release 仍为 Draft | `releases/latest` 客户端不可消费该版本 |
+| Release 已公开但清理工作流的事件对象与 `releases/latest` 不一致 | 清理工作流失败且不删除任何历史资源；修复或手动重试前不得宣称清理完成 |
+| 历史 Release/tag 删除 API 任一失败 | Actions 以非零状态结束，保留真实部分完成状态并允许安全重试 |
 | `latest.json.notes` 仍为占位文案 | 不得发布；修正工作流并重新生成 Draft 资产 |
 | 平台 URL 是 GitHub REST asset API | 用当前锁定 updater 的二进制请求语义验证；请求必须携带 `Accept: application/octet-stream`，下载字节数和 SHA-256 必须与 Release 资产一致 |
 | UAC 取消或安装器失败 | 不得报告升级成功；允许用户重新打开旧版本 |
@@ -71,7 +76,9 @@
 - 基线：启动时和进程运行期间每小时可访问固定更新源；没有用户确认时不下载或安装。普通本地构建在没有任何签名环境变量时生成常规 NSIS。
 - 基线：代理关闭或 URL 为空时不传 `proxy`，保持 updater 默认网络行为。
 - 基线：GitHub API asset URL 的普通 GET 返回 JSON 元数据，但 updater 通过 `Accept: application/octet-stream` 获取实际安装器，下载哈希与 Release 资产一致。
+- 良好：正式 Release 公开后，清理工作流只保留 `releases/latest` 对应的 Release/tag，并在删除失败时以失败状态结束；旧安装客户端仍通过 Latest 清单发现当前版本。
 - 错误：在基础配置开启 `createUpdaterArtifacts`，导致每次本地构建都要求私钥。
+- 错误：在 Draft 构建阶段或未校验 `releases/latest` 时删除旧 Release/tag，造成客户端暂时失去更新清单。
 - 错误：只用浏览器打开或普通 GET 检查 GitHub API asset URL，看到 JSON 后直接替换已发布资产或判断 Release 损坏。
 - 错误：把私钥内容、公钥对应密码或 GitHub Token 写入仓库、任务材料、日志或命令行参数。
 - 错误：发布后替换同一版本的二进制或 `.sig`；修复必须使用新的更高 SemVer。
@@ -85,6 +92,7 @@
 ## 6. 必需测试
 
 - `src/release-config.test.ts` 断言固定 HTTPS endpoint、公开公钥、`updater:default` 权限、基础/发布配置分离、Secret 名称、手动触发、Draft 和 NSIS 优先。
+- `src/release-retention.test.ts` 断言清理工作流只在正式发布后运行、保留 `releases/latest`、分页读取候选、删除历史 Release/tag，并对一致性或 API 失败返回非零。
 - `src/release-config.test.ts` 还必须断言已登记 NSIS 升级固定原目录、跳过目录页、没有“不要卸载”并存分支，且新鲜安装/WiX 迁移仍保留目录选择语义。
 - 工作流结构测试断言 `releaseBody` 使用多行最终说明，并明确拒绝占位文案，防止占位内容进入 `latest.json.notes`。
 - composable 测试断言创建时不自行检查远端、应用级静默检查、显式检查、单飞、已有可用 session 保留、旧响应防护、确认、进度和安全失败状态；应用测试使用假定时器断言启动检查、每小时检查和卸载清理。

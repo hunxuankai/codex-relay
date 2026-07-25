@@ -4,6 +4,8 @@
 
 `providers.json`、`auth.json` 和备份中的原始快照均可能包含明文 API Key，敏感级别相同。`metadata.json` 不得包含密钥，只记录事务、时间、操作、Provider ID、文件存在状态和应用版本。
 
+GitHub Releases 的历史安装包/tag 清理是公开发布资产的保留策略，不等同于本机数据清理。该流程不得删除或覆盖 Codex 配置、`%LOCALAPPDATA%\CodexRelay`、日志、备份或其中的密钥；发布记录也不得把远端成品删除写成用户数据已删除。
+
 ## 备份保留
 
 - 每次受管写操作前创建事务备份。

@@ -1,11 +1,12 @@
 # Windows 更新发布操作指南
 
-本文面向 Codex Relay 维护者，说明如何把已经完成并验证的改动发布为 Windows NSIS 安装包和 Tauri 应用内更新。发布工作流只允许手动触发，并且必须先生成 Draft Release，核对完成后再人工公开。
+本文面向 Codex Relay 维护者，说明如何把已经完成并验证的改动发布为 Windows NSIS 安装包和 Tauri 应用内更新。发布工作流只允许手动触发，并且必须先生成 Draft Release，核对完成后再人工公开；公开后由独立清理工作流只保留当前 Latest。
 
 ## 1. 发布边界
 
 - 默认发布源是 GitHub 默认分支 `main`，工作流为 `.github/workflows/release.yml`。
 - 工作流触发键固定为 `workflow_dispatch:`，并通过 `releaseDraft: true` 保证只先生成 Draft；普通提交不得自动公开 Release。
+- `.github/workflows/cleanup-old-releases.yml` 只响应正式 Release 的 `published` 事件（或手动重试），以 `releases/latest` 为唯一保留对象，删除其他 Release、资产和对应 Git tag；Draft 阶段不执行清理。
 - 应用版本使用 SemVer，发布版本必须严格高于当前公开版本。
 - 应用版本来源是 `package.json`；package lock、Cargo 元数据和发布说明必须同步。
 - 普通本地构建不需要更新私钥；带 `.sig` 和 `latest.json` 的 updater 资产只由 GitHub Actions 发布构建生成。
@@ -238,6 +239,23 @@ $manifest | Select-Object version, pub_date
 - tag 下载和 `releases/latest/download/latest.json` 的清单内容一致；
 - 公开资产的大小、SHA-256、URL 和签名与 Draft 核对结果没有漂移。
 
+### 8.1 核对历史版本清理
+
+Release 公开后，检查名为“清理历史 GitHub Releases”的 Actions Run。该 Run 必须：
+
+- 以 `releases/latest` 返回的新 Tag/Release 为唯一保留对象；
+- 删除其余 Release、三项打包资产和对应 Git tag；
+- 清理失败时保持失败状态，不把部分完成写成成功。
+
+清理前后分别保存只读列表（只记录 Tag、Release ID、状态和资产名称，不记录 Token）：
+
+```powershell
+gh release list --repo hunxuankai/codex-relay --limit 100
+gh api --paginate repos/hunxuankai/codex-relay/tags --jq '.[].name'
+```
+
+旧 Release、安装器、`latest.json`、Tag 下载链接和源码快照在清理后不再保证可用；已安装旧版本仍通过固定 `releases/latest` 清单更新。清理动作不涉及 Codex 配置、应用数据、日志或备份。
+
 ## 9. 验证应用内升级
 
 公开 Release 只能证明托管状态，不能替代真实升级验证。使用 Windows Sandbox 或隔离 VM，从已知良好的上一公开版本执行：
@@ -262,6 +280,7 @@ $manifest | Select-Object version, pub_date
 
 - 本地检查失败：停止发布，修复并重新运行完整检查。
 - GitHub Actions 失败：不得发布；记录失败步骤，使用新提交重试。
+- 历史 Release/tag 清理失败：不得把清理报告为成功；保留已删除与未删除对象的真实列表，修复权限或网络后通过清理工作流的 `workflow_dispatch` 安全重试，不使用通配符删除。
 - Draft 错误：删除 Draft 和错误资产，修正后重新生成。
 - UAC 取消、安装器失败或升级后无法启动：不得报告升级成功；允许用户重新打开旧版本或人工安装已知良好版本。
 - 已公开版本有缺陷：不得原地替换安装器、`.sig` 或 `latest.json`，发布严格更高的 SemVer 修复。
@@ -278,6 +297,7 @@ $manifest | Select-Object version, pub_date
 - Draft Release ID、Tag、目标提交和三个资产的大小、SHA-256；
 - `latest.json` 的版本、说明、平台 URL 和签名关联核对；
 - 公开时间与公开端点复核结果；
+- 历史 Release/tag 清理 Run 的 URL、保留 Tag、删除前后列表、失败步骤和未完成项；
 - Sandbox/VM 中实际执行和未执行的安装、升级、UAC、重启及数据保留场景；
 - 所有真实失败、限制和未完成项。
 

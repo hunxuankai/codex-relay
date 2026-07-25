@@ -1,0 +1,120 @@
+name: 清理历史 GitHub Releases
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-retention
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    # 预发布版本不应取代 releases/latest；正式发布事件才触发清理。
+    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      EVENT_RELEASE_ID: ${{ github.event.release.id }}
+      EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - name: 清理历史 Release 与 tags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repo="$REPOSITORY"
+          event_release_id="${EVENT_RELEASE_ID:-}"
+          event_release_tag="${EVENT_RELEASE_TAG:-}"
+          work_dir="$(mktemp -d)"
+          trap 'rm -rf "$work_dir"' EXIT
+          latest_file="$work_dir/latest.json"
+          releases_file="$work_dir/releases.json"
+
+          # 以公开 updater 实际消费的 Latest 为唯一保留对象。
+          gh api "repos/$repo/releases/latest" > "$latest_file"
+          keep_id="$(jq -r '.id // empty' "$latest_file")"
+          keep_tag="$(jq -r '.tag_name // empty' "$latest_file")"
+          keep_draft="$(jq -r '.draft // true' "$latest_file")"
+          keep_prerelease="$(jq -r '.prerelease // true' "$latest_file")"
+
+          if [[ -z "$keep_id" || -z "$keep_tag" || "$keep_draft" != "false" || "$keep_prerelease" != "false" ]]; then
+            echo "::error::releases/latest 不是可保留的正式 Release，停止清理。"
+            exit 1
+          fi
+
+          # Release 事件必须与当前 Latest 一致；不一致时宁可失败，也不冒险误删。
+          if [[ -n "$event_release_id" && ( "$event_release_id" != "$keep_id" || "$event_release_tag" != "$keep_tag" ) ]]; then
+            echo "::error::Release 事件与 releases/latest 不一致，停止清理。"
+            exit 1
+          fi
+
+          # 分页获取全部 Release，避免只清理 API 第一页。
+          gh api --paginate --slurp "repos/$repo/releases?per_page=100" > "$releases_file"
+          if ! jq -e '
+            flatten
+            | all(.[]; ((.id | type) == "number") and ((.tag_name | type) == "string") and ((.tag_name | length) > 0))
+          ' "$releases_file" > /dev/null; then
+            echo "::error::Release 列表包含缺少 ID/tag 的项目，停止清理。"
+            exit 1
+          fi
+          if ! jq -e --arg keep_id "$keep_id" --arg keep_tag "$keep_tag" '
+            flatten
+            | any(.[]; ((.id | tostring) == $keep_id) and (.tag_name == $keep_tag))
+          ' "$releases_file" > /dev/null; then
+            echo "::error::Release 列表未包含当前 Latest，停止清理。"
+            exit 1
+          fi
+
+          delete_if_present() {
+            local endpoint="$1"
+            local response
+
+            if response="$(gh api --include "$endpoint" 2>&1)"; then
+              gh api --silent --method DELETE "$endpoint"
+              return 0
+            fi
+
+            # 允许重试时跳过已经删除的对象；其他状态必须使工作流失败。
+            if grep -qE 'HTTP/[0-9.]+ 404' <<< "$response"; then
+              return 0
+            fi
+
+            echo "::error::读取待清理资源失败: $endpoint"
+            return 1
+          }
+
+          mapfile -t candidates < <(
+            jq -r --arg keep_id "$keep_id" --arg keep_tag "$keep_tag" '
+              flatten[]
+              | select(((.id | tostring) != $keep_id) and (.tag_name != $keep_tag))
+              | [(.id | tostring), .tag_name]
+              | @tsv
+            ' "$releases_file"
+          )
+
+          deleted=0
+          for candidate in "${candidates[@]}"; do
+            IFS=$'\t' read -r release_id release_tag <<< "$candidate"
+            if [[ -z "$release_id" || -z "$release_tag" ]]; then
+              echo "::error::清理候选缺少 Release ID 或 tag，停止清理。"
+              exit 1
+            fi
+            if [[ "$release_id" == "$keep_id" || "$release_tag" == "$keep_tag" ]]; then
+              continue
+            fi
+
+            echo "清理历史 Release: $release_tag"
+            delete_if_present "repos/$repo/releases/$release_id"
+            delete_if_present "repos/$repo/git/refs/tags/$release_tag"
+            deleted=$((deleted + 1))
+          done
+
+          echo "已清理 $deleted 个历史 Release 及其 tags；保留 $keep_tag。"
