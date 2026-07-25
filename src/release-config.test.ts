@@ -93,14 +93,14 @@ describe('Windows release configuration', () => {
     expect(releaseWorkflow).toContain('TAURI_SIGNING_PRIVATE_KEY_PASSWORD:')
     expect(releaseWorkflow.match(/TAURI_SIGNING_PRIVATE_KEY:/g)).toHaveLength(1)
     expect(releaseWorkflow).toContain('releaseBody: |')
-    expect(releaseWorkflow).toContain('已安装 `v0.1.2` 的用户可在设置页点击“检查更新”')
+    expect(releaseWorkflow).toContain('已安装 `v0.2.0` 的用户可在设置页点击“检查更新”')
     expect(releaseWorkflow).not.toContain('请在发布前补充本版本的变更说明')
     expect(releaseWorkflow).toContain(
       'tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f',
     )
   })
 
-  it('builds the 0.2.0 feature release from the latest public version', () => {
+  it('builds the 0.2.1 patch release from the latest public version', () => {
     const cargoPackageVersion = cargoToml.match(
       /\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
     )?.[1]
@@ -108,15 +108,15 @@ describe('Windows release configuration', () => {
       /\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
     )?.[1]
 
-    expect(packageJson.version).toBe('0.2.0')
+    expect(packageJson.version).toBe('0.2.1')
     expect(packageLock.version).toBe(packageJson.version)
     expect(packageLock.packages[''].version).toBe(packageJson.version)
     expect(cargoPackageVersion).toBe(packageJson.version)
     expect(coreCargoPackageVersion).toBe(packageJson.version)
-    expect(releaseWorkflow).toContain('从 `v0.1.2` 更新到 `v0.2.0`')
-    expect(releaseWorkflow).toContain('多命名 Base URL 与多命名 API Key')
-    expect(releaseWorkflow).toContain('Provider API 可用性与 Codex 兼容性测试')
-    expect(releaseWorkflow).toContain('应用网络代理')
+    expect(releaseWorkflow).toContain('从 `v0.2.0` 更新到 `v0.2.1`')
+    expect(releaseWorkflow).toContain('发布日期')
+    expect(releaseWorkflow).toContain('Markdown')
+    expect(releaseWorkflow).toContain('过滤不安全内容')
     expect(releaseWorkflow).toContain('Windows 可能显示“未知发布者”')
     expect(releaseWorkflow).toContain(
       '安装和升级不会删除 Codex 配置、Codex Relay 应用数据、日志或备份',
