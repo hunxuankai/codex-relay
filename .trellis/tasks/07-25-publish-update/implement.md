@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-任务已激活。版本与最终发布说明切片、typecheck、全量检查、普通构建、候选提交和推送已完成。三轮 GitHub Actions 均在完整检查阶段失败：第一轮已修复 Cargo 正常 stderr 被 PowerShell 误判的问题；第二轮暴露冷 Windows runner 上进程树测试的 5 秒预算不足；第三轮证明只扩大到 30 秒仍不足以解决“由子 PowerShell 自行报告 PID”的错误等待条件。当前正在把 PID 报告移动到父进程的 `Start-Process` 返回边界。Draft 审计、公开 Release 和隔离升级尚未执行。
+任务已激活。版本与最终发布说明切片、typecheck、全量检查、普通构建、候选提交和推送已完成。三轮 GitHub Actions 均在完整检查阶段失败：第一轮已修复 Cargo 正常 stderr 被 PowerShell 误判的问题；第二轮暴露冷 Windows runner 上进程树测试的 5 秒预算不足；第三轮证明只扩大到 30 秒仍不足以解决“由子 PowerShell 自行报告 PID”的错误等待条件。父进程 PID 修复后的第四轮工作流已成功，Draft 审计、公开 Release 和公开端点复核均已完成；当前只剩隔离 `v0.1.2 → v0.2.0` 应用内升级验证与最终收尾。
 
 ## 当前进度与证据
 
@@ -136,6 +136,45 @@
   本地 `HEAD` 与 `origin/main` 精确一致，工作区干净；远端 `v0.2.0` Release/Tag 仍不存在，可以触发
   下一轮单一工作流。
 
+## Draft 审计证据
+
+- Run `30162150074`（`https://github.com/hunxuankai/codex-relay/actions/runs/30162150074`）于
+  `2026-07-25T14:42:05Z` 触发，`headSha=d745f285e4d0d12301a31a5f318b30952b3fba33`，于
+  `2026-07-25T14:57:41Z` 成功；检出、Node、Rust、依赖安装、完整检查和 Draft 构建每一步均为 success。
+- Draft Release ID `359782094`，标题 `Codex Relay v0.2.0`，`tag_name=v0.2.0`、`draft=true`、
+  `prerelease=false`，`target_commitish=d745f285e4d0d12301a31a5f318b30952b3fba33`，与 Run head 精确一致。
+  Draft 页面暂用 `untagged-884ad2397451c7a69c40` 地址，公开前不把它描述为正式 Tag。
+- Draft 恰有三个资产（API 返回大小/下载后大小/sha256 digest 均一致）：
+  - `Codex Relay_0.2.0_x64-setup.exe`（实际文件名 `Codex.Relay_0.2.0_x64-setup.exe`）：4,573,718 字节，
+    SHA-256 `d6a70c69b4e7e1c4f2621b905b2e433c05e4f272b80219b0ea6f689b286cb3d1`。
+  - `Codex Relay_0.2.0_x64-setup.exe.sig`（实际文件名 `Codex.Relay_0.2.0_x64-setup.exe.sig`）：424 字节，
+    SHA-256 `d499f14b01f52433d77b42d605f88f7c4676d50e2e76efda7b30aec718d44798`。
+  - `latest.json`：2,332 字节，SHA-256 `948c27533335876c3e5b1fbd9084fa880539e74d30974faeae0a7fa4c206f557`。
+- `latest.json` 的 `version=0.2.0`、`pub_date=2026-07-25T14:57:33.219Z`，平台恰为
+  `windows-x86_64` 与 `windows-x86_64-nsis`；两者 URL 均指向
+  `https://api.github.com/repos/hunxuankai/codex-relay/releases/assets/489516982`，且都与独立 `.sig`
+  的签名内容一致。Release body 与 `latest.json.notes` 逐字一致，并包含未知发布者和数据保留提示。
+- 使用 `Accept: application/octet-stream` 对该 API asset URL 做等价二进制请求，得到 4,573,718 字节、
+  SHA-256 `d6a70c69b4e7e1c4f2621b905b2e433c05e4f272b80219b0ea6f689b286cb3d1`，与 Draft 资产一致。
+- 本机未安装 `minisign`，未执行独立密码学验签；仅记录 Actions 成功、API digest、下载字节和内联/独立
+  签名一致性，不把它们扩大为本地密码学验证声明。Draft 审计时尚未公开。
+
+## 公开发布与复核证据
+
+- 发布前再次确认 Release ID `359782094` 仍为 Draft、非 prerelease、目标提交为
+  `d745f285e4d0d12301a31a5f318b30952b3fba33` 且资产数为 3；随后执行公开并显式标记 Latest，命令退出 0，
+  正式页面为 `https://github.com/hunxuankai/codex-relay/releases/tag/v0.2.0`。
+- 公开后 `releases/latest` 与 `releases/tags/v0.2.0` 均返回 `v0.2.0`、`draft=false`、
+  `prerelease=false`、目标提交 `d745f285e4d0d12301a31a5f318b30952b3fba33`；公开资产仍恰为 3 项。
+- 公开 `latest.json` 返回 `version=0.2.0`、`pub_date=2026-07-25T14:57:33.219Z`，Release body 与 notes
+  仍逐字一致，平台仍为 `windows-x86_64` 和 `windows-x86_64-nsis`，两者均指向 API asset
+  `489516982`。
+- 公开 Tag 直链和带 `Accept: application/octet-stream` 的 API asset 请求都得到 4,573,718 字节，
+  SHA-256 均为 `d6a70c69b4e7e1c4f2621b905b2e433c05e4f272b80219b0ea6f689b286cb3d1`，与 Draft digest 完全一致。
+  公开 `latest.json` 仍为 2,332 字节，SHA-256
+  `948c27533335876c3e5b1fbd9084fa880539e74d30974faeae0a7fa4c206f557`；独立 `.sig` 仍为 424 字节，
+  SHA-256 `d499f14b01f52433d77b42d605f88f7c4676d50e2e76efda7b30aec718d44798`。未发现 Draft 到公开的资产漂移。
+
 ## 恢复步骤
 
 1. 补齐第二轮 CI 失败与测试预算契约，运行 Trellis check、差异检查和任务校验。
@@ -199,4 +238,4 @@ python ./.trellis/scripts/task.py validate .trellis/tasks/07-25-publish-update
 
 ## 下一步
 
-精确暂存父进程 PID 修复、规范和证据，提交推送新候选，再触发新的单一发布 Run。
+准备安全 Windows Sandbox staging，核对公开 `v0.1.2` 安装器后执行应用内升级；若 Windows 自动化不可用，则保留已完成的脚本准备并请求用户完成必要的 GUI 点击，不虚报升级成功。
