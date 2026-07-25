@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-任务已激活。版本与最终发布说明切片、typecheck、全量检查、普通构建、候选提交和推送已完成。两轮 GitHub Actions 均在完整检查阶段失败：第一轮已修复 Cargo 正常 stderr 被 PowerShell 误判的问题，第二轮根因已收窄为冷 Windows runner 上进程树测试的 5 秒测试预算不足；测试级 30 秒预算、前端延迟焦点生命周期修复、本地完整检查和无签名普通构建均已完成，尚待提交推送并重新运行工作流。Draft 审计、公开 Release 和隔离升级尚未执行。
+任务已激活。版本与最终发布说明切片、typecheck、全量检查、普通构建、候选提交和推送已完成。三轮 GitHub Actions 均在完整检查阶段失败：第一轮已修复 Cargo 正常 stderr 被 PowerShell 误判的问题；第二轮暴露冷 Windows runner 上进程树测试的 5 秒预算不足；第三轮证明只扩大到 30 秒仍不足以解决“由子 PowerShell 自行报告 PID”的错误等待条件。当前正在把 PID 报告移动到父进程的 `Start-Process` 返回边界。Draft 审计、公开 Release 和隔离升级尚未执行。
 
 ## 当前进度与证据
 
@@ -99,6 +99,39 @@
 - 修复提交 `fe6ed317f2a375aade4123bf7f7f8d8569c10ba5`（`fix(release): 稳定发布候选检查`）已创建，
   精确包含 Windows 冷启动进程测试预算、延迟焦点生命周期回归与实现、两项长期规范和本任务证据；
   当前本地 `master` 领先 `origin/main` 1 个提交，尚未推送。
+- 任务证据提交 `b065764afb66e6b5ebc34feeacbe428626314a9d` 已连同修复提交推送到远端 `main`；
+  本地 `HEAD`、`origin/main` 与远端引用精确一致，推送后工作区干净。触发前 GitHub Status 为
+  All Systems Operational，且不存在 `v0.2.0` Release 或 Tag。
+- 第三轮 GitHub Actions Run `30161343392`（`https://github.com/hunxuankai/codex-relay/actions/runs/30161343392`）
+  已于 `2026-07-25T14:17:16Z` 通过 `workflow_dispatch` 创建，head SHA 精确为
+  `b065764afb66e6b5ebc34feeacbe428626314a9d`。Run 于 `2026-07-25T14:26:27Z` 失败：检出、Node、
+  Rust、依赖安装、Trellis、前端、Rust 依赖图、fmt、Clippy、主 crate 40 项均通过；core 172 项中
+  171 项通过，只有 `cancellation_terminates_descendant_processes_in_the_job` 在 30 秒后仍未看到 PID。
+  `output_limit_terminates_the_process_tree` 本轮通过，Draft 构建被跳过，`v0.2.0` Release 仍不存在。
+
+## 第三轮 Actions 失败与假设修正
+
+- 第三轮日志推翻了“只把 5 秒扩大为 30 秒即可”的完整性假设。失败测试等待的是子 PowerShell 完成
+  冷启动、开始执行 `child.ps1` 并自行写入 `$PID`；但 Job Object 取消契约只需要确认后代进程已经由
+  父进程创建并取得真实 PID。
+- 父脚本的 `Start-Process -PassThru` 返回值已经提供 `$child.Id`。最小根因修复改为由父进程在
+  `Start-Process` 返回后立即写 PID，再等待子进程；子进程只执行 120 秒挂起命令，确保取消前不会自然
+  退出。测试继续保留 30 秒有界条件轮询、严格 `Cancelled` 结果和“子 PID 不再运行”断言。
+- 该调整不改变生产 Job Object、进程启动、取消、超时或输出上限逻辑，只纠正测试观察点；未来不得
+  通过继续扩大任意 timeout 掩盖错误条件。
+- 修复后的本地验证：`cargo fmt --all --check` 通过；`codex_process` 5 项专项通过；取消后代进程用例
+  连续重复 3 次均通过（每次约 0.7–0.9 秒）。下一步运行完整 `npm run check`，再重新生成候选提交。
+- 最新完整 `npm run check` 已在父进程 PID 修复后退出 0，用时约 192.4 秒：Trellis 8 项、前端 37/176
+  项、主 Rust crate 40 项、`codex-relay-core` 172 项、路径安全 3 项、Provider workflow 1 项全部通过；
+  依赖图、fmt、Clippy 和 workspace 测试均通过。下一步重新执行无签名普通构建，再提交并推送新候选。
+- 父进程 PID 修复后的无签名 `npm run build` 已退出 0，用时约 215 秒；两个 Tauri 签名环境变量均为
+  `False`，且 `UPDATER_ARTIFACT_COUNT=0`。最终候选普通构建产物：
+  - `src-tauri/target/release/CodexRelay.exe`：18,903,552 字节，写入时间
+    `2026-07-25T22:38:51.0466447+08:00`，SHA-256
+    `6CA203EA5042F7970C677AF00A78018EFC00D21CF3CA4D66FC6ED289895B24AC`。
+  - `src-tauri/target/release/bundle/nsis/Codex Relay_0.2.0_x64-setup.exe`：4,573,253 字节，写入时间
+    `2026-07-25T22:38:50.9765553+08:00`，SHA-256
+    `5417BC319FDCDE4579BE89DE9150A6503EACABC095EAF8D303E744E1E7240289`。
 
 ## 恢复步骤
 
@@ -163,4 +196,4 @@ python ./.trellis/scripts/task.py validate .trellis/tasks/07-25-publish-update
 
 ## 下一步
 
-提交本次任务证据并推送新候选到远端 `main`，确认远端引用后重新触发并监控 `release.yml`。
+精确暂存父进程 PID 修复、规范和证据，提交推送新候选，再触发新的单一发布 Run。

@@ -786,17 +786,16 @@ mod tests {
     #[serial(codex_process)]
     async fn cancellation_terminates_descendant_processes_in_the_job() {
         let directory = tempfile::tempdir().unwrap();
-        let child_script = directory.path().join("child.ps1");
         let parent_script = directory.path().join("parent.ps1");
         let pid_file = directory.path().join("child.pid");
         fs::write(
-            &child_script,
-            "param([string]$PidFile)\nSet-Content -LiteralPath $PidFile -Value $PID\nStart-Sleep -Seconds 30\n",
-        )
-        .unwrap();
-        fs::write(
             &parent_script,
-            "param([string]$ChildScript,[string]$PidFile)\n$child = Start-Process -FilePath $PSHOME\\powershell.exe -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-File',$ChildScript,$PidFile) -WindowStyle Hidden -PassThru\nWait-Process -Id $child.Id\n",
+            r#"param([string]$PidFile)
+$ErrorActionPreference = 'Stop'
+$child = Start-Process -FilePath "$PSHOME\powershell.exe" -ArgumentList '-NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 120"' -WindowStyle Hidden -PassThru
+Set-Content -LiteralPath $PidFile -Value $child.Id
+Wait-Process -Id $child.Id
+"#,
         )
         .unwrap();
         let (sender, cancel) = tokio::sync::watch::channel(false);
@@ -808,7 +807,6 @@ mod tests {
                 "-NonInteractive".into(),
                 "-File".into(),
                 parent_script.as_os_str().to_owned(),
-                child_script.as_os_str().to_owned(),
                 pid_file.as_os_str().to_owned(),
             ],
             env: Vec::new(),

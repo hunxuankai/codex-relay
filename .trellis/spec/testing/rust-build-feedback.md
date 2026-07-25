@@ -133,14 +133,16 @@ npm run test:rust:lib -- provider_http
 
 - Windows 测试模块使用 `PROCESS_TREE_TEST_TIMEOUT: Duration = Duration::from_secs(30)` 作为有界的
   测试级总预算。
-- `wait_for_process_id(path: &Path) -> u32` 每 20 毫秒重新读取 PID 文件，直到条件满足或测试预算
-  到期。
+- 父 PowerShell 在 `Start-Process` 返回后立即把 `$child.Id` 写入 PID 文件；
+  `wait_for_process_id(path: &Path) -> u32` 每 20 毫秒重新读取该文件，直到条件满足或测试预算到期。
 - `SystemCodexProcessBackend::run(..., PROCESS_TREE_TEST_TIMEOUT, ...)` 只用于需要等待 PowerShell
   启动、后代创建或输出上限的测试；生产调用方的显式超时不因此改变。
 
 ### 3. 契约
 
 - 等待后代进程时必须轮询“PID 文件已写入且可解析”这一真实条件，不能用固定 sleep 猜测启动时间。
+- PID 必须由创建后代的父进程从 `Start-Process -PassThru` 返回值写入；不能要求子 PowerShell 先完成
+  自身冷启动并执行脚本后再写 PID，因为那验证的是子运行时就绪，不是 Job Object 所需的“后代已创建”。
 - 轮询必须有清晰的总 deadline；条件始终不满足时在 deadline 后失败，不能无限等待。
 - 后代取消测试只能在已取得子 PID 后发送取消信号，再断言运行结果为 `Cancelled` 且子进程已退出。
 - 输出上限测试必须给冷 PowerShell 和管道足够的测试预算，再断言错误为 `OutputTooLarge`；若先得到
@@ -151,7 +153,8 @@ npm run test:rust:lib -- provider_http
 
 | 条件 | 必需结果 |
 |---|---|
-| 冷 runner 在 5 秒后、30 秒内写入有效 PID | 继续发送取消并验证整个进程树终止 |
+| 冷 runner 在 5 秒后、30 秒内创建后代并由父进程写入有效 PID | 继续发送取消并验证整个进程树终止 |
+| 子 PowerShell 用户代码启动很慢，但 `Start-Process` 已返回 | 父进程仍立即记录 PID，不等待子脚本就绪 |
 | deadline 内始终没有有效 PID | 测试以“child process id was not written in time”失败 |
 | 超限输出在 deadline 内被读取 | 返回 `OutputTooLarge`，并终止进程树 |
 | 超限输出测试先返回 `Timeout` | 保留失败并调查吞吐、读取或预算，不把 `Timeout` 接受为等价结果 |
@@ -159,10 +162,11 @@ npm run test:rust:lib -- provider_http
 
 ### 5. 良好/基线/错误用例
 
-- 良好：按 20 毫秒轮询 PID 文件，在冷 runner 实际完成子进程启动后立即继续，不额外等待满 30 秒。
+- 良好：父进程在 `Start-Process` 返回时写入 `$child.Id`，测试按 20 毫秒轮询并立即继续，不等待
+  子 PowerShell 执行用户脚本。
 - 基线：缓存命中的本机在数百毫秒内满足条件，测试仍快速结束。
-- 错误：`for _ in 0..250` 把 20 毫秒轮询隐式限制为 5 秒，或给 4 MiB 以上 PowerShell 输出只留
-  5 秒，然后把 CI 的 `Timeout` 误判为生产逻辑缺陷。
+- 错误：让子脚本执行 `Set-Content -Value $PID`，把“已创建后代”错误提升为“后代 PowerShell 已完成
+  冷启动”；或用 `for _ in 0..250` 把轮询隐式限制为 5 秒。
 
 ### 6. 必需测试
 
@@ -176,6 +180,12 @@ npm run test:rust:lib -- provider_http
 
 #### 错误
 
+```powershell
+# 子进程只有在 PowerShell 冷启动并开始执行脚本后才报告 PID。
+Set-Content -LiteralPath $PidFile -Value $PID
+Start-Sleep -Seconds 120
+```
+
 ```rust
 for _ in 0..250 {
     if let Ok(pid) = read_pid(path) {
@@ -186,6 +196,12 @@ for _ in 0..250 {
 ```
 
 #### 正确
+
+```powershell
+$child = Start-Process ... -PassThru
+Set-Content -LiteralPath $PidFile -Value $child.Id
+Wait-Process -Id $child.Id
+```
 
 ```rust
 let deadline = Instant::now() + PROCESS_TREE_TEST_TIMEOUT;
