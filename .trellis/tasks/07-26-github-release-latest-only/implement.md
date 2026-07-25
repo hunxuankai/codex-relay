@@ -11,11 +11,11 @@
    Latest-only 策略、历史链接失效范围、清理失败处置和远端证据边界。
 4. [x] 重构 workflow 脚本和测试断言，确认当前 Release 排除、Draft/Prerelease 边界、
    分页和错误退出路径清晰可审计。
-5. [ ] 运行专项测试、`git diff --check`，再运行完整 `npm run check`（若完整检查受
+5. [x] 运行专项测试、`git diff --check`，再运行完整 `npm run check`（若完整检查受
    环境限制失败，保留首次失败与根因）。
-6. [ ] 检查 Git 跟踪/忽略范围和秘密扫描；确认没有真实 Token、Authorization、签名
+6. [x] 检查 Git 跟踪/忽略范围和秘密扫描；确认没有真实 Token、Authorization、签名
    私钥、用户数据或真实 Codex/Relay 数据目录进入改动。
-7. [ ] 仅在用户确认的彻底策略下，对当前公开仓库执行一次远端历史 Release/tag
+7. [x] 仅在用户确认的彻底策略下，对当前公开仓库执行一次远端历史 Release/tag
    清理；记录真实命令输出和未完成项，不把本地测试当作远端成功证据。
 
 ## 行为切片与验证命令
@@ -82,12 +82,19 @@ gh api --paginate repos/hunxuankai/codex-relay/tags --jq '.[].name'
 - GREEN：新增 workflow 后同一专项测试 3/3 通过；随后
   `npx vitest run src/release-config.test.ts src/release-retention.test.ts` 2 个文件、
   16 项通过。
-- 结构检查：workflow 的 `bash -n` 通过，PyYAML 解析通过，`git diff --check` 通过
+- 结构检查：workflow 的 `bash -n` 通过，PyYAML 解析通过，Actionlint 通过，`git diff --check` 通过
   （仅有 Git 的 LF/CRLF 提示）；完整检查待执行。
 - 远端首次手动 Run `30177039434` 于 `2026-07-25T22:09:53Z` 失败且未删除资源。日志显示
   API 返回的 `draft=false`、`prerelease=false` 被 `.draft // true` / `.prerelease // true`
   误判为 `true`；新增布尔值回归测试先复现 1 项失败，随后改用 `| tostring`，专项 4/4、
   Bash 语法、Actionlint 和公开 Latest 字段模拟均通过。该次失败是实现缺陷，不能记为
   远端清理成功。
-- 真实 GitHub Actions 和远端删除：待工作流进入默认分支后执行；未执行前不得声称
-  历史资源已清理。
+- 修复提交 `1746b5b` 推送到 `main` 后，手动 Run `30177164945` 成功；日志明确列出
+  `v0.2.0`、`v0.1.2`、`v0.1.1`、`v0.1.0` 四个历史 Release，最终报告“已清理 4 个”。
+  远端只读复核显示 Releases 仅剩 `v0.2.1`（3 项资产）、tags 仅剩 `v0.2.1`，旧
+  `v0.2.0` Release/tag API 均返回 404；未输出 Token 或签名秘密。
+- 完整检查需在修复提交后再执行一次；Release/NSIS 构建、应用安装/升级和 Sandbox
+  场景未因本任务需要重新执行，不把清理 Run 当作这些行为的证据。
+- 修复后 `npm run check` 于本轮退出 0（94 秒）：Trellis 8 项、前端 39 个文件/182 项、
+  Rust workspace 172 项及路径/Provider 集成测试全部通过；类型检查、Rust fmt 和
+  Clippy 通过。该检查不包含真实安装、升级、签名或 Release 构建证据。
