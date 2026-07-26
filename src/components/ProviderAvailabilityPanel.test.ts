@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import type { ProviderProfile } from '../types/provider'
 import type {
@@ -194,6 +194,125 @@ describe('ProviderAvailabilityPanel', () => {
     expect(document.body.textContent).toContain('响应')
     expect(document.body.textContent).toContain('HTTP 200')
     expect(document.body.textContent).toContain('"status": "completed"')
+  })
+
+  it('clears the old trace and automatically opens the new trace after an API test', async () => {
+    const newTrace: ProviderAvailabilityTrace = {
+      request: {
+        ...apiTrace.request,
+        body: '{\n  "model": "gpt-5.6-sol",\n  "stream": false,\n  "request": "new"\n}',
+      },
+      response: {
+        ...apiTrace.response!,
+        body: '{\n  "status": "new-response"\n}',
+      },
+    }
+    const wrapper = mount(ProviderAvailabilityPanel, {
+      attachTo: document.body,
+      props: {
+        provider,
+        apiResult: result('api', 'passed', { trace: apiTrace }),
+        codexResult: null,
+        runningKind: null,
+        disabled: false,
+        cancelling: false,
+      },
+    })
+
+    await wrapper.get('[aria-label="查看 Provider A 的 API 请求与响应"]').trigger('click')
+    expect(document.body.textContent).toContain('"status": "completed"')
+
+    await wrapper.get('[aria-label="测试 Provider A 的 API 可用性"]').trigger('click')
+    await wrapper.setProps({ apiResult: null, runningKind: 'api' })
+    expect(document.body.textContent).not.toContain('"status": "completed"')
+
+    await wrapper.setProps({
+      apiResult: result('api', 'passed', { trace: newTrace }),
+      runningKind: null,
+    })
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('"status": "new-response"')
+    expect(document.body.textContent).not.toContain('"status": "completed"')
+  })
+
+  it('consumes the auto-open request when the new API result has no trace', async () => {
+    const wrapper = mount(ProviderAvailabilityPanel, {
+      attachTo: document.body,
+      props: {
+        provider,
+        apiResult: result('api', 'passed', { trace: apiTrace }),
+        codexResult: null,
+        runningKind: null,
+        disabled: false,
+        cancelling: false,
+      },
+    })
+
+    await wrapper.get('[aria-label="测试 Provider A 的 API 可用性"]').trigger('click')
+    await wrapper.setProps({ apiResult: null, runningKind: 'api' })
+    await wrapper.setProps({
+      apiResult: result('api', 'failed', { trace: null }),
+      runningKind: null,
+    })
+    await flushPromises()
+
+    expect(document.body.textContent).not.toContain('API 请求与响应')
+
+    await wrapper.setProps({ apiResult: result('api', 'passed', { trace: apiTrace }) })
+    await flushPromises()
+    expect(document.body.textContent).not.toContain('"status": "completed"')
+  })
+
+  it('does not auto-open a cancelled trace', async () => {
+    const wrapper = mount(ProviderAvailabilityPanel, {
+      props: {
+        provider,
+        apiResult: null,
+        codexResult: null,
+        runningKind: null,
+        disabled: false,
+        cancelling: false,
+      },
+    })
+
+    await wrapper.get('[aria-label="测试 Provider A 的 API 可用性"]').trigger('click')
+    await wrapper.setProps({ runningKind: 'api' })
+    await wrapper.setProps({
+      apiResult: result('api', 'cancelled', { trace: apiTrace }),
+      runningKind: null,
+    })
+    await flushPromises()
+
+    const dialog = wrapper.findComponent({ name: 'ProviderAvailabilityTraceDialog' })
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.props('open')).toBe(false)
+  })
+
+  it('drops a pending auto-open when the Provider changes', async () => {
+    const wrapper = mount(ProviderAvailabilityPanel, {
+      props: {
+        provider,
+        apiResult: null,
+        codexResult: null,
+        runningKind: null,
+        disabled: false,
+        cancelling: false,
+      },
+    })
+
+    await wrapper.get('[aria-label="测试 Provider A 的 API 可用性"]').trigger('click')
+    await wrapper.setProps({ runningKind: 'api' })
+    await wrapper.setProps({
+      provider: { ...provider, id: 'provider-b', name: 'Provider B' },
+      apiResult: result('api', 'passed', { trace: apiTrace }),
+      runningKind: null,
+    })
+    await flushPromises()
+
+    const dialog = wrapper.findComponent({ name: 'ProviderAvailabilityTraceDialog' })
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.props('open')).toBe(false)
   })
 
   it('turns the active test into an explicit cancel action and disables the other test', async () => {

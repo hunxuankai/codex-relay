@@ -78,6 +78,36 @@ describe('useProviderAvailability', () => {
     )
   })
 
+  it('clears the previous result for the test kind before a new request resolves', async () => {
+    let finish!: (value: ProviderAvailabilityResult) => void
+    const pending = new Promise<ProviderAvailabilityResult>((resolve) => {
+      finish = resolve
+    })
+    const testProviderApi = vi.fn()
+      .mockResolvedValueOnce({ ...result('api'), trace: apiTrace })
+      .mockReturnValueOnce(pending)
+    const api = client({ testProviderApi })
+    const availability = useProviderAvailability({
+      client: api,
+      createRequestId: vi.fn()
+        .mockReturnValueOnce('request-api-first')
+        .mockReturnValueOnce('request-codex')
+        .mockReturnValueOnce('request-api-second'),
+    })
+
+    await availability.testApi('provider-a', false)
+    await availability.testCodex('provider-a', false)
+
+    const running = availability.testApi('provider-a', false)
+
+    expect(availability.resultFor('provider-a', 'api')).toBeNull()
+    expect(availability.resultFor('provider-a', 'codex')).toEqual(result('codex'))
+
+    finish({ ...result('api'), trace: apiTrace })
+    await running
+    expect(availability.resultFor('provider-a', 'api')).toEqual({ ...result('api'), trace: apiTrace })
+  })
+
   it('allows only one active test and exposes cancellable state', async () => {
     let finish!: (value: ProviderAvailabilityResult) => void
     const pending = new Promise<ProviderAvailabilityResult>((resolve) => {

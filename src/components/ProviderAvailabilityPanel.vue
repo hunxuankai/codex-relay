@@ -31,21 +31,64 @@ const emit = defineEmits<{
 
 const skipProxy = shallowRef(true)
 const traceDialogOpen = shallowRef(false)
+const traceDialogPending = shallowRef(false)
 const apiTrace = computed(() => props.apiResult?.trace ?? null)
 
 watch(
-  [() => props.provider.id, () => props.apiResult],
+  () => props.provider.id,
   () => {
     traceDialogOpen.value = false
+    traceDialogPending.value = false
+  },
+)
+
+watch(
+  () => props.apiResult,
+  (result, previousResult) => {
+    if (traceDialogPending.value) {
+      if (result?.trace && result.status !== 'cancelled') {
+        traceDialogPending.value = false
+        traceDialogOpen.value = true
+      } else if (result && result !== previousResult) {
+        traceDialogPending.value = false
+      }
+      return
+    }
+
+    if (result !== previousResult) traceDialogOpen.value = false
+  },
+)
+
+watch(
+  () => props.runningKind,
+  (runningKind, previousRunningKind) => {
+    if (
+      traceDialogPending.value &&
+      previousRunningKind === 'api' &&
+      runningKind === null &&
+      !apiTrace.value
+    ) {
+      traceDialogPending.value = false
+    }
   },
 )
 
 function openTraceDialog() {
-  if (apiTrace.value) traceDialogOpen.value = true
+  if (apiTrace.value) {
+    traceDialogPending.value = false
+    traceDialogOpen.value = true
+  }
 }
 
 function closeTraceDialog() {
   traceDialogOpen.value = false
+  traceDialogPending.value = false
+}
+
+function startApiTest() {
+  traceDialogOpen.value = false
+  traceDialogPending.value = true
+  emit('testApi', !skipProxy.value)
 }
 
 const proxyUnavailableReason = computed(() =>
@@ -205,7 +248,7 @@ function blockedReason(
           native-type="button"
           :aria-label="`测试 ${provider.name} 的 API 可用性`"
           :disabled="isTestDisabled(provider, disabled, runningKind) || cancelling"
-          @click="emit('testApi', !skipProxy)"
+          @click="startApiTest"
         >
           测试 API 可用性
         </ElButton>

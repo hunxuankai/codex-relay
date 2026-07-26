@@ -83,12 +83,29 @@ export function useProviderAvailability(options: UseProviderAvailabilityOptions 
     }
   }
 
+  function clearResult(providerId: string, kind: ProviderTestKind) {
+    const providerResults = results.value[providerId]
+    if (!providerResults?.[kind]) return
+
+    const nextProviderResults = { ...providerResults }
+    delete nextProviderResults[kind]
+
+    const nextResults = { ...results.value }
+    if (Object.keys(nextProviderResults).length === 0) {
+      delete nextResults[providerId]
+    } else {
+      nextResults[providerId] = nextProviderResults
+    }
+    results.value = nextResults
+  }
+
   async function test(
     providerId: string,
     kind: ProviderTestKind,
     useProxy: boolean,
   ): Promise<void> {
     if (running.value) return
+    clearResult(providerId, kind)
     const requestId = createRequestId()
     const current: RunningTest = {
       providerId,
