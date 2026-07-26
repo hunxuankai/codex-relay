@@ -115,4 +115,37 @@ describe('ProviderList', () => {
     expect(wrapper.emitted('use')?.[0]).toEqual(['provider-a'])
     expect(wrapper.emitted('delete')?.[0]).toEqual(['provider-a'])
   })
+
+  it('emits the complete order when a Provider is dropped and disables dragging while busy', async () => {
+    const wrapper = mount(ProviderList, {
+      props: {
+        providers: [
+          provider({ id: 'provider-a', name: 'Provider A' }),
+          provider({ id: 'provider-b', name: 'Provider B', isActive: false }),
+          provider({ id: 'provider-c', name: 'Provider C', isActive: false }),
+        ],
+        selectedProviderId: null,
+        busy: false,
+      },
+    })
+
+    const handle = wrapper.get('[aria-label="拖动 Provider A 排序"]')
+    expect(handle.attributes('draggable')).toBe('true')
+    await handle.trigger('dragstart')
+    await wrapper.get('[data-provider-id="provider-c"]').trigger('drop')
+
+    expect(wrapper.emitted('reorder')?.[0]).toEqual([
+      ['provider-b', 'provider-c', 'provider-a'],
+    ])
+
+    await wrapper.get('[aria-label="拖动 Provider C 排序"]').trigger('keydown', {
+      key: 'ArrowUp',
+    })
+    expect(wrapper.emitted('reorder')?.[1]).toEqual([
+      ['provider-a', 'provider-c', 'provider-b'],
+    ])
+
+    await wrapper.setProps({ busy: true })
+    expect(wrapper.get('[aria-label="拖动 Provider A 排序"]').attributes('draggable')).toBe('false')
+  })
 })

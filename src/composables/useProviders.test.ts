@@ -61,6 +61,7 @@ function mutation(message: string): ProviderMutationOutcome {
 function client(overrides: Partial<ProviderClient> = {}): ProviderClient {
   return {
     listProviders: vi.fn().mockResolvedValue(state([])),
+    reorderProviders: vi.fn().mockResolvedValue(mutation('顺序已保存。')),
     createProvider: vi.fn().mockResolvedValue(mutation('已保存。')),
     updateProvider: vi.fn().mockResolvedValue(mutation('已更新。')),
     saveProviderBaseUrls: vi.fn().mockResolvedValue(mutation('地址已保存。')),
@@ -154,6 +155,85 @@ describe('useProviders', () => {
 
     expect(deleteProvider).toHaveBeenCalledWith('provider-a', fingerprints)
     expect(providers.providers.value).toEqual([])
+  })
+
+  it('persists a complete Provider order with the current fingerprint and refreshes', async () => {
+    const listProviders = vi
+      .fn()
+      .mockResolvedValueOnce(state([provider('provider-a'), provider('provider-b')]))
+      .mockResolvedValueOnce(state([provider('provider-b'), provider('provider-a')]))
+    const reorderProviders = vi.fn().mockResolvedValue(mutation('Provider 顺序已保存。'))
+    const providers = useProviders({
+      client: client({ listProviders, reorderProviders }),
+      subscribe: false,
+    })
+    await flushPromises()
+
+    await providers.reorder(['provider-b', 'provider-a'])
+
+    expect(reorderProviders).toHaveBeenCalledWith({
+      providerIds: ['provider-b', 'provider-a'],
+      expectedFiles: fingerprints,
+    })
+    expect(providers.providers.value.map((item) => item.id)).toEqual([
+      'provider-b',
+      'provider-a',
+    ])
+    expect(providers.successMessage.value).toBe('Provider 顺序已保存。')
+  })
+
+  it('shows the dropped Provider order immediately while persistence is pending', async () => {
+    let finish!: (value: ProviderMutationOutcome) => void
+    const pending = new Promise<ProviderMutationOutcome>((resolve) => {
+      finish = resolve
+    })
+    const listProviders = vi
+      .fn()
+      .mockResolvedValueOnce(state([provider('provider-a'), provider('provider-b')]))
+      .mockResolvedValueOnce(state([provider('provider-b'), provider('provider-a')]))
+    const providers = useProviders({
+      client: client({
+        listProviders,
+        reorderProviders: vi.fn().mockReturnValue(pending),
+      }),
+      subscribe: false,
+    })
+    await flushPromises()
+
+    const saving = providers.reorder(['provider-b', 'provider-a'])
+
+    expect(providers.providers.value.map((item) => item.id)).toEqual([
+      'provider-b',
+      'provider-a',
+    ])
+    finish(mutation('Provider 顺序已保存。'))
+    await saving
+  })
+
+  it('restores the previous Provider order when persistence fails', async () => {
+    const providers = useProviders({
+      client: client({
+        listProviders: vi.fn().mockResolvedValue(
+          state([provider('provider-a'), provider('provider-b')]),
+        ),
+        reorderProviders: vi.fn().mockRejectedValue(
+          new RelayCommandError('EXTERNAL_MODIFICATION_CONFLICT', '配置文件已变化，请重试。'),
+        ),
+      }),
+      subscribe: false,
+    })
+    await flushPromises()
+
+    await providers.reorder(['provider-b', 'provider-a'])
+
+    expect(providers.providers.value.map((item) => item.id)).toEqual([
+      'provider-a',
+      'provider-b',
+    ])
+    expect(providers.error.value).toEqual({
+      code: 'EXTERNAL_MODIFICATION_CONFLICT',
+      message: '配置文件已变化，请重试。',
+    })
   })
 
   it('refreshes after switching a Provider', async () => {

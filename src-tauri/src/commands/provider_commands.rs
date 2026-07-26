@@ -4,7 +4,7 @@ use crate::error::CommandResult;
 use crate::infrastructure::file_fingerprint::FileSetFingerprint;
 use crate::models::provider::{
     CreateProviderInput, ImportCurrentApiKeyInput, ProviderApiKeyManagementState,
-    ProviderListState, ProviderMutationOutcome, SaveProviderApiKeysInput,
+    ProviderListState, ProviderMutationOutcome, ReorderProvidersInput, SaveProviderApiKeysInput,
     SaveProviderBaseUrlsInput, SelectProviderApiKeyInput, SelectProviderBaseUrlInput,
     SwitchOutcome, UpdateProviderInput, UpdateProviderPreferenceInput,
 };
@@ -16,6 +16,31 @@ pub(crate) fn list_providers_inner(state: &AppState) -> CommandResult<ProviderLi
 #[tauri::command]
 pub fn list_providers(state: tauri::State<'_, AppState>) -> CommandResult<ProviderListState> {
     list_providers_inner(&state)
+}
+
+pub(crate) async fn reorder_providers_inner(
+    state: &AppState,
+    input: ReorderProvidersInput,
+) -> CommandResult<ProviderMutationOutcome> {
+    command_result(state.provider_service.reorder_providers(input).await)
+}
+
+#[tauri::command]
+pub async fn reorder_providers(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    input: ReorderProvidersInput,
+) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+    let application_write = match state.begin_application_write() {
+        Ok(application_write) => application_write,
+        Err(error) => return Ok(CommandResult::failure(&error)),
+    };
+    let result = reorder_providers_inner(&state, input).await;
+    drop(application_write);
+    if let Some(outcome) = result.data.as_ref() {
+        crate::tray::after_provider_mutation(&app, outcome.message.clone(), false);
+    }
+    Ok(result)
 }
 
 pub(crate) fn get_provider_api_keys_for_management_inner(

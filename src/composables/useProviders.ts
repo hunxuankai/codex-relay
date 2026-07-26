@@ -10,6 +10,7 @@ import type {
   ProviderProfile,
   ProviderBaseUrlDraft,
   ModelCatalogItem,
+  ReorderProvidersInput,
   SaveProviderBaseUrlsInput,
   SelectProviderApiKeyInput,
   SelectProviderBaseUrlInput,
@@ -20,6 +21,7 @@ import type {
 
 export interface ProviderClient {
   listProviders(): Promise<ProviderListState>
+  reorderProviders(input: ReorderProvidersInput): Promise<ProviderMutationOutcome>
   createProvider(input: CreateProviderInput): Promise<ProviderMutationOutcome>
   updateProvider(input: UpdateProviderInput): Promise<ProviderMutationOutcome>
   saveProviderBaseUrls(input: SaveProviderBaseUrlsInput): Promise<ProviderMutationOutcome>
@@ -44,6 +46,7 @@ export interface UseProvidersOptions {
 
 const defaultClient: ProviderClient = {
   listProviders: relay.listProviders,
+  reorderProviders: relay.reorderProviders,
   createProvider: relay.createProvider,
   updateProvider: relay.updateProvider,
   saveProviderBaseUrls: relay.saveProviderBaseUrls,
@@ -156,6 +159,34 @@ export function useProviders(options: UseProvidersOptions = {}) {
     return fingerprints.value
   }
 
+  async function reorder(providerIds: readonly string[]) {
+    if (busy.value) return undefined
+    let expectedFiles = fingerprints.value
+    if (!expectedFiles) {
+      await refresh()
+      expectedFiles = fingerprints.value
+    }
+    if (!expectedFiles) return undefined
+    const byId = new Map(providerList.value.map((provider) => [provider.id, provider]))
+    if (providerIds.length !== byId.size || new Set(providerIds).size !== byId.size) {
+      return undefined
+    }
+    const nextProviders = providerIds.map((providerId) => byId.get(providerId))
+    if (nextProviders.some((provider) => !provider)) return undefined
+
+    const previousProviders = providerList.value
+    const optimisticSequence = stateSequence
+    providerList.value = nextProviders as ProviderProfile[]
+    const outcome = await mutate(() => client.reorderProviders({
+      providerIds: [...providerIds],
+      expectedFiles,
+    }))
+    if (!outcome && stateSequence === optimisticSequence) {
+      providerList.value = previousProviders
+    }
+    return outcome
+  }
+
   async function saveBaseUrls(providerId: string, entries: readonly ProviderBaseUrlDraft[]) {
     const expectedFiles = await currentExpectedFiles()
     if (!expectedFiles) return undefined
@@ -250,6 +281,7 @@ export function useProviders(options: UseProvidersOptions = {}) {
     successMessage: readonly(successMessage),
     refresh,
     create,
+    reorder,
     update,
     saveBaseUrls,
     selectBaseUrl,

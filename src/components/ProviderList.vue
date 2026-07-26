@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { shallowRef } from 'vue'
 import { ElButton, ElCard, ElEmpty } from 'element-plus'
 import type { ProviderProfile } from '../types/provider'
 import ProviderStatus from './ProviderStatus.vue'
 
-defineProps<{
+const props = defineProps<{
   providers: readonly ProviderProfile[]
   selectedProviderId: string | null
   busy: boolean
@@ -15,7 +16,81 @@ const emit = defineEmits<{
   edit: [providerId: string]
   use: [providerId: string]
   delete: [providerId: string]
+  reorder: [providerIds: string[]]
 }>()
+
+const draggedProviderId = shallowRef<string | null>(null)
+const dropTargetId = shallowRef<string | null>(null)
+
+function resetDrag() {
+  draggedProviderId.value = null
+  dropTargetId.value = null
+}
+
+function startDrag(event: DragEvent, providerId: string) {
+  if (props.busy || props.providers.length < 2) {
+    event.preventDefault()
+    return
+  }
+  draggedProviderId.value = providerId
+  dropTargetId.value = providerId
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', providerId)
+  }
+}
+
+function allowDrop(event: DragEvent, providerId: string) {
+  if (props.busy || !draggedProviderId.value) return
+  event.preventDefault()
+  dropTargetId.value = providerId
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+function emitMovedOrder(sourceProviderId: string, targetIndex: number) {
+  const providerIds = props.providers.map((provider) => provider.id)
+  const sourceIndex = providerIds.indexOf(sourceProviderId)
+  if (
+    sourceIndex < 0 ||
+    targetIndex < 0 ||
+    targetIndex >= providerIds.length ||
+    sourceIndex === targetIndex
+  ) {
+    resetDrag()
+    return
+  }
+
+  const [movedProviderId] = providerIds.splice(sourceIndex, 1)
+  if (!movedProviderId) {
+    resetDrag()
+    return
+  }
+  providerIds.splice(targetIndex, 0, movedProviderId)
+  resetDrag()
+  emit('reorder', providerIds)
+}
+
+function dropProvider(event: DragEvent, targetProviderId: string) {
+  if (props.busy) {
+    resetDrag()
+    return
+  }
+  event.preventDefault()
+  const sourceProviderId = draggedProviderId.value
+  const providerIds = props.providers.map((provider) => provider.id)
+  const targetIndex = providerIds.indexOf(targetProviderId)
+  if (!sourceProviderId || targetIndex < 0) {
+    resetDrag()
+    return
+  }
+  emitMovedOrder(sourceProviderId, targetIndex)
+}
+
+function moveProviderBy(providerId: string, offset: -1 | 1) {
+  if (props.busy) return
+  const sourceIndex = props.providers.findIndex((provider) => provider.id === providerId)
+  emitMovedOrder(providerId, sourceIndex + offset)
+}
 </script>
 
 <template>
@@ -39,24 +114,52 @@ const emit = defineEmits<{
 
     <ElEmpty v-if="providers.length === 0" class="empty-state" description="还没有 Provider。" />
     <ul v-else class="provider-items">
-      <li v-for="provider in providers" :key="provider.id">
+      <li
+        v-for="provider in providers"
+        :key="provider.id"
+        :data-provider-id="provider.id"
+        :class="{
+          'provider-item-dragging': draggedProviderId === provider.id,
+          'provider-item-drop-target': dropTargetId === provider.id && draggedProviderId !== provider.id,
+        }"
+        @dragover="allowDrop($event, provider.id)"
+        @drop="dropProvider($event, provider.id)"
+      >
         <ElCard
           class="provider-card"
           :class="{ selected: selectedProviderId === provider.id }"
           shadow="never"
         >
-          <ElButton
-            class="provider-select"
-            text
-            native-type="button"
-            :aria-label="`选择 ${provider.name}`"
-            @click="emit('select', provider.id)"
-          >
-            <span class="provider-select-content">
-              <span class="provider-name">{{ provider.name }}</span>
-              <span class="provider-id">{{ provider.id }}</span>
-            </span>
-          </ElButton>
+          <div class="provider-card-heading">
+            <ElButton
+              class="provider-drag-handle"
+              text
+              native-type="button"
+              :aria-label="`拖动 ${provider.name} 排序`"
+              :title="`拖动 ${provider.name} 排序`"
+              :disabled="busy || providers.length < 2"
+              :draggable="!busy && providers.length > 1"
+              @dragstart="startDrag($event, provider.id)"
+              @dragend="resetDrag"
+              @keydown.up.prevent="moveProviderBy(provider.id, -1)"
+              @keydown.down.prevent="moveProviderBy(provider.id, 1)"
+              @click.prevent
+            >
+              <span aria-hidden="true">⠿</span>
+            </ElButton>
+            <ElButton
+              class="provider-select"
+              text
+              native-type="button"
+              :aria-label="`选择 ${provider.name}`"
+              @click="emit('select', provider.id)"
+            >
+              <span class="provider-select-content">
+                <span class="provider-name">{{ provider.name }}</span>
+                <span class="provider-id">{{ provider.id }}</span>
+              </span>
+            </ElButton>
+          </div>
 
           <ProviderStatus :provider="provider" />
           <dl class="provider-details">
@@ -128,7 +231,8 @@ const emit = defineEmits<{
 
 .provider-list-header,
 .provider-actions,
-.provider-select {
+.provider-select,
+.provider-card-heading {
   display: flex;
   align-items: center;
 }
@@ -157,6 +261,29 @@ const emit = defineEmits<{
   list-style: none;
 }
 
+.provider-card-heading {
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.provider-drag-handle {
+  flex: 0 0 auto;
+  cursor: grab;
+  font-size: 1.05rem;
+}
+
+.provider-drag-handle:active {
+  cursor: grabbing;
+}
+
+.provider-item-dragging {
+  opacity: 0.55;
+}
+
+.provider-item-drop-target .provider-card {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
 .provider-card {
   border: 1px solid var(--border);
   border-radius: 0.8rem;
@@ -176,6 +303,8 @@ const emit = defineEmits<{
 }
 
 .provider-select {
+  flex: 1 1 auto;
+  min-width: 0;
   width: 100%;
   justify-content: stretch;
   border: 0;

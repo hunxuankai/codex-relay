@@ -6,7 +6,7 @@ use crate::models::provider::{
     CreateProviderInput, ImportCurrentApiKeyInput, ModelCatalogItem, ProviderApiKeyManagementEntry,
     ProviderApiKeyManagementState, ProviderApiKeyStatus, ProviderApiKeySummary,
     ProviderBaseUrlStatus, ProviderBaseUrlSummary, ProviderListState, ProviderMutationOutcome,
-    ProviderProfile, SaveProviderApiKeysInput, SaveProviderBaseUrlsInput,
+    ProviderProfile, ReorderProvidersInput, SaveProviderApiKeysInput, SaveProviderBaseUrlsInput,
     SelectProviderApiKeyInput, SelectProviderBaseUrlInput, SwitchOutcome, UpdateProviderInput,
     UpdateProviderPreferenceInput, WireApi,
 };
@@ -29,7 +29,7 @@ use crate::services::provider_secret_service::{
 use crate::services::transaction_service::{
     FileChange, FileChanges, FileOps, StdFileOps, TransactionRequest, TransactionService,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -272,6 +272,12 @@ impl ProviderService {
                 Some(preference.clone()),
             )?,
         );
+        let mut provider_order = ordered_provider_ids(
+            &disk.preference_store.provider_order,
+            &disk.provider_configs,
+        );
+        provider_order.push(validated.id.clone());
+        new_preferences.provider_order = provider_order;
 
         let auth_change = if input.activate_after_save {
             new_config = config_service::select_provider_with_preference(
@@ -959,6 +965,9 @@ impl ProviderService {
         new_store.providers.remove(&provider_id);
         let mut new_preferences = disk.preference_store.clone();
         new_preferences.providers.remove(&provider_id);
+        new_preferences
+            .provider_order
+            .retain(|id| id != &provider_id);
 
         self.transaction_service
             .execute(
@@ -982,6 +991,41 @@ impl ProviderService {
         Ok(ProviderMutationOutcome {
             providers: self.list_providers()?.providers,
             message: format!("Provider「{display_name}」已删除。"),
+        })
+    }
+
+    pub async fn reorder_providers(
+        &self,
+        input: ReorderProvidersInput,
+    ) -> Result<ProviderMutationOutcome, AppError> {
+        let disk = self.read_consistent_state(AuthReadMode::Lenient)?;
+        let provider_ids = validate_provider_order(&input.provider_ids, &disk.provider_configs)?;
+        let mut new_preferences = disk.preference_store.clone();
+        new_preferences.provider_order = provider_ids.clone();
+        let expected_files = input.expected_files;
+
+        self.transaction_service
+            .execute(
+                TransactionRequest {
+                    operation: TransactionOperation::ReorderProviders,
+                    provider_id: None,
+                    expected_files: Some(expected_files),
+                    changes: FileChanges {
+                        config: FileChange::Unchanged,
+                        auth: FileChange::Unchanged,
+                        providers: FileChange::Unchanged,
+                        preferences: FileChange::Write(serialize_preference_store(
+                            &new_preferences,
+                        )?),
+                    },
+                },
+                |paths| validate_provider_order_written(paths, &provider_ids),
+            )
+            .await?;
+
+        Ok(ProviderMutationOutcome {
+            providers: self.list_providers()?.providers,
+            message: "Provider 顺序已保存。".into(),
         })
     }
 
@@ -1313,9 +1357,12 @@ impl ProviderService {
 
     fn list_state_from_disk(&self, disk: &DiskState) -> ProviderListState {
         let active_provider_id = config_service::current_provider_id(&disk.document);
-        let providers: Vec<ProviderProfile> = disk
-            .provider_configs
-            .iter()
+        let ordered_configs = ordered_provider_configs(
+            &disk.preference_store.provider_order,
+            &disk.provider_configs,
+        );
+        let providers: Vec<ProviderProfile> = ordered_configs
+            .into_iter()
             .map(|provider| {
                 profile_from_config(
                     provider,
@@ -1606,6 +1653,71 @@ fn configured_key(store: &ProviderSecretStore, provider_id: &str) -> Option<Stri
         .map(str::to_owned)
 }
 
+fn ordered_provider_configs<'a>(
+    provider_order: &[String],
+    provider_configs: &'a [ProviderConfig],
+) -> Vec<&'a ProviderConfig> {
+    let mut seen = BTreeSet::new();
+    let mut ordered = Vec::with_capacity(provider_configs.len());
+    for provider_id in provider_order {
+        if let Some(provider) = provider_configs
+            .iter()
+            .find(|provider| provider.id == *provider_id)
+            && seen.insert(provider.id.as_str())
+        {
+            ordered.push(provider);
+        }
+    }
+    for provider in provider_configs {
+        if seen.insert(provider.id.as_str()) {
+            ordered.push(provider);
+        }
+    }
+    ordered
+}
+
+fn ordered_provider_ids(
+    provider_order: &[String],
+    provider_configs: &[ProviderConfig],
+) -> Vec<String> {
+    ordered_provider_configs(provider_order, provider_configs)
+        .into_iter()
+        .map(|provider| provider.id.clone())
+        .collect()
+}
+
+fn validate_provider_order(
+    requested: &[String],
+    provider_configs: &[ProviderConfig],
+) -> Result<Vec<String>, AppError> {
+    let current_ids = provider_configs
+        .iter()
+        .map(|provider| provider.id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut seen = BTreeSet::new();
+    for provider_id in requested {
+        let normalized = match config_service::validate_provider_id(provider_id) {
+            Ok(normalized) => normalized,
+            Err(_) => return Err(invalid_provider_order()),
+        };
+        if normalized != *provider_id || !seen.insert(provider_id.clone()) {
+            return Err(invalid_provider_order());
+        }
+    }
+    if seen.len() != current_ids.len() || seen != current_ids {
+        return Err(invalid_provider_order());
+    }
+    Ok(requested.to_vec())
+}
+
+fn invalid_provider_order() -> AppError {
+    AppError::new(
+        "INVALID_PROVIDER_ORDER",
+        "Provider 排序已变化，请刷新后重试。",
+        "provider order is not an exact permutation of current providers",
+    )
+}
+
 fn configured_model_preference<'a>(
     store: &'a ProviderPreferenceStore,
     provider_id: &str,
@@ -1701,6 +1813,29 @@ fn validate_provider_deleted(paths: &AppPaths, provider_id: &str) -> Result<(), 
     if preferences.providers.contains_key(provider_id) {
         return Err(post_write_validation_error(
             "deleted provider still exists in provider-preferences.json",
+        ));
+    }
+    if preferences
+        .provider_order
+        .iter()
+        .any(|id| id == provider_id)
+    {
+        return Err(post_write_validation_error(
+            "deleted provider still exists in provider order",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_provider_order_written(
+    paths: &AppPaths,
+    expected_order: &[String],
+) -> Result<(), AppError> {
+    let preferences =
+        ProviderPreferenceService::new(paths.provider_preferences_file.clone()).load()?;
+    if preferences.provider_order != expected_order {
+        return Err(post_write_validation_error(
+            "provider order does not match expected values",
         ));
     }
     Ok(())
@@ -1863,9 +1998,9 @@ mod tests {
     use super::*;
     use crate::models::provider::{
         CreateProviderInput, ImportCurrentApiKeyInput, ProviderApiKeyDraft, ProviderApiKeyStatus,
-        ProviderBaseUrlDraft, ProviderBaseUrlStatus, SaveProviderApiKeysInput,
-        SaveProviderBaseUrlsInput, SelectProviderApiKeyInput, SelectProviderBaseUrlInput,
-        UpdateProviderInput,
+        ProviderBaseUrlDraft, ProviderBaseUrlStatus, ReorderProvidersInput,
+        SaveProviderApiKeysInput, SaveProviderBaseUrlsInput, SelectProviderApiKeyInput,
+        SelectProviderBaseUrlInput, UpdateProviderInput,
     };
     use std::fs;
     use std::sync::Arc;
@@ -2413,6 +2548,10 @@ wire_api = "chat_completions"
         let preference = &preferences.providers["provider-c"];
         assert_eq!(preference.base_urls[0].name, "主用地址");
         assert_eq!(
+            preferences.provider_order,
+            ["provider-a", "provider-b", "provider-c"]
+        );
+        assert_eq!(
             AuthService::new(paths.auth_file.clone())
                 .read_api_key()
                 .unwrap()
@@ -2426,6 +2565,17 @@ wire_api = "chat_completions"
         let directory = tempfile::tempdir().unwrap();
         let paths = create_paths(&directory);
         write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        let mut preferences =
+            ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+                .load_versioned()
+                .unwrap()
+                .store;
+        preferences.provider_order = vec!["provider-b".into(), "provider-a".into()];
+        fs::write(
+            &paths.provider_preferences_file,
+            serialize_preference_store(&preferences).unwrap(),
+        )
+        .unwrap();
         let service = ProviderService::new(paths.clone(), "0.1.0");
         let before = service.list_providers().unwrap();
 
@@ -2447,6 +2597,13 @@ wire_api = "chat_completions"
             fs::read_to_string(&paths.auth_file)
                 .unwrap()
                 .contains("test-key-c-not-real")
+        );
+        assert_eq!(
+            ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+                .load()
+                .unwrap()
+                .provider_order,
+            ["provider-b", "provider-a", "provider-c"]
         );
     }
 
@@ -3227,6 +3384,17 @@ wire_api = "chat_completions"
         let directory = tempfile::tempdir().unwrap();
         let paths = create_paths(&directory);
         write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        let mut preferences =
+            ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+                .load_versioned()
+                .unwrap()
+                .store;
+        preferences.provider_order = vec!["provider-b".into(), "provider-a".into()];
+        fs::write(
+            &paths.provider_preferences_file,
+            serialize_preference_store(&preferences).unwrap(),
+        )
+        .unwrap();
         let service = ProviderService::new(paths.clone(), "0.1.0");
         let before = service.list_providers().unwrap();
 
@@ -3258,6 +3426,13 @@ wire_api = "chat_completions"
                 .providers
                 .contains_key("provider-b")
         );
+        assert_eq!(
+            ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+                .load()
+                .unwrap()
+                .provider_order,
+            ["provider-a"]
+        );
 
         let refreshed = service.list_providers().unwrap();
         let error = service
@@ -3265,6 +3440,118 @@ wire_api = "chat_completions"
             .await
             .unwrap_err();
         assert_eq!(error.code(), "ACTIVE_PROVIDER_DELETE_FORBIDDEN");
+    }
+
+    #[tokio::test]
+    async fn reorder_persists_private_order_without_changing_codex_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let original_config = fs::read(&paths.config_file).unwrap();
+        let original_auth = fs::read(&paths.auth_file).unwrap();
+        let original_providers = fs::read(&paths.providers_file).unwrap();
+
+        let outcome = service
+            .reorder_providers(ReorderProvidersInput {
+                provider_ids: vec!["provider-b".into(), "provider-a".into()],
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outcome
+                .providers
+                .iter()
+                .map(|provider| provider.id.as_str())
+                .collect::<Vec<_>>(),
+            ["provider-b", "provider-a"]
+        );
+        assert_eq!(fs::read(&paths.config_file).unwrap(), original_config);
+        assert_eq!(fs::read(&paths.auth_file).unwrap(), original_auth);
+        assert_eq!(fs::read(&paths.providers_file).unwrap(), original_providers);
+        let preferences = ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+            .load()
+            .unwrap();
+        assert_eq!(preferences.provider_order, ["provider-b", "provider-a"]);
+        assert_eq!(
+            service
+                .list_providers()
+                .unwrap()
+                .providers
+                .iter()
+                .map(|provider| provider.id.as_str())
+                .collect::<Vec<_>>(),
+            ["provider-b", "provider-a"]
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_reorders_are_rejected_without_writing_any_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let original_config = fs::read(&paths.config_file).unwrap();
+        let original_auth = fs::read(&paths.auth_file).unwrap();
+        let original_providers = fs::read(&paths.providers_file).unwrap();
+        let original_preferences = fs::read(&paths.provider_preferences_file).unwrap();
+
+        for provider_ids in [
+            vec!["provider-a".into(), "provider-a".into()],
+            vec!["provider-a".into()],
+            vec!["provider-a".into(), "provider-c".into()],
+            vec!["provider-a".into(), "provider/invalid".into()],
+        ] {
+            let error = service
+                .reorder_providers(ReorderProvidersInput {
+                    provider_ids,
+                    expected_files: before.fingerprints.clone(),
+                })
+                .await
+                .unwrap_err();
+
+            assert_eq!(error.code(), "INVALID_PROVIDER_ORDER");
+        }
+        assert_eq!(fs::read(&paths.config_file).unwrap(), original_config);
+        assert_eq!(fs::read(&paths.auth_file).unwrap(), original_auth);
+        assert_eq!(fs::read(&paths.providers_file).unwrap(), original_providers);
+        assert_eq!(
+            fs::read(&paths.provider_preferences_file).unwrap(),
+            original_preferences
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_reorder_fingerprint_does_not_overwrite_external_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let original_preferences = fs::read(&paths.provider_preferences_file).unwrap();
+        fs::write(
+            &paths.config_file,
+            format!("{}\n# external change\n", MULTIPLE),
+        )
+        .unwrap();
+
+        let error = service
+            .reorder_providers(ReorderProvidersInput {
+                provider_ids: vec!["provider-b".into(), "provider-a".into()],
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code(), "EXTERNAL_MODIFICATION_CONFLICT");
+        assert_eq!(
+            fs::read(&paths.provider_preferences_file).unwrap(),
+            original_preferences
+        );
     }
 
     #[tokio::test]

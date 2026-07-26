@@ -296,6 +296,7 @@ fn operation_name(operation: TransactionOperation) -> &'static str {
         TransactionOperation::SaveProviderApiKeys => "save_provider_api_keys",
         TransactionOperation::SelectProviderApiKey => "select_provider_api_key",
         TransactionOperation::ImportCurrentApiKey => "import_current_api_key",
+        TransactionOperation::ReorderProviders => "reorder_providers",
     }
 }
 
@@ -541,6 +542,10 @@ mod tests {
         assert_eq!(
             operation_name(TransactionOperation::ImportCurrentApiKey),
             "import_current_api_key"
+        );
+        assert_eq!(
+            operation_name(TransactionOperation::ReorderProviders),
+            "reorder_providers"
         );
     }
 

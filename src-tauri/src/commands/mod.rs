@@ -25,7 +25,7 @@ mod tests {
     use crate::infrastructure::path_service::AppPaths;
     use crate::models::backup::BackupFileName;
     use crate::models::health::HealthLevel;
-    use crate::models::provider::CreateProviderInput;
+    use crate::models::provider::{CreateProviderInput, ReorderProvidersInput};
     use crate::models::settings::Settings;
     use crate::services::autostart_service::{AutostartBackend, AutostartService};
     use crate::services::self_check_service::{CodexCommandProbe, CodexProbeResult};
@@ -111,6 +111,30 @@ mod tests {
         assert!(!json.contains("test-key-a-not-real"));
         assert!(!json.contains("test-key-b-not-real"));
         assert!(!json.contains("\"apiKey\":"));
+    }
+
+    #[tokio::test]
+    async fn reorder_provider_command_returns_safe_success_and_order() {
+        let (_directory, state) = create_state();
+        let current = state.provider_service.list_providers().unwrap();
+        let result = provider_commands::reorder_providers_inner(
+            &state,
+            ReorderProvidersInput {
+                provider_ids: vec!["provider-b".into(), "provider-a".into()],
+                expected_files: current.fingerprints,
+            },
+        )
+        .await;
+
+        assert!(result.success);
+        let ids = result
+            .data
+            .unwrap()
+            .providers
+            .into_iter()
+            .map(|provider| provider.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["provider-b", "provider-a"]);
     }
 
     #[tokio::test]

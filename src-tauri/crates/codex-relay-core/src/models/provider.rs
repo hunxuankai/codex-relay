@@ -272,6 +272,13 @@ pub struct UpdateProviderPreferenceInput {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReorderProvidersInput {
+    pub provider_ids: Vec<String>,
+    pub expected_files: FileSetFingerprint,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderMutationOutcome {
     pub providers: Vec<ProviderProfile>,
     pub message: String,

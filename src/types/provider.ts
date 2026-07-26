@@ -150,6 +150,11 @@ export interface UpdateProviderPreferenceInput {
   expectedFiles: FileSetFingerprint
 }
 
+export interface ReorderProvidersInput {
+  providerIds: string[]
+  expectedFiles: FileSetFingerprint
+}
+
 export interface ProviderMutationOutcome {
   providers: ProviderProfile[]
   message: string

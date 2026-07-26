@@ -149,6 +149,12 @@ pub struct ProviderPrivatePreference {
 pub struct ProviderPreferenceStore {
     pub version: u32,
     pub providers: BTreeMap<String, ProviderPrivatePreference>,
+    #[serde(
+        default,
+        rename = "providerOrder",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub provider_order: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -173,6 +179,7 @@ impl Default for ProviderPreferenceStore {
         Self {
             version: PROVIDER_PREFERENCE_VERSION,
             providers: BTreeMap::new(),
+            provider_order: Vec::new(),
         }
     }
 }
@@ -406,6 +413,7 @@ fn parse_legacy_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, App
         store: ProviderPreferenceStore {
             version: PROVIDER_PREFERENCE_VERSION,
             providers,
+            provider_order: Vec::new(),
         },
         needs_upgrade: true,
     })
@@ -429,6 +437,17 @@ fn normalize_store(
         }
         if let Some(model_preference) = &preference.model_preference {
             validate_preference(model_preference)?;
+        }
+    }
+    let mut order_ids = BTreeSet::new();
+    for provider_id in &store.provider_order {
+        validate_provider_store_id(provider_id)?;
+        if !order_ids.insert(provider_id) {
+            return Err(AppError::new(
+                "INVALID_PROVIDER_PREFERENCES",
+                "provider-preferences.json 的 Provider 排序包含重复 ID。",
+                "provider order contains duplicate ids",
+            ));
         }
     }
     Ok(store)
@@ -569,6 +588,41 @@ mod tests {
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("\"version\": 2"));
         assert!(text.ends_with('\n'));
+    }
+
+    #[test]
+    fn provider_order_is_optional_for_legacy_v2_and_round_trips() {
+        let legacy_v2 = br#"{"version":2,"providers":{}}"#;
+        let loaded = parse_store(legacy_v2).unwrap();
+        assert!(loaded.store.provider_order.is_empty());
+
+        let mut store = loaded.store;
+        store.provider_order = vec!["provider-b".into(), "provider-a".into()];
+        let bytes = serialize_store(&store).unwrap();
+        let reparsed = parse_store(&bytes).unwrap();
+
+        assert_eq!(reparsed.store.provider_order, ["provider-b", "provider-a"]);
+        assert!(
+            String::from_utf8(bytes)
+                .unwrap()
+                .contains("\"providerOrder\"")
+        );
+    }
+
+    #[test]
+    fn provider_order_rejects_invalid_or_duplicate_ids() {
+        for order in [
+            r#"["provider-a", "provider-a"]"#,
+            r#"["Provider-A"]"#,
+            r#"["provider/a"]"#,
+        ] {
+            let source = format!(r#"{{"version":2,"providers":{{}},"providerOrder":{order}}}"#);
+            let error = parse_store(source.as_bytes()).unwrap_err();
+            assert!(matches!(
+                error.code(),
+                "INVALID_PROVIDER_PREFERENCES" | "INVALID_PROVIDER_ID"
+            ));
+        }
     }
 
     #[test]

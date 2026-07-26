@@ -107,6 +107,7 @@ function controller() {
     successMessage,
     refresh: vi.fn(),
     create,
+    reorder: vi.fn(),
     update,
     saveBaseUrls: vi.fn().mockResolvedValue({ providers: [], message: '地址已保存。' }),
     selectBaseUrl: vi.fn().mockResolvedValue({ providers: [], message: '地址已切换。' }),
@@ -212,6 +213,20 @@ describe('ProvidersView', () => {
 
     expect(wrapper.find('[aria-label="新增 Provider"]').exists()).toBe(true)
     expect(wrapper.find('[name="provider-id"]').exists()).toBe(true)
+  })
+
+  it('forwards Provider list ordering to the composable', async () => {
+    const state = controller()
+    mockUseProviders.mockReturnValue(state)
+    const wrapper = mount(ProvidersView)
+
+    wrapper.getComponent({ name: 'ProviderList' }).vm.$emit(
+      'reorder',
+      ['provider-b', 'provider-a'],
+    )
+    await nextTick()
+
+    expect(state.reorder).toHaveBeenCalledWith(['provider-b', 'provider-a'])
   })
 
   it('reports onboarding create cancellation without completing setup', async () => {

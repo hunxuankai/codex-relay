@@ -13,6 +13,7 @@ import type {
   ProviderApiKeyManagementState,
   ProviderListState,
   ProviderMutationOutcome,
+  ReorderProvidersInput,
   SaveProviderApiKeysInput,
   SaveProviderBaseUrlsInput,
   SelectProviderApiKeyInput,
@@ -63,6 +64,12 @@ function subscribe<T>(eventName: string, handler: (payload: T) => void): Promise
 
 export function listProviders(): Promise<ProviderListState> {
   return call('list_providers')
+}
+
+export function reorderProviders(
+  input: ReorderProvidersInput,
+): Promise<ProviderMutationOutcome> {
+  return call('reorder_providers', { input })
 }
 
 export function getProviderApiKeysForManagement(

@@ -254,6 +254,7 @@ watch(apiKeyManagerProvider, (provider) => {
       @edit="openEdit"
       @use="providerState.switchTo"
       @delete="requestDelete"
+      @reorder="providerState.reorder"
     />
 
     <section class="provider-detail" aria-label="Provider 详情">

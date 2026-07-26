@@ -15,6 +15,7 @@ pub enum TransactionOperation {
     SaveProviderApiKeys,
     SelectProviderApiKey,
     ImportCurrentApiKey,
+    ReorderProviders,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

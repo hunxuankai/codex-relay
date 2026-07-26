@@ -12,6 +12,7 @@ import type {
   ProviderApiKeyManagementState,
   ProviderListState,
   ProviderMutationOutcome,
+  ReorderProvidersInput,
   SaveProviderApiKeysInput,
   SaveProviderBaseUrlsInput,
   SelectProviderApiKeyInput,
@@ -37,6 +38,7 @@ import {
   openBackupFile,
   openCodexDirectory,
   restoreBackup,
+  reorderProviders,
   runCriticalSelfCheck,
   runExtendedSelfCheck,
   saveProviderApiKeys,
@@ -325,6 +327,18 @@ describe('Tauri service boundary', () => {
     })
     expect(JSON.stringify(error)).not.toContain('stack')
     expect(JSON.stringify(error)).not.toContain('test-key')
+  })
+
+  it('wraps Provider reorder input with the exact command name', async () => {
+    invokeMock.mockResolvedValueOnce(success(mutation))
+    const input: ReorderProvidersInput = {
+      providerIds: ['provider-b', 'provider-a'],
+      expectedFiles: fingerprints,
+    }
+
+    await reorderProviders(input)
+
+    expect(invokeMock).toHaveBeenCalledWith('reorder_providers', { input })
   })
 
   it('subscribes to typed Provider refresh events', async () => {
