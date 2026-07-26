@@ -79,6 +79,11 @@
 - 良好：正式 Release 公开后，清理工作流只保留 `releases/latest` 对应的 Release/tag，并在删除失败时以失败状态结束；旧安装客户端仍通过 Latest 清单发现当前版本。
 - 错误：在基础配置开启 `createUpdaterArtifacts`，导致每次本地构建都要求私钥。
 - 错误：在 Draft 构建阶段或未校验 `releases/latest` 时删除旧 Release/tag，造成客户端暂时失去更新清单。
+- 错误：在清理脚本中使用 `jq '.draft // true'` 或 `jq '.prerelease // true'`；jq 的 `//`
+  会把合法的 `false` 当作缺失值，导致正式 Latest 被误判为不可保留并让清理提前失败。
+- 正确：对 GitHub API 的布尔字段使用 `jq '.draft | tostring'` 与
+  `jq '.prerelease | tostring'`，再严格比较字符串 `"false"`；字段缺失时输出 `"null"`
+  并安全失败。
 - 错误：只用浏览器打开或普通 GET 检查 GitHub API asset URL，看到 JSON 后直接替换已发布资产或判断 Release 损坏。
 - 错误：把私钥内容、公钥对应密码或 GitHub Token 写入仓库、任务材料、日志或命令行参数。
 - 错误：发布后替换同一版本的二进制或 `.sig`；修复必须使用新的更高 SemVer。
