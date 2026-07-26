@@ -227,12 +227,13 @@ def _codex_mode_banner(config: dict) -> str:
     """Emit a `<codex-mode>` banner for the additionalContext payload.
 
     Reads `codex.dispatch_mode` from .trellis/config.yaml; defaults to
-    `inline` when missing or invalid because Codex sub-agents run with
-    `fork_turns="none"` isolation and can't inherit the parent session's
-    task context. The banner makes the active mode explicit to Codex AI
-    per turn, complementing the workflow-state body which is per-status.
-    Mode tells AI which dispatch protocol to follow; workflow-state tells
-    AI what step it's at.
+    `inline` when missing or invalid so the main session owns core
+    implementation/checking and lifecycle transitions. Sub-agent conversation
+    inheritance varies by host version, so Trellis uses the active task path and
+    persisted task materials as the stable context contract. The banner makes
+    the active mode explicit to Codex AI per turn, complementing the
+    workflow-state body which is per-status. Mode tells AI which core dispatch
+    protocol to follow; workflow-state tells AI what step it's at.
     """
     mode = "inline"
     if isinstance(config, dict):
@@ -259,11 +260,12 @@ def resolve_breadcrumb_key(
 ) -> str:
     """Pick the breadcrumb tag key based on Codex dispatch_mode.
 
-    Codex defaults to ``inline`` because sub-agents run with ``fork_turns="none"``
-    isolation and can't inherit the parent session's task context. Users can
-    opt into ``codex.dispatch_mode: sub-agent`` in ``.trellis/config.yaml``
-    to use the parallel ``<status>-inline`` tag → ``<status>`` flip. Invalid
-    or missing values fall back to inline.
+    Codex defaults to ``inline`` so the main session owns core implementation,
+    checking, final verification, and lifecycle transitions. Sub-agent context
+    inheritance is host-version-specific; task paths and persisted materials are
+    the stable contract. Users can opt into ``codex.dispatch_mode: sub-agent``
+    in ``.trellis/config.yaml`` to use the parallel ``<status>-inline`` tag →
+    ``<status>`` flip. Invalid or missing values fall back to inline.
 
     Non-codex platforms return the plain status unchanged.
     """

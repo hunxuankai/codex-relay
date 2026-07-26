@@ -29,7 +29,35 @@ codex:
   dispatch_mode: inline
 ```
 
-不启用 channel 或 sub-agent dispatch。Codex 在主会话中读取任务和相关规范、直接实施和检查。
+`inline` 只规定核心 Implement/Check 由主会话直接执行，不等于禁止所有辅助子 Agent。
+主 Agent 仍拥有用户沟通、任务状态、TDD 顺序、最终修复与验证、规范更新、提交和归档。
+
+满足以下条件时，主 Agent 应考虑派发受控辅助子 Agent：
+
+- 存在两个或更多可以独立完成的读多写少分支，例如规范/代码探索、测试或日志分析、
+  文档核验和只读审查；
+- 派发能够显著减少主线程的中间输出污染，或能并行取得相互独立的证据；
+- Prompt 首行包含 `Active task: <task path>`，依赖的用户决定已经写入任务材料，
+  Agent 能从 PRD、设计、计划、JSONL、规范或研究文件恢复上下文；
+- Agent 默认只读，或只写当前任务 `research/` 下的独立文件；不得并发修改重叠文件。
+
+辅助 Agent 的结论不能替代主 Agent 的核验。核心代码实施、问题修复和 Trellis check
+继续 Inline；写入型 Implement/Check 子 Agent、Channel Worker 或并行写入只有在用户明确
+要求且另有隔离与验证方案时才启用。
+
+子 Agent 是否继承父会话历史属于宿主运行时实现细节。项目长期契约只依赖持久化任务
+材料和显式活动任务路径，不把某个固定 `fork_turns` 值视为跨版本保证。
+
+### 派发示例
+
+正确：一个 Agent 只读检查安全边界，另一个 Agent 分析测试日志；两者收到相同的活动任务
+路径，返回带文件证据的报告，主 Agent 逐项验证后再修复。
+
+正确：Research Agent 只把一个独立主题写入当前任务 `research/<topic>.md`，不修改代码、
+规范、平台配置或 Git。
+
+错误：Inline 模式把核心实现或 Trellis check 整体交给子 Agent，或让多个 Agent 同时修改
+同一批文件，然后直接依据摘要宣布完成。
 
 ## 保留的 Superpowers
 

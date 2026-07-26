@@ -87,9 +87,8 @@ developer_instructions = """
 
 # 对此子 Agent 完全禁用 Codex 协作工具。multi_agent 和 multi_agent_v2 都关闭时，
 # `spawn_agent` / `wait_agent` / `list_agents` / `close_agent` 完全不会注册到
-# 子 Agent 工具列表中，模型实际上无法调用它们。这从结构上修复了父级通过 Codex
-# 默认 `fork_turns="all"` 继承其对话记录时发生的 wait_agent 自死锁
-#（#240 后续、#241）。
+# 子 Agent 工具列表中，模型实际上无法调用它们。这从结构上阻止递归派发和等待循环；
+# 不依赖宿主是否继承父会话历史。活动任务路径和任务文件是本 Agent 的稳定上下文来源。
 [features]
 multi_agent = false
 

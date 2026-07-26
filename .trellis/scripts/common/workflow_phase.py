@@ -150,10 +150,11 @@ def resolve_effective_platform(platform: str, config: dict) -> str:
     namespaced name (e.g. ``[codex-sub-agent, ...]`` or ``[codex-inline, Kilo,
     Antigravity, Devin]``).
 
-    Default is ``inline`` because Codex sub-agents run with ``fork_turns="none"``
-    isolation and can't inherit the parent session's task context — inline
-    keeps the main agent in charge so context isn't lost. Invalid / missing
-    values also fall back to inline.
+    Default is ``inline`` so the main agent owns core implementation, checking,
+    final verification, and lifecycle transitions. Sub-agent conversation
+    inheritance is host-version-specific; Trellis relies on the active task path
+    and persisted task materials instead. Invalid / missing values also fall
+    back to inline.
 
     Other platforms are returned unchanged.
     """

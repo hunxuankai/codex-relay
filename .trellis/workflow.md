@@ -236,6 +236,7 @@ TDD 规划门禁：在 `task.py start` 前记录可观察行为切片、被测�
 TDD 规划门禁：在 `task.py start` 前记录可观察行为切片、被测公开接口和 mock 边界。
 多交付物范围：考虑使用父任务和可独立验证的子任务；依赖关系必须写入子任务材料，不能由任务树位置暗示。
 Inline 模式：跳过 JSONL 整理；Phase 2 通过 `trellis-before-dev` 读取材料/规范。
+规划、用户决策和任务状态始终由主会话负责；辅助研究只有在存在两个或更多独立、读多写少分支时才考虑派发。
 [/workflow-state:planning-inline]
 
 ### Phase 2：实施
@@ -249,7 +250,7 @@ Inline 模式：跳过 JSONL 整理；Phase 2 通过 `trellis-before-dev` 读取
      因此正文必须覆盖从实施到提交的每个必需步骤，包括 Phase 3.3 规范更新和
      Phase 3.4 提交。 -->
 
-子 Agent 派发协议适用于所有平台和所有子 Agent，包括 class-2 Codex/Copilot/Gemini/Qoder 与 `trellis-research`：每个派发 prompt 都先以 `Active task: <task path from task.py current>` 开头，再写角色专属指令。
+子 Agent 派发协议适用于所有平台和所有子 Agent，包括 class-2 Codex/Copilot/Gemini/Qoder 与 `trellis-research`：每个派发 prompt 都先以 `Active task: <task path from task.py current>` 开头，再写角色专属指令。依赖的用户决定必须先写入任务材料；上下文继承方式属于宿主实现细节，不能替代文件契约。
 
 [workflow-state:in_progress]
 先确认当前请求属于活动任务；若不相关，保持旧任务原状，并按请求分类决定直接处理或创建新任务。
@@ -267,6 +268,7 @@ Inline 模式：跳过 JSONL 整理；Phase 2 通过 `trellis-before-dev` 读取
 流程：`trellis-before-dev` -> 选择一个行为 -> 红色测试 -> 绿色实现 -> 保持绿色时重构 -> `trellis-check` -> 验证 -> `trellis-update-spec` -> 提交（Phase 3.4）-> `/trellis:finish-work`。
 Inline 模式下不要派发 implement/check 子 Agent。
 上下文读取顺序：`prd.md` -> 存在时的 `design.md` -> 存在时的 `implement.md`，再加上 Skill 加载的相关规范/研究材料。
+当存在两个或更多独立、读多写少的研究、代码探索、测试/日志分析或只读审查分支时，可以派发受控辅助子 Agent；它们不得并发修改重叠文件，也不能替代主会话的修复、Trellis check、最终验证、规范更新、提交或归档。
 [/workflow-state:in_progress-inline]
 
 ### Phase 3：完成
@@ -408,13 +410,20 @@ Brainstorm Skill 会指导你：
 
 [/Claude Code, Cursor, OpenCode, codex-sub-agent, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi]
 
-[codex-inline, Kilo, Antigravity, Devin]
+[codex-inline]
 
-直接在主会话中研究，并将发现写入 `{TASK_DIR}/research/`。对于 `codex-inline`，
-这可以避开 `fork_turns="none"` 隔离；该隔离会阻止 `trellis-research` 子 Agent
-解析活动任务路径。
+单个研究主题默认由主会话完成，并将发现写入 `{TASK_DIR}/research/`。存在两个或更多
+相互独立、读多写少的主题，或中间输出会明显污染主线程时，可以派发受控 Research/
+Explorer 子 Agent。派发 prompt 必须以 `Active task: <task path>` 开头；每个主题写入
+独立的 research 文件或返回可复核的结构化摘要。不要依赖某个固定的父会话继承行为。
 
-[/codex-inline, Kilo, Antigravity, Devin]
+[/codex-inline]
+
+[Kilo, Antigravity, Devin]
+
+直接在主会话中研究，并将发现写入 `{TASK_DIR}/research/`。
+
+[/Kilo, Antigravity, Devin]
 
 **研究材料约定**：
 - 每个研究主题一个文件，例如 `research/auth-library-comparison.md`
@@ -483,11 +492,19 @@ python ./.trellis/scripts/task.py add-context "$TASK_DIR" check "<path>" "<reaso
 
 [/Claude Code, Cursor, OpenCode, codex-sub-agent, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi]
 
-[codex-inline, Kilo, Antigravity, Devin]
+[codex-inline]
+
+核心 Implement/Check 跳过本步骤，Phase 2 由 `trellis-before-dev` Skill 直接加载上下文。
+若规划期间决定派发辅助子 Agent，主会话必须先把依赖的用户决定写入任务材料，并在
+派发 prompt 中显式提供活动任务路径和所需规范/研究文件。
+
+[/codex-inline]
+
+[Kilo, Antigravity, Devin]
 
 跳过本步骤。Phase 2 由 `trellis-before-dev` Skill 直接加载上下文。
 
-[/codex-inline, Kilo, Antigravity, Devin]
+[/Kilo, Antigravity, Devin]
 
 #### 1.4 激活任务 `[required · once]`
 
@@ -605,6 +622,13 @@ Codex 子 Agent 定义自动处理上下文加载要求：
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
+[codex-inline]
+
+辅助子 Agent 只用于相互独立的研究、探索、测试/日志分析或只读审查；核心实现与修复
+仍由主会话串行完成。主会话必须验证每项辅助结论后才能据此修改代码或报告完成。
+
+[/codex-inline]
+
 #### 2.2 质量检查 `[required · repeatable]`
 
 [Claude Code, Cursor, OpenCode, codex-sub-agent, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi]
@@ -638,6 +662,13 @@ Check Agent 的工作：
 如果发现问题 -> 修复 -> 重新检查，直到变绿。
 
 [/codex-inline, Kilo, Antigravity, Devin]
+
+[codex-inline]
+
+可以使用受控只读 Reviewer 补充独立视角，但其报告不能替代本步骤；主会话必须验证每个
+发现、完成修复并重新运行相应检查。
+
+[/codex-inline]
 
 **最终检查（Phase 3.4 提交前）**：任务最后一次 2.2 必须覆盖全范围，不能只检查
 最新实施批次。使用 `python ./.trellis/scripts/get_context.py --mode packages`

@@ -94,10 +94,12 @@ channel:
 #-------------------------------------------------------------------------------
 # Codex（派发行为）
 #-------------------------------------------------------------------------------
-# Codex 专属开关，其他平台忽略。默认值（"inline"）让 Codex 主 Agent 直接编辑
-# 代码，因为 Codex 子 Agent 使用 `fork_turns="none"` 隔离运行，无法继承父会话
-# 的任务上下文。设置为 "sub-agent" 可选择旧版派发模型（主 Agent 启动
-# trellis-implement / trellis-check / trellis-research 子 Agent）。
+# Codex 专属开关，其他平台忽略。默认值（"inline"）让主 Agent 直接承担核心
+# Implement/Check，并继续拥有任务状态、最终验证和收尾。子 Agent 的父会话继承方式由
+# Codex 宿主版本决定；无论是否继承历史，都必须通过 Active task 和持久化任务材料加载
+# 上下文。设置为 "sub-agent" 可选择完整 Trellis 派发模型（主 Agent 启动
+# trellis-implement / trellis-check / trellis-research 子 Agent）。Inline 模式仍可按项目
+# 工作流使用受控的研究、探索、测试/日志分析或只读审查辅助 Agent。
 #
 codex:
   dispatch_mode: inline
