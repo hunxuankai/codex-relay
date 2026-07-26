@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **活动文件**：`journal-1.md`
-- **会话总数**：25
+- **会话总数**：26
 - **最近活动**：2026-07-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | 文件 | 行数 | 状态 |
 |------|-------|--------|
-| `journal-1.md` | ~852 | 活动 |
+| `journal-1.md` | ~889 | 活动 |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | 日期 | 标题 | 提交 | 分支 |
 |---|------|-------|---------|--------|
+| 26 | 2026-07-26 | GitHub Releases 仅保留最新版本下载 | `0888bcc`, `1746b5b`, `eaca9fb`, `8ea4d5c`, `0fec7e7` | `master` |
 | 25 | 2026-07-26 | 发布 Codex Relay v0.2.1 | `b05991c`, `3207b5a`, `7b3d5f2` | `master` |
 | 24 | 2026-07-26 | 完成 v0.2.0 发布与失败复盘 | `febc69d`, `59611dd` | `master` |
 | 23 | 2026-07-25 | 完成 Provider API 请求与响应 trace | `4f16b11`, `5ad14da` | `master` |
