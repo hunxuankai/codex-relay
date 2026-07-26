@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **活动文件**：`journal-1.md`
-- **会话总数**：27
+- **会话总数**：28
 - **最近活动**：2026-07-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | 文件 | 行数 | 状态 |
 |------|-------|--------|
-| `journal-1.md` | ~924 | 活动 |
+| `journal-1.md` | ~960 | 活动 |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | 日期 | 标题 | 提交 | 分支 |
 |---|------|-------|---------|--------|
+| 28 | 2026-07-26 | 完善 Provider UI 交互 | `995d96f`, `da14243`, `743a1f5`, `8092d83` | `master` |
 | 27 | 2026-07-26 | 优化 API 测试结果交互与分层验证规则 | `ef6a7ea`, `ad66b67`, `12d74f1` | `master` |
 | 26 | 2026-07-26 | GitHub Releases 仅保留最新版本下载 | `0888bcc`, `1746b5b`, `eaca9fb`, `8ea4d5c`, `0fec7e7` | `master` |
 | 25 | 2026-07-26 | 发布 Codex Relay v0.2.1 | `b05991c`, `3207b5a`, `7b3d5f2` | `master` |
