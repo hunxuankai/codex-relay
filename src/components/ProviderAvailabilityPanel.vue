@@ -31,63 +31,55 @@ const emit = defineEmits<{
 
 const skipProxy = shallowRef(true)
 const traceDialogOpen = shallowRef(false)
-const traceDialogPending = shallowRef(false)
-const apiTrace = computed(() => props.apiResult?.trace ?? null)
+const traceDialogLoading = shallowRef(false)
+const apiTrace = computed(() =>
+  props.apiResult?.status === 'cancelled' ? null : props.apiResult?.trace ?? null,
+)
+const traceDialogMounted = computed(
+  () =>
+    traceDialogOpen.value ||
+    traceDialogLoading.value ||
+    props.runningKind === 'api' ||
+    apiTrace.value !== null,
+)
 
 watch(
   () => props.provider.id,
   () => {
     traceDialogOpen.value = false
-    traceDialogPending.value = false
+    traceDialogLoading.value = false
   },
 )
 
 watch(
-  () => props.apiResult,
-  (result, previousResult) => {
-    if (traceDialogPending.value) {
-      if (result?.trace && result.status !== 'cancelled') {
-        traceDialogPending.value = false
-        traceDialogOpen.value = true
-      } else if (result && result !== previousResult) {
-        traceDialogPending.value = false
-      }
+  [() => props.apiResult, () => props.runningKind],
+  ([result, runningKind]) => {
+    if (result) {
+      traceDialogLoading.value = false
+      if (!result.trace || result.status === 'cancelled') traceDialogOpen.value = false
       return
     }
-
-    if (result !== previousResult) traceDialogOpen.value = false
-  },
-)
-
-watch(
-  () => props.runningKind,
-  (runningKind, previousRunningKind) => {
-    if (
-      traceDialogPending.value &&
-      previousRunningKind === 'api' &&
-      runningKind === null &&
-      !apiTrace.value
-    ) {
-      traceDialogPending.value = false
+    if (runningKind !== 'api') {
+      traceDialogLoading.value = false
+      traceDialogOpen.value = false
     }
   },
 )
 
 function openTraceDialog() {
-  if (apiTrace.value) {
-    traceDialogPending.value = false
+  if (apiTrace.value || props.runningKind === 'api') {
     traceDialogOpen.value = true
+    if (apiTrace.value) traceDialogLoading.value = false
   }
 }
 
 function closeTraceDialog() {
   traceDialogOpen.value = false
-  traceDialogPending.value = false
 }
 
 function startApiTest() {
-  traceDialogOpen.value = false
-  traceDialogPending.value = true
+  traceDialogOpen.value = true
+  traceDialogLoading.value = true
   emit('testApi', !skipProxy.value)
 }
 
@@ -216,18 +208,18 @@ function blockedReason(
               <span>{{ formatTestedAt(apiResult.testedAt) }}</span>
               <span v-if="apiResult.httpStatus !== null">HTTP {{ apiResult.httpStatus }}</span>
             </div>
-            <ElButton
-              v-if="apiResult.trace"
-              type="primary"
-              plain
-              size="small"
-              native-type="button"
-              :aria-label="`查看 ${provider.name} 的 API 请求与响应`"
-              @click="openTraceDialog"
-            >
-              查看请求与响应
-            </ElButton>
           </div>
+          <ElButton
+            v-if="runningKind === 'api' || (apiResult?.trace && apiResult.status !== 'cancelled')"
+            type="primary"
+            plain
+            size="small"
+            native-type="button"
+            :aria-label="`查看 ${provider.name} 的 API 请求与响应`"
+            @click="openTraceDialog"
+          >
+            查看请求与响应
+          </ElButton>
         </div>
         <ElButton
           v-if="runningKind === 'api'"
@@ -310,11 +302,12 @@ function blockedReason(
   </section>
 
   <ProviderAvailabilityTraceDialog
-    v-if="apiTrace"
+    v-if="traceDialogMounted"
     :open="traceDialogOpen"
     :provider-name="provider.name"
     :trace="apiTrace"
     :duration-ms="apiResult?.durationMs ?? 0"
+    :loading="traceDialogOpen && traceDialogLoading"
     @close="closeTraceDialog"
   />
 </template>

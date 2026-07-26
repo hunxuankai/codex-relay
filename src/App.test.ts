@@ -211,6 +211,7 @@ describe('App', () => {
     await flushPromises()
 
     expect(state.healthState.runExtended).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.app-header').text()).toContain('Codex Relay v0.1.2')
     expect(wrapper.get('[aria-label="主导航"]').text()).toContain('Providers')
     expect(wrapper.get('[aria-label="主导航"]').text()).toContain('自检')
     expect(wrapper.get('[aria-label="主导航"]').text()).toContain('备份')
@@ -240,6 +241,20 @@ describe('App', () => {
     expect(wrapper.get('[data-view="about"]').text()).toContain('C:\\safe-test\\codex')
     await wrapper.get('[aria-label="模拟打开配置目录"]').trigger('click')
     expect(state.settingsState.openDirectory).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a usable title when the runtime version cannot be read', async () => {
+    const state = controllers()
+    mocks.getCurrentVersion.mockRejectedValueOnce(new Error('version unavailable'))
+    mocks.useProviders.mockReturnValue(state.providerState)
+    mocks.useHealth.mockReturnValue(state.healthState)
+    mocks.useSettings.mockReturnValue(state.settingsState)
+
+    const wrapper = mount(App, { global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.get('.app-header').text()).toContain('Codex Relay')
+    expect(wrapper.get('.app-header').text()).not.toContain('Codex Relay v')
   })
 
   it('checks on startup and hourly with the latest proxy, then opens the shared update in settings', async () => {

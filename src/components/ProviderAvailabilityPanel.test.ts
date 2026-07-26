@@ -196,6 +196,56 @@ describe('ProviderAvailabilityPanel', () => {
     expect(document.body.textContent).toContain('"status": "completed"')
   })
 
+  it('reopens an existing trace without starting another API test', async () => {
+    const wrapper = mount(ProviderAvailabilityPanel, {
+      attachTo: document.body,
+      props: {
+        provider,
+        apiResult: result('api', 'passed', { trace: apiTrace }),
+        codexResult: null,
+        runningKind: null,
+        disabled: false,
+        cancelling: false,
+      },
+    })
+
+    const openTrace = wrapper.get('[aria-label="查看 Provider A 的 API 请求与响应"]')
+    await openTrace.trigger('click')
+    const dialog = wrapper.findComponent({ name: 'ProviderAvailabilityTraceDialog' })
+    expect(dialog.props('open')).toBe(true)
+
+    dialog.vm.$emit('close')
+    await flushPromises()
+    expect(dialog.props('open')).toBe(false)
+
+    await openTrace.trigger('click')
+    expect(dialog.props('open')).toBe(true)
+    expect(wrapper.emitted('testApi')).toBeUndefined()
+  })
+
+  it('opens the request and response dialog immediately with loading sections', async () => {
+    const wrapper = mount(ProviderAvailabilityPanel, {
+      attachTo: document.body,
+      props: {
+        provider,
+        apiResult: null,
+        codexResult: null,
+        runningKind: null,
+        disabled: false,
+        cancelling: false,
+      },
+    })
+
+    await wrapper.get('[aria-label="测试 Provider A 的 API 可用性"]').trigger('click')
+
+    const dialog = wrapper.findComponent({ name: 'ProviderAvailabilityTraceDialog' })
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.props('open')).toBe(true)
+    expect(document.body.textContent).toContain('正在生成请求')
+    expect(document.body.textContent).toContain('正在等待响应')
+    wrapper.unmount()
+  })
+
   it('clears the old trace and automatically opens the new trace after an API test', async () => {
     const newTrace: ProviderAvailabilityTrace = {
       request: {
@@ -285,8 +335,7 @@ describe('ProviderAvailabilityPanel', () => {
     await flushPromises()
 
     const dialog = wrapper.findComponent({ name: 'ProviderAvailabilityTraceDialog' })
-    expect(dialog.exists()).toBe(true)
-    expect(dialog.props('open')).toBe(false)
+    expect(dialog.exists()).toBe(false)
   })
 
   it('drops a pending auto-open when the Provider changes', async () => {

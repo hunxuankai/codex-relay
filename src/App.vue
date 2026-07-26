@@ -80,6 +80,9 @@ const operationText = computed(
     healthState.error.value?.message ??
     '暂无操作',
 )
+const appTitle = computed(() =>
+  appVersion.value ? `Codex Relay v${appVersion.value}` : 'Codex Relay',
+)
 
 async function completeOnboarding() {
   const settings = settingsState.settings.value
@@ -224,7 +227,7 @@ onUnmounted(() => {
     <div v-else class="app-shell">
     <header class="app-header">
       <div>
-        <p class="eyebrow">Codex Relay</p>
+        <p class="eyebrow">{{ appTitle }}</p>
         <h1>Provider 控制台</h1>
       </div>
       <nav class="app-nav" aria-label="主导航">

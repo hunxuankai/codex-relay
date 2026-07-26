@@ -18,6 +18,26 @@ const trace: ProviderAvailabilityTrace = {
 }
 
 describe('ProviderAvailabilityTraceDialog', () => {
+  it('shows independent loading states before a trace exists', async () => {
+    const wrapper = mount(ProviderAvailabilityTraceDialog, {
+      attachTo: document.body,
+      props: {
+        open: true,
+        providerName: 'Provider A',
+        trace: null,
+        durationMs: 0,
+        loading: true,
+      },
+    })
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('正在生成请求')
+    expect(document.body.textContent).toContain('正在等待响应')
+    expect(wrapper.get('[aria-labelledby="provider-trace-request-title"]').attributes('aria-busy')).toBe('true')
+    expect(wrapper.get('[aria-labelledby="provider-trace-response-title"]').attributes('aria-busy')).toBe('true')
+    wrapper.unmount()
+  })
+
   it('shows request, response, status and duration without rendering headers', async () => {
     const wrapper = mount(ProviderAvailabilityTraceDialog, {
       attachTo: document.body,
@@ -89,6 +109,7 @@ describe('ProviderAvailabilityTraceDialog', () => {
 
     const dialog = escapeWrapper.getComponent(ElDialog)
     expect(dialog.props('closeOnPressEscape')).toBe(true)
+    expect(dialog.props('closeOnClickModal')).toBe(true)
     dialog.vm.$emit('update:modelValue', false)
     expect(escapeWrapper.emitted('close')).toEqual([[]])
     escapeWrapper.unmount()
