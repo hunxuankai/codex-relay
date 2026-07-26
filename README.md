@@ -239,7 +239,7 @@ Codex Provider 配置的主要数据源。每个 Provider 的实际 `base_url` �
 
 ### `provider-preferences.json`
 
-位于 `%LOCALAPPDATA%\CodexRelay\provider-preferences.json`。版本 2 保存每个 Provider 有序的多个命名 Base URL、稳定条目 ID、可用模型、当前偏好模型以及每个模型独立的 `model_reasoning_effort`。它不保存第二份 URL 选择游标；当前选择由 `config.toml.base_url` 与命名列表匹配得到。模型目录随软件版本发布，不支持在线更新；该文件不是 Codex 官方配置，不会写入 `[model_providers.<id>]`。版本 1 只读兼容，在下一次成功用户事务后升级。
+位于 `%LOCALAPPDATA%\CodexRelay\provider-preferences.json`。版本 2 保存 Provider 列表显示顺序，以及每个 Provider 有序的多个命名 Base URL、稳定条目 ID、可用模型、当前偏好模型和逐模型 `model_reasoning_effort`。列表顺序是 Relay 私有界面偏好，不会重排或污染 Codex 官方 `config.toml`；未记录或外部新增的 Provider 按 `config.toml` 顺序追加。该文件不保存第二份 URL 选择游标；当前选择由 `config.toml.base_url` 与命名列表匹配得到。模型目录随软件版本发布，不支持在线更新。版本 1 只读兼容，在下一次成功用户事务后升级。
 
 ### 其他应用数据
 
@@ -269,6 +269,8 @@ Codex Provider 配置的主要数据源。每个 Provider 的实际 `base_url` �
 
 地址和密钥各自通过管理对话框批量新增、重命名、替换和删除，并在一次事务中统一保存。名称去除首尾空白后必填、同类大小写不敏感唯一，实际值也必须唯一；条目保持添加顺序且没有数量上限。当前选中项必须先切换才能删除，最后一项不能删除。
 
+左侧 Provider 列表可通过拖动手柄排序，也可聚焦手柄后使用上下方向键调整。排序放开后立即显示，并通过只修改 `provider-preferences.json` 的受保护事务跨刷新和重启保留；它不会切换当前 Provider，也不会改写 `config.toml`、`auth.json` 或 `providers.json`。
+
 点击 Base URL 只切换地址，点击 API Key 只切换密钥。当前 Provider 立即同步对应 `config.toml` 或 `auth.json` 并提示重启 Codex；非当前 Provider 只保存预选，不改变全局当前 Provider。应用非当前 Provider 时，其预选地址、密钥、模型和推理强度一起生效。外部未命名地址或密钥只展示状态，显式命名纳管前不能应用或测试。
 
 切换步骤包括：重新读取四个受管文件、验证目标偏好与密钥、检查外部修改指纹、创建统一备份、生成内存结果、写入临时文件、解析验证、替换正式文件、再次验证、刷新托盘与界面。成功提示包含“请重启 Codex 后生效”。
@@ -290,7 +292,7 @@ Provider 详情提供两种彼此独立的显式测试，结果只保存在本�
 - **API 可用性测试**：通过 Relay 网络边界向当前 Provider 发送一次无工具、非流式、最多 16 个输出 token 的最小 Responses 请求，确认 Base URL、Bearer 认证、当前偏好模型和 Responses 完成格式。它通常只产生少量 token 费用，不代表 Codex CLI 一定兼容。
 - **Codex 兼容性测试**：高级入口会先要求确认，然后在独立临时状态中启动受安全门禁的本机 Codex，向 Provider 发送一次正常 Codex 回合。它可能消耗更多 token、等待更久；不会修改当前 `config.toml` 或 `auth.json`。不支持的 Codex 版本、managed requirements 或工具能力漂移会在联系真实 Provider 前停止。
 - 两种测试都要求目标 Provider 的命名地址、命名密钥和模型偏好配置完整；测试使用各自当前选择，但成功、失败或取消都不会改变选择。测试期间只允许一个 Provider 测试，界面可取消正在运行的测试。
-- API 请求一旦构造完成，结果卡片会提供“查看请求与响应”详情：显示实际 `POST` 地址、请求 JSON、HTTP 状态和最多 256 KiB 的响应正文，超限时明确标记截断；未收到响应时仍可查看请求。详情不显示 Header、API Key 或代理地址，若响应意外回显当前密钥会在 Rust 边界移除。Codex 兼容性结果仍只显示安全摘要；两类结果都不会记录命令行或临时路径。
+- 点击 API 测试后“请求与响应”弹窗立即打开；请求和响应区域在测试过程中分别显示 loading，trace 返回后原位更新为实际 `POST` 地址、请求 JSON、HTTP 状态和最多 256 KiB 的响应正文，超限时明确标记截断。弹窗支持 Escape、点击遮罩和关闭按钮，关闭后可从结果卡片再次打开；未形成 trace 或取消时不会伪造请求/响应。详情不显示 Header、API Key 或代理地址，若响应意外回显当前密钥会在 Rust 边界移除。Codex 兼容性结果仍只显示安全摘要；两类结果都不会记录命令行或临时路径。
 
 ## 托盘、窗口与退出
 

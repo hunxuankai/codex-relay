@@ -10,12 +10,13 @@ Codex Relay 是面向 Windows 10/11、当前登录用户和个人可信计算机
 - 仅支持 `responses` Wire API；Provider ID 创建后不可修改。
 - 每个 Provider 可保存多个命名 Base URL 和多个命名 API Key，并在详情页独立选择；两组列表不配对。
 - 在 `providers.json` v2 保存命名密钥集合和密钥预选，在 `auth.json` 保存当前生效密钥。
-- 在 `provider-preferences.json` v2 保存命名 Base URL 集合、模型集合、当前偏好和逐模型推理强度；`config.toml.base_url` 与 Codex 顶层模型字段才是实际生效配置。
+- 在 `provider-preferences.json` v2 保存 Provider 列表顺序、命名 Base URL 集合、模型集合、当前偏好和逐模型推理强度；列表顺序只影响 Relay 展示，`config.toml.base_url` 与 Codex 顶层模型字段才是实际生效配置。
+- 左侧 Provider 列表支持拖动排序和聚焦手柄后的上下方向键排序；放开后立即展示，并通过受保护事务跨刷新和重启保留，不改变当前 Provider 或 Codex 官方配置。
 - 使用统一事务提供备份、冲突检测、原子替换、写后验证和失败回滚。
 - 支持关键/扩展自检、文件监控、系统托盘、单实例、当前用户开机启动和 Windows 通知。
 - 支持用户在设置页显式检查公开 GitHub Releases 更新，并在 Tauri 签名校验后启动 NSIS 更新。
 - 支持为 Codex Relay 自身网络请求配置无认证 HTTP/HTTPS 代理，并由用户显式测试或检测固定本机代理端口；Provider 详情提供用户显式触发的 API 可用性测试和 Codex 兼容性测试。验证区域默认“不使用代理”，用户仅在设置页“网络代理”已启用时才能取消该选项；两类测试随后共同使用已保存的 Relay 代理。普通 Codex CLI 请求不受影响。
-- Provider 测试结果只保存在当前前端会话中，不写入 Provider DTO、应用数据、日志或通知；配置指纹变化后旧结果失效。API 结果可携带同次请求生成的有界请求/响应 trace 供详情弹窗查看，Codex 结果仍只包含安全摘要；trace 不含 Header、API Key 或代理地址。
+- Provider 测试结果只保存在当前前端会话中，不写入 Provider DTO、应用数据、日志或通知；配置指纹变化后旧结果失效。点击 API 测试后详情弹窗立即打开并在请求/响应区域显示独立 loading，结果可携带同次请求生成的有界 trace 原位更新；弹窗支持 Escape、遮罩和关闭按钮关闭及结果入口再次打开。Codex 结果仍只包含安全摘要；trace 不含 Header、API Key 或代理地址。
 - 首次没有 Provider 时显示引导，不自动写入虚假 Provider。
 
 ## 明确非目标
@@ -27,7 +28,7 @@ Codex Relay 是面向 Windows 10/11、当前登录用户和个人可信计算机
 
 ## 数据与卸载契约
 
-- `config.toml` 是 Codex 官方 Provider/顶层选择和实际 Base URL 真相；`provider-preferences.json` 是 Relay 命名 URL 与模型偏好真相；`providers.json` 是命名密钥与密钥预选存储；`auth.json` 是当前生效认证。
+- `config.toml` 是 Codex 官方 Provider/顶层选择和实际 Base URL 真相；`provider-preferences.json` 是 Relay Provider 显示顺序、命名 URL 与模型偏好真相；`providers.json` 是命名密钥与密钥预选存储；`auth.json` 是当前生效认证。
 - 普通 Provider 列表只暴露命名 URL、密钥名称/状态和配置完整性，不得返回密钥值。完整密钥只在用户显式打开管理器后进入短生命周期前端状态。
 - 卸载器只移除程序和快捷方式，不删除 `.codex`、Codex Relay 应用数据、密钥、日志或备份。
 - 新鲜 NSIS 安装可以选择目录；已登记安装的升级固定原目录，不提供并存安装或自动跨盘迁移。需要更换位置时先卸载旧版，再重新安装。

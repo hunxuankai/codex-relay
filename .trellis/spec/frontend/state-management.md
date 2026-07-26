@@ -34,6 +34,17 @@ return {
 
 完整跨层契约见 [Provider 多命名地址与密钥契约](../project/provider-multi-credentials.md)。
 
+## Provider 列表排序状态契约
+
+- `ProviderList` 只负责拖动/方向键手势并发出完整 Provider ID 排列；不得直接访问 Tauri、
+  localStorage 或复制长期 Provider 列表。
+- `useProviders.reorder` 可在已加载指纹时同步做短期乐观投影，再通过 typed
+  `reorderProviders` mutation 持久化；失败且没有更新事件覆盖时恢复先前数组，并保留安全错误。
+- mutation 成功后仍从 `list_providers` 重新加载权威顺序；`providers-changed` 和请求序列规则
+  继续阻止晚刷新覆盖更新事件。
+- 排序 busy 与其他 Provider mutation 共用同一防重状态；排序不改变 `selectedProviderId`、
+  活动 Provider 或 Provider 内部 URL/Key 顺序。
+
 ## 事件处理
 
 - `providers-changed`：刷新 Provider 数据和选中状态。
@@ -81,9 +92,11 @@ API 结果的 `trace` 与结果作为一个对象保存和失效，不建立第�
 - 同一类测试重新启动时，`useProviderAvailability` 必须在确认没有其他活动测试后先清除该
   `providerId + kind` 的旧结果，再发起异步 command；另一类测试结果保持不变。活动测试期间的
   重复启动仍直接拒绝，不能先清结果造成用户可见闪烁。
-- API 面板的“自动打开详情”只是一次性局部 UI 意图：点击后关闭旧弹窗并等待新的带 `trace`
-  结果到达；无 `trace`、取消、Provider 切换、指纹失效或晚响应时必须消费/清除该意图，不能
-  显示旧请求或伪造请求响应。结果生命周期仍由 composable 管理，面板不得建立第二份结果 store。
+- API 面板的弹窗打开/loading 只是短生命周期局部 UI 状态：点击测试后立即清除旧详情并打开
+  弹窗，请求和响应区域在新结果到达前分别显示 loading；`trace` 到达后原位更新。用户关闭只
+  改变弹窗状态，不取消测试；运行中或结果卡片上的“查看请求与响应”可再次打开。无 `trace`、
+  取消、Provider 切换、指纹失效或晚响应时必须关闭/清除局部状态，不能显示旧请求或伪造请求
+  响应。结果生命周期仍由 composable 管理，面板不得建立第二份结果 store。
 - 后端稳定错误码原样映射为安全中文消息；除专用只读详情组件按文本展示 `trace` 外，组件不得解析、
   重写或从响应正文推导状态，也不得使用 `v-html`。
 - 用户取消“不使用代理”但网络代理未启用：显示可见原因、禁用两类测试按钮，且不发起 IPC；后端

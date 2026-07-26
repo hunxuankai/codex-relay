@@ -2,7 +2,7 @@
 
 ## 适用操作
 
-Provider 创建、编辑、删除、切换、同步和备份恢复都必须经过 `TransactionService`。command、托盘、Vue 层和单个配置服务不得绕过它直接修改受管文件。
+Provider 创建、编辑、删除、列表排序、切换、同步和备份恢复都必须经过 `TransactionService`。command、托盘、Vue 层和单个配置服务不得绕过它直接修改受管文件。
 
 ## 强制顺序
 

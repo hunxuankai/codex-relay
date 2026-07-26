@@ -20,7 +20,7 @@ Windows 当前用户文件与系统集成
 |---|---|---|
 | `config.toml` | Provider 名称、实际 URL、Wire API、Codex 顶层当前 Provider/模型/推理强度、未知字段 | 不能整文件反序列化后重建；不得写入 Relay 私有数组 |
 | `providers.json` v2 | Provider ID → 命名 API Key 列表与 `selectedApiKeyId` | 不能当作 Provider 定义唯一来源；损坏时不能覆盖；普通 DTO 不返回值 |
-| `provider-preferences.json` v2 | Provider 命名 Base URL 列表、可用模型、当前偏好和逐模型推理强度 | 不保存第二份 URL 游标；不能把私有元数据写入 Codex Provider 块 |
+| `provider-preferences.json` v2 | Provider 显示顺序、命名 Base URL 列表、可用模型、当前偏好和逐模型推理强度 | 不保存第二份 URL 游标；不能把私有元数据写入 Codex Provider 块 |
 | `auth.json` | 当前生效 API Key | 不能通过普通列表、日志或事件返回 |
 | `settings.json` | 窗口、托盘、引导、自启和应用内网络代理偏好 | 自启显示必须同时查询 Windows 实际状态；代理只允许无认证 HTTP(S) URL |
 
@@ -64,6 +64,11 @@ Vue typed DTO + 文件指纹
 ```
 
 Provider 主界面与托盘必须调用同一个 `ProviderService::switch_provider`。当前 Provider 不得删除；切换时使用目标 Provider 的预选 URL、密钥、模型和推理强度。详情页 URL/密钥选择分别调用独立 command，不得隐式切换全局当前 Provider。
+
+Provider 列表排序使用独立 `reorder_providers` typed command，提交完整 ID 排列与文件指纹；
+`ProviderService` 只通过 `TransactionService` 更新 `provider-preferences.json.providerOrder`。
+列表投影先采用已保存顺序，再按 `config.toml` 原顺序追加未记录或外部新增的 Provider；不得为
+排序重排 `config.toml` 表、改变活动 Provider 或复制第二份 Provider DTO 真相。
 
 ## 事件边界
 

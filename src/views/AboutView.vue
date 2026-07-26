@@ -18,7 +18,8 @@ defineEmits<{
         <h1>关于 Codex Relay</h1>
         <p class="summary">
           Codex Relay 是一个本机 Provider 配置管理工具，通过受保护的文件事务让 Codex CLI
-          在不同 Provider 之间切换，并为每个 Provider 独立切换多个命名 Base URL 与 API Key。
+          在不同 Provider 之间切换，为每个 Provider 独立切换多个命名 Base URL 与 API Key，
+          并按个人习惯持久化 Provider 列表顺序。
         </p>
       </div>
     </header>
@@ -44,7 +45,7 @@ defineEmits<{
       <h2 id="workflow-title">工作原理</h2>
       <ol class="workflow-list">
         <li><code>config.toml</code> 保存每个 Provider 当前实际 Base URL，以及 Codex 顶层当前模型、推理强度等官方配置。</li>
-        <li><code>provider-preferences.json</code> 保存多个命名 Base URL、模型集合和逐模型推理强度偏好。</li>
+        <li><code>provider-preferences.json</code> 保存 Provider 列表顺序、多个命名 Base URL、模型集合和逐模型推理强度偏好。</li>
         <li><code>providers.json</code> 保存每个 Provider 的多个命名 API Key 与密钥预选。</li>
         <li>Base URL 与 API Key 可以独立切换；当前 Provider 立即同步，非当前 Provider 只保存预选。</li>
         <li>切换 Provider 时，将其预选地址、密钥、模型和推理强度同步到 <code>config.toml</code> 与 <code>auth.json</code>。</li>
@@ -63,8 +64,9 @@ defineEmits<{
           用于确认地址、认证、模型和响应格式，通常只产生少量 token 费用。
         </li>
         <li>
-          API 请求构造完成后可在详情弹窗查看实际请求地址、请求 JSON、HTTP 状态和有界响应正文；
-          不显示 Header、API Key 或代理地址，未收到响应和正文截断都会明确标记。
+          点击 API 测试后详情弹窗立即打开，请求和响应区域在测试过程中分别显示 loading；
+          完成后展示实际请求地址、请求 JSON、HTTP 状态和有界响应正文。弹窗可通过 Escape、
+          点击遮罩或关闭按钮关闭，并可从结果卡片再次打开；不显示 Header、API Key 或代理地址。
         </li>
         <li>
           <strong>Codex 兼容性测试</strong>：启动本机 Codex 并发送一次正常 Codex 回合，
@@ -101,7 +103,7 @@ defineEmits<{
           <h3>Codex Relay 应用数据</h3>
           <ul>
             <li><code>providers.json</code>：各 Provider 的多个命名 API Key 和密钥预选。</li>
-            <li><code>provider-preferences.json</code>：各 Provider 的多个命名 Base URL、可用模型、当前偏好和逐模型推理强度。</li>
+            <li><code>provider-preferences.json</code>：Provider 列表顺序，以及各 Provider 的多个命名 Base URL、可用模型、当前偏好和逐模型推理强度。</li>
             <li><code>settings.json</code>：窗口、托盘、首次引导、自启动和应用网络代理设置。</li>
             <li>
               <code>backups/</code>：配置事务快照、元数据和设置备份；备份页可展开事务文件列表，
