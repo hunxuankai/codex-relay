@@ -2,6 +2,8 @@
 
 Codex Relay 是一款面向 Windows 10/11 的轻量桌面工具，用于管理当前 Windows 用户的 Codex Provider 配置、API Key、事务备份、自检、系统托盘和开机启动。应用基于 Tauri 2、Vue 3 与 Rust，主程序名为 `CodexRelay.exe`。
 
+![Codex Relay Provider 管理总览](docs/images/readme/provider-overview.jpg)
+
 ## 主要功能
 
 - 读取并管理 `config.toml` 中已有的 `[model_providers.<id>]`。
@@ -18,6 +20,22 @@ Codex Relay 是一款面向 Windows 10/11 的轻量桌面工具，用于管理�
 - 设置页手动检查 GitHub Releases 更新，并使用 Tauri 签名校验后启动 NSIS 升级。
 - 修改前自动备份，最多保留最近 20 份事务备份，并支持手动恢复。
 - 简体中文界面、跟随系统的明暗主题、键盘焦点态和窄窗口响应式布局。
+
+## 界面预览
+
+### Provider 配置与 Fast
+
+![编辑 Provider、模型与 Fast 配置](docs/images/readme/provider-editor.jpg)
+
+### API 可用性测试
+
+![查看 API 可用性测试的请求与响应](docs/images/readme/api-test-trace.jpg)
+
+### 系统自检
+
+![Codex Relay 系统自检](docs/images/readme/health-check.jpg)
+
+界面截图均使用脱敏演示数据，示例地址采用保留的 `.test` 域名。
 
 ## 技术栈
 
