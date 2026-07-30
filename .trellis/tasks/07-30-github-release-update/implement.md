@@ -31,7 +31,47 @@
   `main`；推送后 GitHub API 与本地 `HEAD` 均为
   `3585504acc76ffdf9f4d5da324fd582f0a433702`。GitHub 状态页为
   `All Systems Operational`，没有活动发布 Run。
-- 当前阶段：提交本阶段任务记录后触发唯一的 Draft 发布工作流。
+- 2026-07-30：最终候选任务记录提交 `ce76f43` 已推送到 `main`。唯一发布 Run
+  [30518089881](https://github.com/hunxuankai/codex-relay/actions/runs/30518089881)
+  基于完整 SHA `ce76f43e25fd3ca2fa9b3a2dac4a8930d2d975a1` 成功：创建于
+  `05:57:08Z`，Job 于 `05:57:12Z` 开始（排队约 4 秒），`06:13:14Z` 完成
+  （Job 约 16 分 2 秒）；工作流内完整检查与 Draft 构建分别成功。Run 注解指出固定
+  SHA 的 `actions/checkout` / `actions/setup-node` 声明 Node.js 20，Runner 已强制使用
+  Node.js 24；该注解未使 Run 失败。
+- 2026-07-30：Draft Release ID `362221700`，标题/Tag 为 `Codex Relay v0.3.0` /
+  `v0.3.0`，目标提交精确为候选 SHA，`draft=true`、`prerelease=false`。Draft 资产：
+  - `Codex.Relay_0.3.0_x64-setup.exe`：4,644,968 字节，SHA-256
+    `1af72eaccbfec0b65716ad2334830000cb4e4bd623b61bcf66c212a87734fde1`；
+  - `Codex.Relay_0.3.0_x64-setup.exe.sig`：424 字节，SHA-256
+    `e24a53b3457ab4d02ec2a65eadaf3a3bccc7c8bd68c36df5308f08ac239ce177`；
+  - `latest.json`：2,293 字节，SHA-256
+    `1325670de9cff1fddc6f978ae37f44c14566e9554db003de378566f04f8cf8d2`。
+- 2026-07-30：Draft 下载审计确认三个文件与 GitHub digest 一致；`latest.json.version`
+  为 `0.3.0`，`pub_date` 为 `2026-07-30T06:13:00.415Z`，说明与 Release 正文完全
+  一致；`windows-x86_64` 和 `windows-x86_64-nsis` 都指向资产 `494995775`，两项
+  内联签名与独立 `.sig` 内容一致。公开说明/清单没有高置信度秘密命中，安装器
+  Authenticode 为 `NotSigned`。
+- 2026-07-30：Release 于 `06:39:33Z` 公开；Tag ref 与 `releases/latest` 均指向
+  候选 SHA。公开后重新下载三项资产，哈希与 Draft 全部一致；固定 Latest 清单为
+  `0.3.0`，按 `Accept: application/octet-stream` 请求清单中的 GitHub REST asset
+  URL 得到 4,644,968 字节安装器，SHA-256 与 Release 资产一致。
+- 2026-07-30：清理前存在 `v0.3.0` Draft（ID `362221700`）和 `v0.2.1` Release
+  （ID `359826042`），公开 Tag 只有 `v0.2.1`。清理 Run
+  [30520280747](https://github.com/hunxuankai/codex-relay/actions/runs/30520280747)
+  成功；清理后只保留 `v0.3.0` Release、三项资产和指向候选 SHA 的 Tag，旧 Release
+  查询返回 404。该远端清理不涉及 Codex/Relay 本机配置、日志、备份或密钥。
+- 2026-07-30：Windows 自动化本机管道连续两次不可用；Sandbox 二进制存在，但功能
+  状态查询要求管理员提升。未启动不可观察的 Sandbox。仓库准备器以 `-PrepareOnly`
+  成功验证 `v0.2.1` 基线哈希，并生成
+  `D:\Users\23869\AppData\Local\Temp\codex-relay-sandbox-dbe6338c783447a9adb6ed1214a97368`：
+  staging 无 reparse point，输入映射只读、结果映射可写，结果目录为空。真实安装、
+  UAC、应用重启、Tauri 验签、`v0.2.1 → v0.3.0` updater 升级和升级后数据保留均未
+  执行，不能声明成功。
+- 2026-07-30：最终专项检查再次通过（2 个发布测试文件、17 项测试），Trellis 材料
+  校验、`git diff --check`、任务材料秘密扫描通过；实时公开门禁确认 Latest 与
+  Manifest 均为 `v0.3.0`、Tag/Release 目标为候选 SHA、Release/Tag 各 1 个且清理
+  Run 为 `completed/success`。
+- 当前阶段：最终检查、提交发布证据、归档任务并记录会话。
 
 ## 执行清单
 
@@ -48,15 +88,16 @@
    重复候选。
 7. [x] 下载公开 `v0.2.1` NSIS 到安全临时目录，核对 Release API 大小与 SHA-256，保留给
    后续隔离升级。
-8. 触发“发布 Windows 更新”，记录 Run URL、候选 SHA、创建/开始/完成时间、排队和
+8. [x] 触发“发布 Windows 更新”，记录 Run URL、候选 SHA、创建/开始/完成时间、排队和
    执行时长；等待成功或如实处理失败。
-9. 审计 `v0.3.0` Draft：Tag、标题、目标提交、说明、状态、三项资产、大小、SHA-256、
+9. [x] 审计 `v0.3.0` Draft：Tag、标题、目标提交、说明、状态、三项资产、大小、SHA-256、
    清单版本/说明/平台 URL、内联签名与独立 `.sig`。
-10. 公开 Release，复核 Latest 与公开资产；等待并核对历史 Release/tag 清理 Run。
-11. 尝试在 Windows Sandbox/隔离 VM 执行 `v0.2.1 → v0.3.0` 应用内升级，读取脱敏的
-    `before.json`/`after.json`；保留所有实际失败和未验证项目。
-12. 完成 Trellis check、规范更新判断、发布证据提交、任务归档和会话记录，并把收尾提交
-    推送到 `main`。任务归档提交不改变已经发布的 Tag 目标。
+10. [x] 公开 Release，复核 Latest 与公开资产；等待并核对历史 Release/tag 清理 Run。
+11. [x] 尝试在 Windows Sandbox/隔离 VM 执行 `v0.2.1 → v0.3.0` 应用内升级；自动化
+    连接不可用，因此只完成安全 `PrepareOnly`，没有启动 Sandbox，也没有生成
+    `before.json` / `after.json`。真实升级及所有相关人工场景如实记录为未执行。
+12. [x] 完成 Trellis check、规范更新判断和发布证据整理；Phase 3.4 提交证据后进入
+    `finish-work` 归档与会话记录。收尾提交不会改变已经发布的 Tag 目标。
 
 ## 验证命令
 
@@ -85,3 +126,8 @@ git status --short --ignored
   错误；虽然随后下载的字节与公开哈希一致，但该目录不作为合格证据。检查命令参数确认
   根因后，启用 `$ErrorActionPreference = 'Stop'`，使用 `New-Item -Path` 在新的临时
   目录完成预写入边界/reparse/空目录检查和重新下载，以上只记录第二次结果。
+- 尝试运行 `npx tauri signer verify --help` 时，Tauri CLI 2.11.4 因不存在 `verify`
+  子命令退出 1；实际 signer 只提供 `sign` / `generate`。因此没有独立 CLI 密码学
+  验签声明，只记录工作流签名成功、`.sig`/清单关联一致，以及真实 updater 验签未执行。
+- Draft 阶段按 Tag 查询 Release 和 Git Tag ref 均返回 404；认证后的 Release 列表显示
+  Draft 目标提交与资产，公开后 Tag 端点/ref 正常出现并精确指向候选 SHA。
