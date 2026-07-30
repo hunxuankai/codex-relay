@@ -8,6 +8,7 @@ import ProviderAvailabilityPanel from '../components/ProviderAvailabilityPanel.v
 import ProviderBaseUrlManagerDialog from '../components/ProviderBaseUrlManagerDialog.vue'
 import ProviderCredentialControls from '../components/ProviderCredentialControls.vue'
 import ProviderEndpointControls from '../components/ProviderEndpointControls.vue'
+import ProviderPreferenceControls from '../components/ProviderPreferenceControls.vue'
 import ProvidersView from './ProvidersView.vue'
 
 const mockUseProviders = vi.hoisted(() => vi.fn())
@@ -29,8 +30,8 @@ const fingerprints = {
 }
 
 const modelCatalog = [
-  { id: 'gpt-5.6-sol', reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'], defaultReasoningEffort: 'medium' },
-  { id: 'gpt-5.4-mini', reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'], defaultReasoningEffort: 'none' },
+  { id: 'gpt-5.6-sol', reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'], defaultReasoningEffort: 'medium', supportsFast: true },
+  { id: 'gpt-5.4-mini', reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'], defaultReasoningEffort: 'none', supportsFast: false },
 ] as const
 
 function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
@@ -62,6 +63,7 @@ function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
     models: ['gpt-5.6-sol'],
     selectedModel: 'gpt-5.6-sol',
     reasoningEfforts: { 'gpt-5.6-sol': 'medium' },
+    fastEnabled: false,
     preferenceConfigured: true,
     apiKeyConfigured: true,
     configurationComplete: true,
@@ -116,6 +118,7 @@ function controller() {
     switchTo,
     importCurrentKey: vi.fn(),
     updatePreference: vi.fn(),
+    updateFast: vi.fn(),
     selectProvider: vi.fn((id: string) => {
       selectedProviderId.value = id
       selectedProvider.value = providers.value.find((item) => item.id === id) ?? null
@@ -271,6 +274,18 @@ describe('ProvidersView', () => {
     expect(detail.text()).toContain('当前地址：主用地址')
     expect(detail.text()).toContain('当前密钥：主用密钥')
     expect(detail.find('[aria-label="编辑所选 Provider"]').exists()).toBe(true)
+  })
+
+  it('forwards detail Fast changes without copying Provider state in the view', async () => {
+    const state = controller()
+    mockUseProviders.mockReturnValue(state)
+    const wrapper = mount(ProvidersView)
+
+    wrapper.getComponent(ProviderPreferenceControls).vm.$emit('update-fast', true)
+    await nextTick()
+
+    expect(state.updateFast).toHaveBeenCalledWith('provider-a', true)
+    expect(state.selectedProvider.value?.fastEnabled).toBe(false)
   })
 
   it('independently selects and manages Base URLs and API Keys', async () => {

@@ -25,7 +25,9 @@ mod tests {
     use crate::infrastructure::path_service::AppPaths;
     use crate::models::backup::BackupFileName;
     use crate::models::health::HealthLevel;
-    use crate::models::provider::{CreateProviderInput, ReorderProvidersInput};
+    use crate::models::provider::{
+        CreateProviderInput, ReorderProvidersInput, UpdateProviderFastInput,
+    };
     use crate::models::settings::Settings;
     use crate::services::autostart_service::{AutostartBackend, AutostartService};
     use crate::services::self_check_service::{CodexCommandProbe, CodexProbeResult};
@@ -138,6 +140,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_provider_fast_command_returns_typed_success() {
+        let (_directory, state) = create_state();
+        let current = state.provider_service.list_providers().unwrap();
+
+        let result = provider_commands::update_provider_fast_inner(
+            &state,
+            UpdateProviderFastInput {
+                provider_id: "provider-a".into(),
+                enabled: true,
+                expected_files: current.fingerprints,
+            },
+        )
+        .await;
+
+        assert!(result.success);
+        assert!(result.error.is_none());
+        assert!(result.data.unwrap().providers[0].fast_enabled);
+    }
+
+    #[tokio::test]
     async fn invalid_create_command_returns_safe_code_without_stack() {
         let (_directory, state) = create_state();
         let current = state.provider_service.list_providers().unwrap();
@@ -148,6 +170,7 @@ mod tests {
             base_url: "https://example.com/v1".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.6-sol".into()],
+            fast_enabled: false,
             api_key_name: "主用密钥".into(),
             api_key: "test-key-command-not-real".into(),
             activate_after_save: false,

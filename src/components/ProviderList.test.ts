@@ -18,6 +18,7 @@ function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
     models: ['model-a'],
     selectedModel: 'model-a',
     reasoningEfforts: { 'model-a': 'medium' },
+    fastEnabled: false,
     preferenceConfigured: true,
     apiKeyConfigured: true,
     configurationComplete: true,

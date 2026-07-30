@@ -120,8 +120,8 @@ await tauri.switchProvider(providerId)
 ## 表单与密钥
 
 - Provider ID 创建后只读。
-- 创建时的地址名称、HTTP(S) Base URL、密钥名称、固定 `responses` 和模型在前端即时校验，Rust 必须再次验证。
-- 常规编辑只修改 Provider 名称、Wire API 和模型，不渲染已保存 URL/Key 修改入口。
+- 创建时的地址名称、HTTP(S) Base URL、密钥名称、固定 `responses`、模型和默认关闭的 Fast 在前端即时校验，Rust 必须再次验证。
+- 常规编辑只修改 Provider 名称、Wire API、模型和 Fast，不渲染已保存 URL/Key 修改入口；Fast 能力只读取 `ModelCatalogItem.supportsFast`。
 - 创建输入中的 API Key 默认密码显示；专用密钥管理器打开后默认明文显示，并提供统一隐藏/显示与逐项复制。
 - 完整密钥只短暂存在 `useProviderApiKeyManager`，不进入 localStorage、日志、通知、快照或普通 composable 状态；关闭和 scope dispose 必须清空。
 

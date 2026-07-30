@@ -2,7 +2,7 @@
 
 ## 适用操作
 
-Provider 创建、编辑、删除、列表排序、切换、同步和备份恢复都必须经过 `TransactionService`。command、托盘、Vue 层和单个配置服务不得绕过它直接修改受管文件。
+Provider 创建、编辑、删除、列表排序、Fast 更新、切换、同步和备份恢复都必须经过 `TransactionService`。command、托盘、Vue 层和单个配置服务不得绕过它直接修改受管文件。
 
 ## 强制顺序
 
@@ -20,8 +20,9 @@ Provider 创建、编辑、删除、列表排序、切换、同步和备份恢�
 ## 格式与保留
 
 - `config.toml` 使用 `toml_edit::DocumentMut` 局部修改，保留注释、未知字段、其他 Provider、MCP、features、sandbox 和 profiles。
+- Fast 开启写顶层 `service_tier="fast"` 并单向确保 `features.fast_mode=true`；关闭只删除 `service_tier`。不得因关闭 Fast 重写或删除 feature gate。
 - 目标无默认模型时保留现有顶层 `model`。
-- JSON 使用两空格缩进和末尾换行；`providers.json` 只修改目标 ID，保留版本和其他条目。
+- JSON 使用两空格缩进和末尾换行；`providers.json` 只修改目标 ID，保留版本和其他条目；`provider-preferences.json` v1/v2 只读迁移只在成功用户事务写 v3。
 - `metadata.json` 不含密钥，但原文件快照可能含明文密钥。
 
 ## 回滚契约
@@ -44,4 +45,4 @@ Provider 创建、编辑、删除、列表排序、切换、同步和备份恢�
 
 ## 必测行为
 
-临时 TOML/JSON 无效、config/auth 写失败、替换后验证失败、回滚失败、并发事务、外部修改冲突、备份恢复、未知 TOML 保留和原始字节恢复。
+临时 TOML/JSON 无效、config/auth/preferences 写失败、Fast 写后不变量、替换后验证失败、回滚失败、并发事务、外部修改冲突、备份恢复、未知 TOML 保留和原始字节恢复。

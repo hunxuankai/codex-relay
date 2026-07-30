@@ -683,6 +683,8 @@ mod tests {
     const PROVIDERS: &[u8] = include_bytes!("../../../../../fixtures/providers-multiple.json");
     const PREFERENCES: &[u8] =
         include_bytes!("../../../../../fixtures/provider-preferences-multiple.json");
+    const PREFERENCES_V2: &[u8] =
+        include_bytes!("../../../../../fixtures/provider-preferences-v2.json");
     const CONFIG_B: &[u8] = br#"model_provider = "provider-b"
 
 [model_providers.provider-a]
@@ -709,6 +711,12 @@ wire_api = "responses"
         fs::write(&paths.config_file, CONFIG_A).unwrap();
         fs::write(&paths.auth_file, AUTH_A).unwrap();
         fs::write(&paths.providers_file, PROVIDERS).unwrap();
+    }
+
+    #[test]
+    fn transaction_validation_accepts_v1_and_v2_preference_stores() {
+        validate_managed_file(ManagedFileKind::Preferences, PREFERENCES).unwrap();
+        validate_managed_file(ManagedFileKind::Preferences, PREFERENCES_V2).unwrap();
     }
 
     fn request(expected: Option<FileSetFingerprint>) -> TransactionRequest {
@@ -1030,7 +1038,7 @@ wire_api = "responses"
     }
 
     #[test]
-    fn managed_private_json_validation_accepts_v1_and_v2_but_rejects_unknown_versions() {
+    fn managed_private_json_validation_accepts_supported_but_rejects_unknown_versions() {
         let providers_v2 = r#"{
   "version": 2,
   "providers": {
@@ -1086,6 +1094,11 @@ wire_api = "responses"
         validate_managed_file(ManagedFileKind::Providers, providers_v2).unwrap();
         validate_managed_file(ManagedFileKind::Preferences, preferences_v1).unwrap();
         validate_managed_file(ManagedFileKind::Preferences, preferences_v2).unwrap();
+        validate_managed_file(
+            ManagedFileKind::Preferences,
+            br#"{"version":3,"providers":{}}"#,
+        )
+        .unwrap();
         assert_eq!(
             validate_managed_file(
                 ManagedFileKind::Providers,
@@ -1098,7 +1111,7 @@ wire_api = "responses"
         assert_eq!(
             validate_managed_file(
                 ManagedFileKind::Preferences,
-                br#"{"version":3,"providers":{}}"#,
+                br#"{"version":4,"providers":{}}"#,
             )
             .unwrap_err()
             .code(),

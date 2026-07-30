@@ -687,6 +687,7 @@ mod tests {
                 "gpt-5.6-sol".into(),
                 "medium".into(),
             )]),
+            fast_enabled: false,
             preference_configured: true,
             api_key_configured,
             configuration_complete: valid && api_key_configured,

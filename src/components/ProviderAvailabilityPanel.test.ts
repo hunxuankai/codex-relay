@@ -23,6 +23,7 @@ const provider: ProviderProfile = {
   models: ['gpt-5.6-sol'],
   selectedModel: 'gpt-5.6-sol',
   reasoningEfforts: { 'gpt-5.6-sol': 'medium' },
+  fastEnabled: false,
   preferenceConfigured: true,
   apiKeyConfigured: true,
   configurationComplete: true,

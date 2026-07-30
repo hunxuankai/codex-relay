@@ -18,7 +18,7 @@ const fingerprints = {
   preferences: { exists: true, len: 1, modifiedUnixMillis: 1, sha256: 'preferences' },
 }
 
-function provider(id: string, active = false): ProviderProfile {
+function provider(id: string, active = false, fastEnabled = false): ProviderProfile {
   const baseUrl = `https://${id}.example.test/v1`
   return {
     id,
@@ -34,6 +34,7 @@ function provider(id: string, active = false): ProviderProfile {
     models: ['gpt-5.6-sol'],
     selectedModel: 'gpt-5.6-sol',
     reasoningEfforts: { 'gpt-5.6-sol': 'medium' },
+    fastEnabled,
     preferenceConfigured: true,
     apiKeyConfigured: true,
     configurationComplete: true,
@@ -67,6 +68,7 @@ function client(overrides: Partial<ProviderClient> = {}): ProviderClient {
     saveProviderBaseUrls: vi.fn().mockResolvedValue(mutation('地址已保存。')),
     selectProviderBaseUrl: vi.fn().mockResolvedValue(mutation('地址已切换。')),
     selectProviderApiKey: vi.fn().mockResolvedValue(mutation('密钥已切换。')),
+    updateProviderFast: vi.fn().mockResolvedValue(mutation('Fast 偏好已更新。')),
     deleteProvider: vi.fn().mockResolvedValue(mutation('已删除。')),
     switchProvider: vi.fn().mockResolvedValue({
       providers: [],
@@ -326,6 +328,51 @@ describe('useProviders', () => {
       expectedFiles: fingerprints,
     })
     expect(providers.successMessage.value).toBe('当前密钥已导入。')
+  })
+
+  it('updates Fast with the current fingerprint and refreshes backend authority', async () => {
+    const listProviders = vi
+      .fn()
+      .mockResolvedValueOnce(state([provider('provider-a', true)]))
+      .mockResolvedValueOnce(state([provider('provider-a', true, true)]))
+    const updateProviderFast = vi.fn().mockResolvedValue(mutation('Fast 已开启。'))
+    const providers = useProviders({
+      client: client({ listProviders, updateProviderFast }),
+      subscribe: false,
+    })
+    await flushPromises()
+
+    await providers.updateFast('provider-a', true)
+
+    expect(updateProviderFast).toHaveBeenCalledWith({
+      providerId: 'provider-a',
+      enabled: true,
+      expectedFiles: fingerprints,
+    })
+    expect(listProviders).toHaveBeenCalledTimes(2)
+    expect(providers.providers.value[0]?.fastEnabled).toBe(true)
+    expect(providers.successMessage.value).toBe('Fast 已开启。')
+  })
+
+  it('preserves the backend error when Fast is unsupported', async () => {
+    const updateProviderFast = vi.fn().mockRejectedValue(
+      new RelayCommandError('MODEL_FAST_UNSUPPORTED', '当前模型不支持 Fast。'),
+    )
+    const listProviders = vi.fn().mockResolvedValue(state([provider('provider-a', true)]))
+    const providers = useProviders({
+      client: client({ listProviders, updateProviderFast }),
+      subscribe: false,
+    })
+    await flushPromises()
+
+    await providers.updateFast('provider-a', true)
+
+    expect(providers.error.value).toEqual({
+      code: 'MODEL_FAST_UNSUPPORTED',
+      message: '当前模型不支持 Fast。',
+    })
+    expect(providers.successMessage.value).toBeNull()
+    expect(listProviders).toHaveBeenCalledOnce()
   })
 
   it('blocks repeated actions while busy', async () => {

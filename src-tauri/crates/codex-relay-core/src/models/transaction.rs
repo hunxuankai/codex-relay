@@ -10,6 +10,7 @@ pub enum TransactionOperation {
     RestoreBackup,
     SyncCurrentProvider,
     UpdateProviderPreference,
+    UpdateProviderFast,
     SaveProviderBaseUrls,
     SelectProviderBaseUrl,
     SaveProviderApiKeys,
@@ -43,5 +44,12 @@ mod tests {
         let json = serde_json::to_string(&transaction).unwrap();
         assert!(json.contains("providerId"));
         assert!(json.contains("switch_provider"));
+
+        let fast_json = serde_json::to_string(&ConfigTransaction {
+            operation: TransactionOperation::UpdateProviderFast,
+            ..transaction
+        })
+        .unwrap();
+        assert!(fast_json.contains("update_provider_fast"));
     }
 }

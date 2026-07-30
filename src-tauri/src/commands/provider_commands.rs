@@ -6,7 +6,7 @@ use crate::models::provider::{
     CreateProviderInput, ImportCurrentApiKeyInput, ProviderApiKeyManagementState,
     ProviderListState, ProviderMutationOutcome, ReorderProvidersInput, SaveProviderApiKeysInput,
     SaveProviderBaseUrlsInput, SelectProviderApiKeyInput, SelectProviderBaseUrlInput,
-    SwitchOutcome, UpdateProviderInput, UpdateProviderPreferenceInput,
+    SwitchOutcome, UpdateProviderFastInput, UpdateProviderInput, UpdateProviderPreferenceInput,
 };
 
 pub(crate) fn list_providers_inner(state: &AppState) -> CommandResult<ProviderListState> {
@@ -235,6 +235,31 @@ pub async fn update_provider_preference(
         Err(error) => return Ok(CommandResult::failure(&error)),
     };
     let result = update_provider_preference_inner(&state, input).await;
+    drop(application_write);
+    if let Some(outcome) = result.data.as_ref() {
+        crate::tray::after_provider_mutation(&app, outcome.message.clone(), false);
+    }
+    Ok(result)
+}
+
+pub(crate) async fn update_provider_fast_inner(
+    state: &AppState,
+    input: UpdateProviderFastInput,
+) -> CommandResult<ProviderMutationOutcome> {
+    command_result(state.provider_service.update_provider_fast(input).await)
+}
+
+#[tauri::command]
+pub async fn update_provider_fast(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    input: UpdateProviderFastInput,
+) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+    let application_write = match state.begin_application_write() {
+        Ok(application_write) => application_write,
+        Err(error) => return Ok(CommandResult::failure(&error)),
+    };
+    let result = update_provider_fast_inner(&state, input).await;
     drop(application_write);
     if let Some(outcome) = result.data.as_ref() {
         crate::tray::after_provider_mutation(&app, outcome.message.clone(), false);

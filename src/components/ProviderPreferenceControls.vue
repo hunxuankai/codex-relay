@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ElButton, ElSegmented } from 'element-plus'
+import { ElButton, ElSegmented, ElSwitch } from 'element-plus'
 import type { ModelCatalogItem, ProviderProfile } from '../types/provider'
 
 const props = defineProps<{
@@ -11,6 +11,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [model: string, reasoningEffort: string]
+  'update-fast': [enabled: boolean]
   configure: []
 }>()
 
@@ -18,6 +19,13 @@ const selectedCatalogModel = computed(() =>
   props.modelCatalog.find((model) => model.id === props.provider.selectedModel),
 )
 const reasoningOptions = computed(() => selectedCatalogModel.value?.reasoningEfforts ?? [])
+const fastSupported = computed(() => selectedCatalogModel.value?.supportsFast === true)
+const displayedFastEnabled = computed(() => fastSupported.value && props.provider.fastEnabled)
+const fastDescription = computed(() =>
+  fastSupported.value
+    ? 'Fast 使用 priority 服务层，可能产生额外费用。'
+    : `${props.provider.selectedModel ?? '当前模型'} 不支持 Fast，Fast 保持关闭。`,
+)
 const selectedEffort = computed(() =>
   props.provider.selectedModel
     ? props.provider.reasoningEfforts?.[props.provider.selectedModel]
@@ -35,6 +43,10 @@ function selectModel(value: string | number | boolean) {
 function selectReasoningEffort(value: string | number | boolean) {
   if (!props.provider.selectedModel) return
   emit('select', props.provider.selectedModel, String(value))
+}
+
+function updateFast(value: string | number | boolean) {
+  if (fastSupported.value && typeof value === 'boolean') emit('update-fast', value)
 }
 </script>
 
@@ -60,6 +72,21 @@ function selectReasoningEffort(value: string | number | boolean) {
           aria-label="推理强度"
           @change="selectReasoningEffort"
         />
+      </div>
+      <div class="preference-field fast-field">
+        <div class="fast-control">
+          <span class="preference-label">Fast</span>
+          <ElSwitch
+            :model-value="displayedFastEnabled"
+            :disabled="busy || !fastSupported"
+            aria-label="Fast"
+            aria-describedby="provider-fast-description"
+            @change="updateFast"
+          />
+        </div>
+        <p id="provider-fast-description" class="fast-description">
+          {{ fastDescription }}
+        </p>
       </div>
       <p class="preference-hint">
         {{
@@ -99,7 +126,15 @@ function selectReasoningEffort(value: string | number | boolean) {
   overflow-x: auto;
 }
 
+.fast-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 .preference-hint,
+.fast-description,
 .preference-missing p {
   margin: 0;
   color: var(--text-secondary);

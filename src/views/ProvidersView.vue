@@ -175,6 +175,12 @@ function updateSelectedPreference(model: string, reasoningEffort: string) {
   void providerState.updatePreference(providerId, model, reasoningEffort)
 }
 
+function updateSelectedFast(enabled: boolean) {
+  const providerId = providerState.selectedProvider.value?.id
+  if (!providerId) return
+  void providerState.updateFast(providerId, enabled)
+}
+
 const selectedApiResult = computed(() => {
   const providerId = providerState.selectedProvider.value?.id
   return providerId ? availabilityState.resultFor(providerId, 'api') : null
@@ -333,6 +339,7 @@ watch(apiKeyManagerProvider, (provider) => {
           :model-catalog="providerState.modelCatalog.value"
           :busy="interactionBusy"
           @select="updateSelectedPreference"
+          @update-fast="updateSelectedFast"
           @configure="openEdit(providerState.selectedProvider.value.id)"
         />
         <ProviderAvailabilityPanel

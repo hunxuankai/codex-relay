@@ -81,6 +81,7 @@ pub fn run() {
             commands::provider_commands::save_provider_api_keys,
             commands::provider_commands::select_provider_api_key,
             commands::provider_commands::update_provider_preference,
+            commands::provider_commands::update_provider_fast,
             commands::provider_commands::delete_provider,
             commands::provider_commands::switch_provider,
             commands::provider_commands::import_current_auth_key,

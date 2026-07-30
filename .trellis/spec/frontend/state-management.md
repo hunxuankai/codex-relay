@@ -34,6 +34,19 @@ return {
 
 完整跨层契约见 [Provider 多命名地址与密钥契约](../project/provider-multi-credentials.md)。
 
+## Provider Fast 状态契约
+
+- `ProviderProfile.fastEnabled` 与 `ModelCatalogItem.supportsFast` 都来自后端权威 DTO；组件不得硬编码
+  支持模型 ID，也不得直接修改 Provider 对象。
+- `useProviders.updateFast(providerId, enabled)` 使用当前 `FileSetFingerprint` 调用 typed
+  `update_provider_fast`，与其他 mutation 共用 busy 防重、稳定错误和成功后权威刷新。
+- `ProviderPreferenceControls` 只接收 props 并发出 `update-fast`；不支持模型时展示值必须为 false、
+  控件禁用并关联可见原因。`ProvidersView` 只转发事件，不持有第二份 Fast 状态。
+- `ProviderEditor` 的草稿可持有 Fast 表单值：create 默认 false，edit 从 Provider 回填；能力依据
+  实际提交后偏好模型（保留的 `selectedModel`，否则模型数组第一项）派生。不支持时只单向关闭，
+  Fast-only 变化也必须触发当前 Provider 的现有 `syncIfActive` 选项。
+- `MODEL_FAST_UNSUPPORTED` 原码和安全消息必须保留；mutation 后刷新失败时不能显示 Fast 成功。
+
 ## Provider 列表排序状态契约
 
 - `ProviderList` 只负责拖动/方向键手势并发出完整 Provider ID 排列；不得直接访问 Tauri、
@@ -60,6 +73,7 @@ return {
 - 保留后端稳定错误码，向用户显示安全中文消息。
 - `EXTERNAL_MODIFICATION_CONFLICT` 要求重新加载，不在前端强制覆盖。
 - `ROLLBACK_INCOMPLETE` 必须提供备份恢复引导，不显示通用成功通知。
+- `MODEL_FAST_UNSUPPORTED` 显示后端明确原因，不在前端猜测为通用配置错误。
 
 ## Provider 测试会话状态契约
 

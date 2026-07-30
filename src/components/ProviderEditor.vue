@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, useTemplateRef, watch } from 'vue'
-import { ElButton, ElCheckbox, ElInput, ElOption, ElSelect } from 'element-plus'
+import { ElButton, ElCheckbox, ElInput, ElOption, ElSelect, ElSwitch } from 'element-plus'
 import type {
   CreateProviderInput,
   FileSetFingerprint,
@@ -37,6 +37,7 @@ const draft = reactive({
   models: [] as string[],
   apiKeyName: '',
   apiKey: '',
+  fastEnabled: false,
   activateAfterSave: false,
   syncIfActive: false,
 })
@@ -50,11 +51,28 @@ const errors = reactive({
   apiKey: '',
 })
 const form = useTemplateRef<HTMLFormElement>('form')
+const preferenceModel = computed(() => {
+  const savedModel = props.mode === 'edit' ? props.provider?.selectedModel : null
+  if (savedModel && draft.models.includes(savedModel)) return savedModel
+  return draft.models[0] ?? null
+})
+const fastSupported = computed(() =>
+  props.modelCatalog.some(
+    (model) => model.id === preferenceModel.value && model.supportsFast,
+  ),
+)
+const fastDescription = computed(() => {
+  if (!preferenceModel.value) return '选择支持 Fast 的偏好模型后可开启。'
+  return fastSupported.value
+    ? 'Fast 使用 priority 服务层，可能产生额外费用。'
+    : `${preferenceModel.value} 不支持 Fast，Fast 保持关闭。`
+})
 const activeFieldsChanged = computed(() => {
   if (props.mode !== 'edit' || !props.provider?.isActive) return false
   return (
     draft.name.trim() !== props.provider.name ||
-    JSON.stringify(draft.models) !== JSON.stringify(props.provider.models)
+    JSON.stringify(draft.models) !== JSON.stringify(props.provider.models) ||
+    draft.fastEnabled !== props.provider.fastEnabled
   )
 })
 const canSyncActiveChanges = computed(() => activeFieldsChanged.value)
@@ -69,9 +87,18 @@ watch(
     draft.models = [...(props.provider?.models ?? [])]
     draft.apiKeyName = ''
     draft.apiKey = ''
+    draft.fastEnabled = props.provider?.fastEnabled ?? false
     draft.activateAfterSave = false
     draft.syncIfActive = false
     clearErrors()
+  },
+  { immediate: true },
+)
+
+watch(
+  fastSupported,
+  (supported) => {
+    if (!supported) draft.fastEnabled = false
   },
   { immediate: true },
 )
@@ -144,12 +171,14 @@ async function submit() {
       baseUrl: draft.baseUrl.trim(),
       apiKeyName: draft.apiKeyName.trim(),
       apiKey: draft.apiKey.trim(),
+      fastEnabled: draft.fastEnabled,
       activateAfterSave: draft.activateAfterSave,
     })
     return
   }
   emit('submit', {
     ...common,
+    fastEnabled: draft.fastEnabled,
     syncIfActive: canSyncActiveChanges.value ? draft.syncIfActive : false,
   })
 }
@@ -286,6 +315,21 @@ async function submit() {
         <span v-if="errors.apiKey" id="api-key-error" class="field-error" role="alert">{{ errors.apiKey }}</span>
       </div>
 
+      <div class="field fast-field">
+        <div class="fast-control">
+          <span>Fast</span>
+          <ElSwitch
+            v-model="draft.fastEnabled"
+            :disabled="busy || !fastSupported"
+            aria-label="Fast"
+            aria-describedby="provider-editor-fast-description"
+          />
+        </div>
+        <span id="provider-editor-fast-description" class="field-hint">
+          {{ fastDescription }}
+        </span>
+      </div>
+
       <ElCheckbox v-if="mode === 'create'" v-model="draft.activateAfterSave" class="check-field" name="activate-after-save">
         保存后立即启用
       </ElCheckbox>
@@ -337,6 +381,13 @@ async function submit() {
 
 .field :deep(.el-select) {
   width: 100%;
+}
+
+.fast-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 .field-error,

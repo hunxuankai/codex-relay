@@ -7,7 +7,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-const PROVIDER_PREFERENCE_VERSION: u32 = 2;
+const PROVIDER_PREFERENCE_VERSION: u32 = 3;
 const MAX_BASE_URL_ENTRY_NAME_LEN: usize = 100;
 const LEGACY_DEFAULT_ENTRY_ID: &str = "legacy-default";
 
@@ -24,6 +24,7 @@ pub struct ModelCatalogEntry {
     pub id: &'static str,
     pub reasoning_efforts: &'static [&'static str],
     pub default_reasoning_effort: &'static str,
+    pub supports_fast: bool,
 }
 
 const STANDARD_EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
@@ -34,36 +35,49 @@ const MODEL_CATALOG: &[ModelCatalogEntry] = &[
         id: "gpt-5.6-sol",
         reasoning_efforts: GPT_56_EFFORTS,
         default_reasoning_effort: "medium",
+        supports_fast: true,
     },
     ModelCatalogEntry {
         id: "gpt-5.6-terra",
         reasoning_efforts: GPT_56_EFFORTS,
         default_reasoning_effort: "medium",
+        supports_fast: true,
     },
     ModelCatalogEntry {
         id: "gpt-5.6-luna",
         reasoning_efforts: GPT_56_EFFORTS,
         default_reasoning_effort: "medium",
+        supports_fast: true,
     },
     ModelCatalogEntry {
         id: "gpt-5.5",
         reasoning_efforts: STANDARD_EFFORTS,
         default_reasoning_effort: "medium",
+        supports_fast: true,
     },
     ModelCatalogEntry {
         id: "gpt-5.4",
         reasoning_efforts: STANDARD_EFFORTS,
         default_reasoning_effort: "none",
+        supports_fast: true,
     },
     ModelCatalogEntry {
         id: "gpt-5.4-mini",
         reasoning_efforts: STANDARD_EFFORTS,
         default_reasoning_effort: "none",
+        supports_fast: false,
     },
 ];
 
 pub fn model_catalog() -> &'static [ModelCatalogEntry] {
     MODEL_CATALOG
+}
+
+fn model_catalog_entry(model: &str) -> Result<&'static ModelCatalogEntry, AppError> {
+    MODEL_CATALOG
+        .iter()
+        .find(|entry| entry.id == model)
+        .ok_or_else(|| unknown_model(model))
 }
 
 pub fn normalize_named_base_urls(
@@ -135,6 +149,7 @@ pub struct ProviderPreference {
     pub models: Vec<String>,
     pub selected_model: String,
     pub reasoning_efforts: BTreeMap<String, String>,
+    pub fast_enabled: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -169,9 +184,44 @@ struct StoreVersion {
 }
 
 #[derive(Deserialize)]
+struct LegacyProviderPreference {
+    models: Vec<String>,
+    #[serde(rename = "selectedModel")]
+    selected_model: String,
+    #[serde(rename = "reasoningEfforts")]
+    reasoning_efforts: BTreeMap<String, String>,
+}
+
+#[derive(Deserialize)]
 struct LegacyProviderPreferenceStore {
     version: u32,
-    providers: BTreeMap<String, ProviderPreference>,
+    providers: BTreeMap<String, LegacyProviderPreference>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2ProviderPrivatePreference {
+    base_urls: Vec<NamedBaseUrl>,
+    model_preference: Option<LegacyProviderPreference>,
+}
+
+#[derive(Deserialize)]
+struct V2ProviderPreferenceStore {
+    version: u32,
+    providers: BTreeMap<String, V2ProviderPrivatePreference>,
+    #[serde(default, rename = "providerOrder")]
+    provider_order: Vec<String>,
+}
+
+impl LegacyProviderPreference {
+    fn into_current(self) -> ProviderPreference {
+        ProviderPreference {
+            models: self.models,
+            selected_model: self.selected_model,
+            reasoning_efforts: self.reasoning_efforts,
+            fast_enabled: false,
+        }
+    }
 }
 
 impl Default for ProviderPreferenceStore {
@@ -195,16 +245,14 @@ impl ProviderPreference {
         })?;
         let mut reasoning_efforts = BTreeMap::new();
         for model in models {
-            let entry = MODEL_CATALOG
-                .iter()
-                .find(|entry| entry.id == model)
-                .ok_or_else(|| unknown_model(model))?;
+            let entry = model_catalog_entry(model)?;
             reasoning_efforts.insert(model.clone(), entry.default_reasoning_effort.into());
         }
         Ok(Self {
             models: models.to_vec(),
             selected_model,
             reasoning_efforts,
+            fast_enabled: false,
         })
     }
 
@@ -230,11 +278,29 @@ impl ProviderPreference {
         self.models = models.to_vec();
         self.selected_model = selected_model;
         self.reasoning_efforts = reasoning_efforts;
+        if self.fast_enabled && !model_catalog_entry(&self.selected_model)?.supports_fast {
+            self.fast_enabled = false;
+        }
         validate_preference(self)?;
         Ok(selected_changed)
     }
 
-    pub fn select(&mut self, model: &str, reasoning_effort: &str) -> Result<(), AppError> {
+    pub fn set_fast(&mut self, enabled: bool) -> Result<(), AppError> {
+        if enabled {
+            let model = model_catalog_entry(&self.selected_model)?;
+            if !model.supports_fast {
+                return Err(AppError::new(
+                    "MODEL_FAST_UNSUPPORTED",
+                    "当前模型不支持 Fast。",
+                    format!("model {} does not support fast", self.selected_model),
+                ));
+            }
+        }
+        self.fast_enabled = enabled;
+        Ok(())
+    }
+
+    pub fn select(&mut self, model: &str, reasoning_effort: &str) -> Result<bool, AppError> {
         if !self.models.iter().any(|allowed| allowed == model) {
             return Err(AppError::new(
                 "MODEL_NOT_ALLOWED_FOR_PROVIDER",
@@ -242,10 +308,16 @@ impl ProviderPreference {
                 format!("model {model} is not allowed for provider"),
             ));
         }
+        let supports_fast = model_catalog_entry(model)?.supports_fast;
         self.selected_model = model.to_owned();
         self.reasoning_efforts
             .insert(model.to_owned(), reasoning_effort.to_owned());
-        validate_preference(self)
+        let fast_disabled = self.fast_enabled && !supports_fast;
+        if fast_disabled {
+            self.fast_enabled = false;
+        }
+        validate_preference(self)?;
+        Ok(fast_disabled)
     }
 }
 
@@ -313,10 +385,7 @@ pub fn validate_preference(preference: &ProviderPreference) -> Result<(), AppErr
         ));
     }
     for model in &preference.models {
-        let entry = MODEL_CATALOG
-            .iter()
-            .find(|entry| entry.id == model)
-            .ok_or_else(|| unknown_model(model))?;
+        let entry = model_catalog_entry(model)?;
         let effort = preference
             .reasoning_efforts
             .get(model)
@@ -358,6 +427,7 @@ pub fn parse_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, AppErr
 
     match version.version {
         1 => parse_legacy_store(bytes),
+        2 => parse_v2_store(bytes),
         PROVIDER_PREFERENCE_VERSION => {
             let store =
                 serde_json::from_slice::<ProviderPreferenceStore>(bytes).map_err(|error| {
@@ -399,6 +469,7 @@ fn parse_legacy_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, App
 
     let mut providers = BTreeMap::new();
     for (provider_id, preference) in legacy.providers {
+        let preference = preference.into_current();
         validate_provider_store_id(&provider_id)?;
         validate_preference(&preference)?;
         providers.insert(
@@ -415,6 +486,48 @@ fn parse_legacy_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, App
             providers,
             provider_order: Vec::new(),
         },
+        needs_upgrade: true,
+    })
+}
+
+fn parse_v2_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, AppError> {
+    let legacy = serde_json::from_slice::<V2ProviderPreferenceStore>(bytes).map_err(|error| {
+        AppError::new(
+            "INVALID_PROVIDER_PREFERENCES",
+            "无法解析 provider-preferences.json。",
+            error.to_string(),
+        )
+    })?;
+    if legacy.version != 2 {
+        return Err(AppError::new(
+            "INVALID_PROVIDER_PREFERENCES",
+            "provider-preferences.json 的版本不受支持。",
+            format!("legacy provider preference version is {}", legacy.version),
+        ));
+    }
+
+    let store = ProviderPreferenceStore {
+        version: PROVIDER_PREFERENCE_VERSION,
+        providers: legacy
+            .providers
+            .into_iter()
+            .map(|(provider_id, preference)| {
+                (
+                    provider_id,
+                    ProviderPrivatePreference {
+                        base_urls: preference.base_urls,
+                        model_preference: preference
+                            .model_preference
+                            .map(LegacyProviderPreference::into_current),
+                    },
+                )
+            })
+            .collect(),
+        provider_order: legacy.provider_order,
+    };
+
+    Ok(LoadedProviderPreferenceStore {
+        store: normalize_store(store)?,
         needs_upgrade: true,
     })
 }
@@ -437,6 +550,15 @@ fn normalize_store(
         }
         if let Some(model_preference) = &preference.model_preference {
             validate_preference(model_preference)?;
+            if model_preference.fast_enabled
+                && !model_catalog_entry(&model_preference.selected_model)?.supports_fast
+            {
+                return Err(AppError::new(
+                    "INVALID_PROVIDER_PREFERENCES",
+                    "provider-preferences.json 包含无效的 Fast 模型偏好。",
+                    "fast is enabled for an unsupported selected model",
+                ));
+            }
         }
     }
     let mut order_ids = BTreeSet::new();
@@ -568,6 +690,44 @@ mod tests {
     }
 
     #[test]
+    fn fast_can_only_be_enabled_for_supported_catalog_models() {
+        let supported_ids = [
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+            "gpt-5.4",
+        ];
+        for model_id in supported_ids {
+            assert!(
+                model_catalog()
+                    .iter()
+                    .find(|entry| entry.id == model_id)
+                    .unwrap()
+                    .supports_fast
+            );
+        }
+        assert!(
+            !model_catalog()
+                .iter()
+                .find(|entry| entry.id == "gpt-5.4-mini")
+                .unwrap()
+                .supports_fast
+        );
+
+        let mut supported = ProviderPreference::from_models(&["gpt-5.6-sol".into()]).unwrap();
+        supported.set_fast(true).unwrap();
+        assert!(supported.fast_enabled);
+        supported.set_fast(false).unwrap();
+        assert!(!supported.fast_enabled);
+
+        let mut unsupported = ProviderPreference::from_models(&["gpt-5.4-mini".into()]).unwrap();
+        let error = unsupported.set_fast(true).unwrap_err();
+        assert_eq!(error.code(), "MODEL_FAST_UNSUPPORTED");
+        assert!(!unsupported.fast_enabled);
+    }
+
+    #[test]
     fn store_round_trip_is_versioned_and_stable() {
         let mut store = ProviderPreferenceStore::default();
         store.providers.insert(
@@ -586,7 +746,8 @@ mod tests {
         assert_eq!(parsed.store, store);
         assert!(!parsed.needs_upgrade);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("\"version\": 2"));
+        assert!(text.contains("\"version\": 3"));
+        assert!(text.contains("\"fastEnabled\": false"));
         assert!(text.ends_with('\n'));
     }
 
@@ -607,6 +768,70 @@ mod tests {
                 .unwrap()
                 .contains("\"providerOrder\"")
         );
+    }
+
+    #[test]
+    fn legacy_v1_and_v2_upgrade_to_v3_with_fast_disabled() {
+        let sources: [&[u8]; 2] = [
+            br#"{
+  "version": 1,
+  "providers": {
+    "provider-a": {
+      "models": ["gpt-5.6-sol"],
+      "selectedModel": "gpt-5.6-sol",
+      "reasoningEfforts": { "gpt-5.6-sol": "medium" }
+    }
+  }
+}"#,
+            br#"{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [],
+      "modelPreference": {
+        "models": ["gpt-5.6-sol"],
+        "selectedModel": "gpt-5.6-sol",
+        "reasoningEfforts": { "gpt-5.6-sol": "medium" }
+      }
+    }
+  }
+}"#,
+        ];
+
+        for source in sources {
+            let loaded = parse_store(source).unwrap();
+            assert!(loaded.needs_upgrade);
+
+            let migrated: serde_json::Value =
+                serde_json::from_slice(&serialize_store(&loaded.store).unwrap()).unwrap();
+            assert_eq!(migrated["version"], 3);
+            assert_eq!(
+                migrated["providers"]["provider-a"]["modelPreference"]["fastEnabled"],
+                false
+            );
+        }
+    }
+
+    #[test]
+    fn v3_rejects_fast_for_an_unsupported_selected_model() {
+        let invalid = br#"{
+  "version": 3,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [],
+      "modelPreference": {
+        "models": ["gpt-5.4-mini"],
+        "selectedModel": "gpt-5.4-mini",
+        "reasoningEfforts": { "gpt-5.4-mini": "none" },
+        "fastEnabled": true
+      }
+    }
+  }
+}"#;
+
+        let error = parse_store(invalid).unwrap_err();
+
+        assert_eq!(error.code(), "INVALID_PROVIDER_PREFERENCES");
     }
 
     #[test]
@@ -667,6 +892,22 @@ mod tests {
     }
 
     #[test]
+    fn reconciling_to_an_unsupported_selected_model_disables_fast() {
+        let mut preference =
+            ProviderPreference::from_models(&["gpt-5.6-sol".into(), "gpt-5.4-mini".into()])
+                .unwrap();
+        preference.set_fast(true).unwrap();
+
+        let selected_changed = preference
+            .reconcile_models(&["gpt-5.4-mini".into()])
+            .unwrap();
+
+        assert!(selected_changed);
+        assert_eq!(preference.selected_model, "gpt-5.4-mini");
+        assert!(!preference.fast_enabled);
+    }
+
+    #[test]
     fn selecting_models_remembers_each_models_reasoning_effort() {
         let mut preference =
             ProviderPreference::from_models(&["gpt-5.6-sol".into(), "gpt-5.4-mini".into()])
@@ -679,6 +920,20 @@ mod tests {
         assert_eq!(preference.selected_model, "gpt-5.6-sol");
         assert_eq!(preference.reasoning_efforts["gpt-5.6-sol"], "high");
         assert_eq!(preference.reasoning_efforts["gpt-5.4-mini"], "low");
+    }
+
+    #[test]
+    fn selecting_an_unsupported_model_automatically_disables_fast() {
+        let mut preference =
+            ProviderPreference::from_models(&["gpt-5.6-sol".into(), "gpt-5.4-mini".into()])
+                .unwrap();
+        preference.set_fast(true).unwrap();
+
+        let fast_disabled = preference.select("gpt-5.4-mini", "none").unwrap();
+
+        assert!(fast_disabled);
+        assert_eq!(preference.selected_model, "gpt-5.4-mini");
+        assert!(!preference.fast_enabled);
     }
 
     #[test]
@@ -728,7 +983,7 @@ mod tests {
     }
 
     #[test]
-    fn preference_store_v1_is_loaded_for_upgrade_and_v2_round_trips() {
+    fn preference_store_v1_is_loaded_for_upgrade_and_v3_round_trips() {
         let legacy = br#"{
   "version": 1,
   "providers": {
@@ -744,7 +999,7 @@ mod tests {
         let loaded = parse_store(legacy).unwrap();
 
         assert!(loaded.needs_upgrade);
-        assert_eq!(loaded.store.version, 2);
+        assert_eq!(loaded.store.version, 3);
         let migrated = &loaded.store.providers["provider-a"];
         assert!(migrated.base_urls.is_empty());
         assert_eq!(
@@ -777,9 +1032,10 @@ mod tests {
         assert!(!reparsed.needs_upgrade);
         assert_eq!(reparsed.store, store);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("\"version\": 2"));
+        assert!(text.contains("\"version\": 3"));
         assert!(text.contains("\"baseUrls\""));
         assert!(text.contains("\"modelPreference\""));
+        assert!(text.contains("\"fastEnabled\": false"));
         assert!(text.ends_with('\n'));
     }
 
@@ -806,7 +1062,7 @@ mod tests {
         assert!(loaded.needs_upgrade);
         assert_eq!(fs::read(&path).unwrap(), legacy);
 
-        let unknown = br#"{"version":3,"providers":{}}"#;
+        let unknown = br#"{"version":4,"providers":{}}"#;
         fs::write(&path, unknown).unwrap();
         let unknown_error = service.load_versioned().unwrap_err();
         assert_eq!(unknown_error.code(), "INVALID_PROVIDER_PREFERENCES");

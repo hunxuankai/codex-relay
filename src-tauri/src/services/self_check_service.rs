@@ -716,6 +716,21 @@ mod tests {
         );
     }
 
+    #[test]
+    fn critical_checks_accept_v2_preferences_without_rewriting_them() {
+        let probe = Arc::new(FakeCodexProbe::new(CodexProbeResult::Detected(
+            "codex-cli 1.0.0".into(),
+        )));
+        let (_directory, paths, service) = valid_service(probe, false);
+        let legacy = include_bytes!("../../../fixtures/provider-preferences-v2.json");
+        fs::write(&paths.provider_preferences_file, legacy).unwrap();
+
+        let report = service.run_critical_checks();
+
+        assert_eq!(report.level, HealthLevel::Normal);
+        assert_eq!(fs::read(&paths.provider_preferences_file).unwrap(), legacy);
+    }
+
     #[tokio::test]
     async fn valid_extended_check_reports_cli_and_consistent_autostart_as_normal() {
         let probe = Arc::new(FakeCodexProbe::new(CodexProbeResult::Detected(

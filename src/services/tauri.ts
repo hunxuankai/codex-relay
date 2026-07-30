@@ -19,6 +19,7 @@ import type {
   SelectProviderApiKeyInput,
   SelectProviderBaseUrlInput,
   SwitchOutcome,
+  UpdateProviderFastInput,
   UpdateProviderInput,
   UpdateProviderPreferenceInput,
 } from '../types/provider'
@@ -114,6 +115,12 @@ export function updateProviderPreference(
   input: UpdateProviderPreferenceInput,
 ): Promise<ProviderMutationOutcome> {
   return call('update_provider_preference', { input })
+}
+
+export function updateProviderFast(
+  input: UpdateProviderFastInput,
+): Promise<ProviderMutationOutcome> {
+  return call('update_provider_fast', { input })
 }
 
 export function deleteProvider(

@@ -291,6 +291,7 @@ fn operation_name(operation: TransactionOperation) -> &'static str {
         TransactionOperation::RestoreBackup => "restore_backup",
         TransactionOperation::SyncCurrentProvider => "sync_current_provider",
         TransactionOperation::UpdateProviderPreference => "update_provider_preference",
+        TransactionOperation::UpdateProviderFast => "update_provider_fast",
         TransactionOperation::SaveProviderBaseUrls => "save_provider_base_urls",
         TransactionOperation::SelectProviderBaseUrl => "select_provider_base_url",
         TransactionOperation::SaveProviderApiKeys => "save_provider_api_keys",
@@ -546,6 +547,10 @@ mod tests {
         assert_eq!(
             operation_name(TransactionOperation::ReorderProviders),
             "reorder_providers"
+        );
+        assert_eq!(
+            operation_name(TransactionOperation::UpdateProviderFast),
+            "update_provider_fast"
         );
     }
 

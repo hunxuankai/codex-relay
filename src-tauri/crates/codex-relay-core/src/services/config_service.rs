@@ -222,15 +222,67 @@ pub fn select_provider_with_preference(
     provider_id: &str,
     model: &str,
     reasoning_effort: &str,
+    fast_enabled: bool,
 ) -> Result<String, AppError> {
     let provider_id = validate_provider_id(provider_id)?;
     let mut document = parse_document(source)?;
     provider_table_mut(&mut document, &provider_id)?;
-    document.insert("model_provider", value(&provider_id));
-    document.insert("model", value(model));
-    document.insert("model_reasoning_effort", value(reasoning_effort));
-    document.insert("cli_auth_credentials_store", value("file"));
+    set_value_preserving_decor(
+        document.as_table_mut(),
+        "model_provider",
+        value(&provider_id),
+    );
+    set_value_preserving_decor(document.as_table_mut(), "model", value(model));
+    set_value_preserving_decor(
+        document.as_table_mut(),
+        "model_reasoning_effort",
+        value(reasoning_effort),
+    );
+    set_value_preserving_decor(
+        document.as_table_mut(),
+        "cli_auth_credentials_store",
+        value("file"),
+    );
+    apply_fast_preference(&mut document, fast_enabled)?;
     Ok(document.to_string())
+}
+
+fn apply_fast_preference(document: &mut DocumentMut, fast_enabled: bool) -> Result<(), AppError> {
+    if !fast_enabled {
+        document.remove("service_tier");
+        return Ok(());
+    }
+
+    set_value_preserving_decor(document.as_table_mut(), "service_tier", value("fast"));
+    if document.get("features").is_none() {
+        document.insert("features", Item::Table(Table::new()));
+    }
+    let features = document
+        .get_mut("features")
+        .and_then(Item::as_table_like_mut)
+        .ok_or_else(|| {
+            AppError::new(
+                "INVALID_FEATURES_CONFIG",
+                "config.toml 中的 features 格式无效。",
+                "features is not a TOML table or inline table",
+            )
+        })?;
+    set_value_preserving_decor(features, "fast_mode", value(true));
+    Ok(())
+}
+
+fn set_value_preserving_decor(table: &mut dyn TableLike, key: &str, mut replacement: Item) {
+    if let Some((_key, existing)) = table.get_key_value_mut(key) {
+        if let (Some(decor), Some(replacement)) = (
+            existing.as_value().map(|existing| existing.decor().clone()),
+            replacement.as_value_mut(),
+        ) {
+            *replacement.decor_mut() = decor;
+        }
+        *existing = replacement;
+    } else {
+        table.insert(key, replacement);
+    }
 }
 
 fn model_providers_table_mut(
@@ -420,7 +472,8 @@ mod tests {
     #[test]
     fn select_provider_updates_only_official_top_level_selection_fields() {
         let output =
-            select_provider_with_preference(MULTIPLE, "provider-b", "gpt-5.6-sol", "high").unwrap();
+            select_provider_with_preference(MULTIPLE, "provider-b", "gpt-5.6-sol", "high", false)
+                .unwrap();
 
         assert!(output.contains("model_provider = \"provider-b\""));
         assert!(output.contains("model = \"gpt-5.6-sol\""));
@@ -428,5 +481,148 @@ mod tests {
         assert!(output.contains("cli_auth_credentials_store = \"file\""));
         assert!(output.contains("[model_providers.provider-a]"));
         assert!(output.contains("model = \"test-model-b\""));
+    }
+
+    #[test]
+    fn selecting_a_fast_provider_writes_top_level_tier_and_enables_feature_gate() {
+        let output = select_provider_with_preference(
+            WITH_COMMENTS,
+            "provider-b",
+            "gpt-5.6-sol",
+            "high",
+            true,
+        )
+        .unwrap();
+        let document = parse_document(&output).unwrap();
+
+        assert_eq!(
+            document.get("service_tier").and_then(Item::as_str),
+            Some("fast")
+        );
+        let features = document
+            .get("features")
+            .and_then(Item::as_table_like)
+            .unwrap();
+        assert_eq!(
+            features.get("fast_mode").and_then(Item::as_bool),
+            Some(true)
+        );
+        assert_eq!(features.get("goals").and_then(Item::as_bool), Some(true));
+        assert!(output.contains("# This leading comment must survive every edit."));
+        assert!(output.contains("[mcp_servers.sample]"));
+
+        let provider = document["model_providers"]["provider-b"]
+            .as_table_like()
+            .unwrap();
+        assert!(!provider.contains_key("service_tier"));
+        assert!(!provider.contains_key("fast_mode"));
+    }
+
+    #[test]
+    fn selecting_a_non_fast_provider_only_removes_the_top_level_tier() {
+        let source = r#"service_tier = "fast"
+model_provider = "provider-a"
+features = { fast_mode = false, other_feature = true }
+
+[model_providers.provider-a]
+name = "Provider A"
+base_url = "https://provider-a.example.com/v1"
+wire_api = "responses"
+"#;
+        let before = parse_document(source).unwrap();
+        let before_features = before.get("features").unwrap().to_string();
+
+        let output =
+            select_provider_with_preference(source, "provider-a", "gpt-5.6-sol", "medium", false)
+                .unwrap();
+        let after = parse_document(&output).unwrap();
+
+        assert!(after.get("service_tier").is_none());
+        assert_eq!(after.get("features").unwrap().to_string(), before_features);
+        assert!(!output.contains("service_tier = \"off\""));
+        assert!(!output.contains("service_tier = \"standard\""));
+    }
+
+    #[test]
+    fn fast_projection_supports_missing_standard_and_inline_feature_tables() {
+        let missing =
+            select_provider_with_preference(MULTIPLE, "provider-a", "gpt-5.6-sol", "medium", true)
+                .unwrap();
+        let missing_document = parse_document(&missing).unwrap();
+        assert_eq!(
+            missing_document["features"]["fast_mode"].as_bool(),
+            Some(true)
+        );
+
+        let inline = r#"model_provider = "provider-a"
+features = { other_feature = true, fast_mode = false }
+
+[model_providers.provider-a]
+name = "Provider A"
+base_url = "https://provider-a.example.com/v1"
+wire_api = "responses"
+"#;
+        let inline_output =
+            select_provider_with_preference(inline, "provider-a", "gpt-5.6-sol", "medium", true)
+                .unwrap();
+        let inline_document = parse_document(&inline_output).unwrap();
+        let inline_features = inline_document["features"].as_inline_table().unwrap();
+        assert_eq!(
+            inline_features
+                .get("fast_mode")
+                .and_then(toml_edit::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            inline_features
+                .get("other_feature")
+                .and_then(toml_edit::Value::as_bool),
+            Some(true)
+        );
+
+        let standard = r#"model_provider = "provider-a"
+
+[model_providers.provider-a]
+name = "Provider A"
+base_url = "https://provider-a.example.com/v1"
+wire_api = "responses"
+
+[features]
+other_feature = true
+# Keep this Fast comment.
+fast_mode = false
+"#;
+        let standard_output =
+            select_provider_with_preference(standard, "provider-a", "gpt-5.6-sol", "medium", true)
+                .unwrap();
+        assert!(standard_output.contains("# Keep this Fast comment."));
+    }
+
+    #[test]
+    fn fast_projection_rejects_scalar_features_only_when_enabling_fast() {
+        let source = r#"service_tier = "fast"
+model_provider = "provider-a"
+features = false
+
+[model_providers.provider-a]
+name = "Provider A"
+base_url = "https://provider-a.example.com/v1"
+wire_api = "responses"
+"#;
+
+        let error =
+            select_provider_with_preference(source, "provider-a", "gpt-5.6-sol", "medium", true)
+                .unwrap_err();
+        assert_eq!(error.code(), "INVALID_FEATURES_CONFIG");
+
+        let disabled =
+            select_provider_with_preference(source, "provider-a", "gpt-5.6-sol", "medium", false)
+                .unwrap();
+        let document = parse_document(&disabled).unwrap();
+        assert!(document.get("service_tier").is_none());
+        assert_eq!(
+            document.get("features").and_then(Item::as_bool),
+            Some(false)
+        );
     }
 }

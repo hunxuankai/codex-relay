@@ -8,6 +8,7 @@ Codex Relay 是一款面向 Windows 10/11 的轻量桌面工具，用于管理�
 - 新增、编辑、删除 Provider，保留无关 TOML 注释、未知字段和功能开关。
 - 为每个 Provider 保存多个命名 Base URL 和多个命名 API Key，在详情页按名称独立切换。
 - Base URL 与 API Key 分别管理；当前 Provider 的选择立即写入 Codex 配置，非当前 Provider 只保存预选。
+- 为每个 Provider 保存独立 Fast 偏好；支持模型开启后投影到 Codex 的 Fast/priority 服务层。
 - API Key 管理器打开后直接查看全部明文密钥，可统一隐藏/显示并逐项复制；关闭后清空前端密钥状态。
 - 在 Provider 详情显式运行 API 可用性测试或 Codex 兼容性测试，分别验证最小 Responses 请求和一次正常 Codex 回合。
 - 切换时以同一事务更新 `config.toml` 与 `auth.json`，失败时验证回滚结果。
@@ -219,7 +220,7 @@ Codex 配置目录按以下优先级解析：
 
 ### `config.toml`
 
-Codex Provider 配置的主要数据源。每个 Provider 的实际 `base_url` 是当前 Base URL 选择的唯一真相。Codex Relay 只局部修改目标 Provider、顶层 `model_provider`、`model`、`model_reasoning_effort` 和 `cli_auth_credentials_store`。Provider 块内不写入 Relay 私有列表或模型偏好；其他 Provider、注释、`[features]` 和未知字段必须保留。
+Codex Provider 配置的主要数据源。每个 Provider 的实际 `base_url` 是当前 Base URL 选择的唯一真相。Codex Relay 只局部修改目标 Provider、顶层 `model_provider`、`model`、`model_reasoning_effort`、`cli_auth_credentials_store` 和 Fast 投影。Provider 块内不写入 Relay 私有列表或模型偏好；其他 Provider、注释、非 Fast feature 和未知字段必须保留。
 
 ### `auth.json`
 
@@ -239,7 +240,13 @@ Codex Provider 配置的主要数据源。每个 Provider 的实际 `base_url` �
 
 ### `provider-preferences.json`
 
-位于 `%LOCALAPPDATA%\CodexRelay\provider-preferences.json`。版本 2 保存 Provider 列表显示顺序，以及每个 Provider 有序的多个命名 Base URL、稳定条目 ID、可用模型、当前偏好模型和逐模型 `model_reasoning_effort`。列表顺序是 Relay 私有界面偏好，不会重排或污染 Codex 官方 `config.toml`；未记录或外部新增的 Provider 按 `config.toml` 顺序追加。该文件不保存第二份 URL 选择游标；当前选择由 `config.toml.base_url` 与命名列表匹配得到。模型目录随软件版本发布，不支持在线更新。版本 1 只读兼容，在下一次成功用户事务后升级。
+位于 `%LOCALAPPDATA%\CodexRelay\provider-preferences.json`。版本 3 保存 Provider 列表显示顺序，以及每个 Provider 有序的多个命名 Base URL、稳定条目 ID、可用模型、当前偏好模型、逐模型 `model_reasoning_effort` 和布尔 `fastEnabled`。列表顺序和 Fast 都是 Relay 私有偏好，不会写入 `[model_providers.<id>]`；未记录或外部新增的 Provider 按 `config.toml` 顺序追加。该文件不保存第二份 URL 选择游标；当前选择由 `config.toml.base_url` 与命名列表匹配得到。模型目录随软件版本发布，不支持在线更新。版本 1/2 只读兼容，迁移时 Fast 默认关闭，仅在下一次成功用户事务后写出 v3；旧版 Relay 可能拒绝 v3，降级前应保留当前备份。
+
+### Provider Fast 偏好
+
+Fast 默认关闭。当前内置目录支持 `gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5` 和 `gpt-5.4`；`gpt-5.4-mini` 不支持。模型不支持时开关保持关闭并显示原因；已开启 Fast 后把模型集合改到不支持的偏好模型，会在同一 Provider 事务中自动关闭 Fast。Relay 不提供通用 `service_tier` 下拉框，也不会在运行时调用 `codex debug models` 或通过真实网络探测能力。
+
+应用 Fast Provider 时，Relay 在 `config.toml` 顶层写入 `service_tier = "fast"`，并单向确保 `[features].fast_mode = true`。关闭 Fast 只删除顶层 `service_tier`，不会删除 `fast_mode` 或写入 `fast_mode = false`。修改当前 Provider 的 Fast 会立即同步当前 Codex 配置；修改非当前 Provider 只保存偏好，等该 Provider 被应用时再投影。Fast 映射到 priority 服务层，可能使用更多 credits 或产生更高 API 费用。官方依据见 [Codex Configuration Reference](https://developers.openai.com/codex/config-reference/#configtoml) 与 [Speed 文档](https://learn.chatgpt.com/docs/agent-configuration/speed)。
 
 ### 其他应用数据
 
@@ -265,13 +272,13 @@ Codex Provider 配置的主要数据源。每个 Provider 的实际 `base_url` �
 
 ## Provider 操作与切换事务
 
-新增 Provider 时录入一个初始地址名称、HTTP(S) Base URL、一个初始密钥名称和 API Key；两项都成为当前选择。常规编辑只修改名称、固定 `responses` Wire API 和模型集合，不再替换或清空地址/密钥。Provider ID 创建后不可修改。
+新增 Provider 时录入一个初始地址名称、HTTP(S) Base URL、一个初始密钥名称、API Key 和默认关闭的 Fast 偏好；地址与密钥都成为当前选择。常规编辑只修改名称、固定 `responses` Wire API、模型集合和 Fast，不再替换或清空地址/密钥。Provider ID 创建后不可修改。
 
 地址和密钥各自通过管理对话框批量新增、重命名、替换和删除，并在一次事务中统一保存。名称去除首尾空白后必填、同类大小写不敏感唯一，实际值也必须唯一；条目保持添加顺序且没有数量上限。当前选中项必须先切换才能删除，最后一项不能删除。
 
 左侧 Provider 列表可通过拖动手柄排序，也可聚焦手柄后使用上下方向键调整。排序放开后立即显示，并通过只修改 `provider-preferences.json` 的受保护事务跨刷新和重启保留；它不会切换当前 Provider，也不会改写 `config.toml`、`auth.json` 或 `providers.json`。
 
-点击 Base URL 只切换地址，点击 API Key 只切换密钥。当前 Provider 立即同步对应 `config.toml` 或 `auth.json` 并提示重启 Codex；非当前 Provider 只保存预选，不改变全局当前 Provider。应用非当前 Provider 时，其预选地址、密钥、模型和推理强度一起生效。外部未命名地址或密钥只展示状态，显式命名纳管前不能应用或测试。
+点击 Base URL 只切换地址，点击 API Key 只切换密钥。详情页修改当前 Provider 的地址、密钥、模型偏好或 Fast 会立即同步对应全局文件并提示重启 Codex；详情页修改非当前 Provider 只保存预选。编辑当前 Provider 时继续由“保存后立即同步当前 Codex 配置”选项决定是否投影。应用非当前 Provider 时，其预选地址、密钥、模型、推理强度和 Fast 一起生效。外部未命名地址或密钥只展示状态，显式命名纳管前不能应用或测试。
 
 切换步骤包括：重新读取四个受管文件、验证目标偏好与密钥、检查外部修改指纹、创建统一备份、生成内存结果、写入临时文件、解析验证、替换正式文件、再次验证、刷新托盘与界面。成功提示包含“请重启 Codex 后生效”。
 
@@ -336,6 +343,7 @@ Tauri 更新包签名用于证明下载资产与客户端内置信任根匹配�
 - `INVALID_CONFIG_TOML`：`config.toml` 无法解析；应用不会修改该文件。
 - `INVALID_PROVIDER_SECRETS`：`providers.json` 损坏；损坏副本已保留。
 - `PROVIDER_API_KEY_MISSING`：目标 Provider 未保存密钥，不能启用。
+- `MODEL_FAST_UNSUPPORTED`：当前偏好模型不支持 Fast；文件保持不变。
 - `PROVIDER_BASE_URL_UNMANAGED` / `PROVIDER_TEST_BASE_URL_UNMANAGED`：当前地址尚未保存为命名地址。
 - `PROVIDER_TEST_KEY_UNMANAGED`：当前密钥尚未命名导入，不能运行测试。
 - `SELECTED_BASE_URL_DELETE_FORBIDDEN` / `SELECTED_API_KEY_DELETE_FORBIDDEN`：先切换当前项再删除。
@@ -355,6 +363,7 @@ NSIS 卸载器移除应用程序和快捷方式，但没有自定义卸载钩子
 
 - 程序仅支持 Windows 10/11；安装器为所有用户（per-machine），但 Provider、Codex 配置、应用数据和开机启动均按当前登录用户管理。
 - Wire API 当前只支持 `responses`。
+- Fast 是模型目录驱动的布尔偏好，不是任意 `service_tier` 编辑器，也不承诺远端 Provider 一定接受 priority 请求。
 - 启动、自检、Provider 列表刷新和文件监控不调用模型接口验证 Base URL 或 API Key；只有用户显式启动上述 Provider 测试时，才会向目标 Provider 发送一次模型请求。
 - API Key 和备份不加密，不适合共享计算机或高安全场景。
 - 没有强制更新、自动下载、自动安装、自动回滚、云同步、团队权限或远程管理。

@@ -26,6 +26,8 @@ save_provider_base_urls(input: SaveProviderBaseUrlsInput) -> ProviderMutationOut
 select_provider_base_url(input: SelectProviderBaseUrlInput) -> ProviderMutationOutcome
 save_provider_api_keys(input: SaveProviderApiKeysInput) -> ProviderMutationOutcome
 select_provider_api_key(input: SelectProviderApiKeyInput) -> ProviderMutationOutcome
+update_provider_preference(input: UpdateProviderPreferenceInput) -> ProviderMutationOutcome
+update_provider_fast(input: UpdateProviderFastInput) -> ProviderMutationOutcome
 import_current_auth_key(input: ImportCurrentApiKeyInput) -> ProviderMutationOutcome
 reorder_providers(input: ReorderProvidersInput) -> ProviderMutationOutcome
 ```
@@ -40,6 +42,7 @@ interface CreateProviderInput {
   baseUrl: string
   wireApi: 'responses'
   models: string[]
+  fastEnabled: boolean
   apiKeyName: string
   apiKey: string
   activateAfterSave: boolean
@@ -51,6 +54,7 @@ interface UpdateProviderInput {
   name: string
   wireApi: 'responses'
   models: string[]
+  fastEnabled: boolean
   syncIfActive: boolean
   expectedFiles: FileSetFingerprint
 }
@@ -71,6 +75,12 @@ interface ReorderProvidersInput {
   providerIds: string[]
   expectedFiles: FileSetFingerprint
 }
+
+interface UpdateProviderFastInput {
+  providerId: string
+  enabled: boolean
+  expectedFiles: FileSetFingerprint
+}
 ```
 
 `id=null` 只表示新增条目；现有 ID 必须来自最近权威快照，客户端不得伪造稳定 ID。
@@ -82,7 +92,10 @@ interface ReorderProvidersInput {
 - `baseUrls: Array<{ id, name, url }>`、`selectedBaseUrlId`、`baseUrlStatus`；
 - `apiKeys: Array<{ id, name }>`、`selectedApiKeyId`、`apiKeyStatus`；
 - `configurationComplete` 与安全的 `disabledReason`；
-- Provider、模型、验证和当前状态字段。
+- `fastEnabled`、Provider、模型、验证和当前状态字段。
+
+`ProviderListState.modelCatalog[]` 必须包含 `supportsFast: boolean`；组件只能消费该字段，不能维护
+另一份支持模型 ID 常量。
 
 普通 DTO 不得包含 `apiKey`。完整密钥只允许出现在
 `ProviderApiKeyManagementState.entries[].apiKey`，并且 Rust `Debug` 必须脱敏。
@@ -93,8 +106,8 @@ interface ReorderProvidersInput {
 
 | 文件 | 权威内容 | 禁止行为 |
 |---|---|---|
-| `config.toml` | Provider 官方字段与每个 Provider 当前实际 `base_url`；顶层当前 Provider/模型/推理强度 | 不写 Relay 私有数组；不保存第二份 URL 选择游标 |
-| `provider-preferences.json` v2 | Provider 显示顺序、命名 Base URL 列表与可选模型偏好 | 不保存 API Key；不覆盖未知 Provider 记录；不重排 Codex 配置 |
+| `config.toml` | Provider 官方字段与每个 Provider 当前实际 `base_url`；顶层当前 Provider/模型/推理强度/Fast 投影 | 不写 Relay 私有数组；不保存第二份 URL 选择游标 |
+| `provider-preferences.json` v3 | Provider 显示顺序、命名 Base URL 列表、模型偏好与 `fastEnabled` | 不保存 API Key；不覆盖未知 Provider 记录；不重排 Codex 配置 |
 | `providers.json` v2 | 命名 API Key 列表与 `selectedApiKeyId` | 不作为 Provider 官方定义来源；损坏时不覆盖为空 |
 | `auth.json` | 当前生效 Provider 的实际密钥 | 不作为非当前 Provider 的密钥预选存储 |
 
@@ -102,11 +115,11 @@ interface ReorderProvidersInput {
 
 ### 3.2 私有存储格式
 
-`provider-preferences.json` v2：
+`provider-preferences.json` v3：
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "providerOrder": ["provider-a"],
   "providers": {
     "provider-a": {
@@ -120,7 +133,8 @@ interface ReorderProvidersInput {
       "modelPreference": {
         "models": ["gpt-5.6-sol"],
         "selectedModel": "gpt-5.6-sol",
-        "reasoningEfforts": { "gpt-5.6-sol": "medium" }
+        "reasoningEfforts": { "gpt-5.6-sol": "medium" },
+        "fastEnabled": false
       }
     }
   }
@@ -170,7 +184,7 @@ interface ReorderProvidersInput {
   `providers.json.selectedApiKeyId` 和当前 `auth.json`。
 - 非当前 Provider 的 URL 点击只修改其 `config.toml.base_url` 预选，不改变顶层当前 Provider；
   密钥点击只修改 `providers.json.selectedApiKeyId`，不得写当前 `auth.json`。
-- 应用非当前 Provider 时，使用其预选 URL、密钥、模型和推理强度，并在同一事务内写入生效配置。
+- 应用非当前 Provider 时，使用其预选 URL、密钥、模型、推理强度和 Fast，并在同一事务内写入生效配置。
 - 当前选中项不能直接删除，最后一项不能删除；系统不得自动按顺序回退选择。
 - 管理对话框提交完整草稿，一次事务全部成功或全部回滚；取消不写文件。
 
@@ -201,10 +215,26 @@ interface ReorderProvidersInput {
 - `provider-preferences.json` v1 模型记录与受管 Provider 的当前 URL在内存中规范为
   `legacy-default` / “默认地址”。
 - `provider-preferences.json` v2 缺少 `providerOrder` 时按空排列读取；不得把缺失字段视为损坏。
-- 启动、列表读取、自检和文件监控不得为迁移而写文件；下一次成功用户事务按需写 v2。
+- 启动、列表读取、自检和文件监控不得为迁移而写文件；v1/v2 的 Fast 在内存中默认关闭，下一次成功用户事务按需写 v3。
 - 列表、密钥管理查询和可用性目标解析遇到缺失的私有文件时，只能使用内存空存储；不得创建
   `providers.json` 或 `provider-preferences.json`，也不得使调用方持有的文件指纹自行过期。
-- 未知版本失败关闭；临时文件解析、备份恢复和自检必须同时接受 v1/v2。
+- 未知版本失败关闭；临时文件解析、备份恢复和自检必须同时接受 v1/v2/v3。
+
+### 3.8 Provider Fast 与 Codex 全局投影
+
+- `fastEnabled` 是 Provider 私有布尔偏好，默认 `false`；不是 Provider 块字段，也不是通用
+  `service_tier` 枚举编辑器。
+- 内置模型目录是能力唯一事实来源：GPT-5.6 Sol/Terra/Luna、GPT-5.5、GPT-5.4 支持，
+  GPT-5.4 Mini 不支持。UI 只读取 `supportsFast`，Rust 在所有写入口再次校验。
+- 开启 Fast 时用 `toml_edit` 写顶层 `service_tier = "fast"`，并单向确保
+  `[features].fast_mode = true`；已有标准表、inline table、注释和其他 feature 必须保留。
+- 关闭 Fast 只删除顶层 `service_tier`，不得删除 `fast_mode` 或写 `fast_mode = false`。
+- 详情页对当前 Provider 的独立 Fast 修改立即写偏好与 `config.toml`；非当前 Provider 只写偏好。
+  编辑页继续由 `syncIfActive` 决定是否立即投影。模型选择或编辑回退到不支持模型时，在同一事务把 Fast 关闭。
+- `features` 是标量且需要开启 Fast 时返回配置错误；关闭 Fast 不读取或重写 `features`。
+- 官方值与费用语义依据 [Codex 配置参考](https://developers.openai.com/codex/config-reference/#configtoml)
+  和 [Speed 文档](https://learn.chatgpt.com/docs/agent-configuration/speed)。不使用未定义的关闭值，
+  不在运行时执行 `codex debug models` 或网络能力测试。
 
 ## 4. 验证与错误矩阵
 
@@ -223,6 +253,8 @@ interface ReorderProvidersInput {
 | 删除最后 URL / 密钥 | `LAST_BASE_URL_DELETE_FORBIDDEN` / `LAST_API_KEY_DELETE_FORBIDDEN` |
 | 应用外部 URL、外部密钥或缺失密钥 | `PROVIDER_BASE_URL_UNMANAGED` / `PROVIDER_API_KEY_MISSING` |
 | 测试外部 URL、外部密钥或缺失密钥 | `PROVIDER_TEST_BASE_URL_UNMANAGED` / `PROVIDER_TEST_KEY_UNMANAGED` / `PROVIDER_TEST_KEY_MISSING` |
+| 不支持模型请求开启 Fast | `MODEL_FAST_UNSUPPORTED`，事务前失败且四文件不变 |
+| 开启 Fast 时 `[features]` 不是 table/inline table | `INVALID_FEATURES_CONFIG`，不覆盖未知 TOML |
 | `expectedFiles` 过期 | `EXTERNAL_MODIFICATION_CONFLICT`，不得强制覆盖 |
 | 写入、解析或写后验证失败 | 回滚全部已触及文件；回滚不完整返回 `ROLLBACK_INCOMPLETE` |
 
@@ -234,25 +266,29 @@ interface ReorderProvidersInput {
 - 良好：打开密钥管理器立即看到全部假密钥，关闭后 manager `entries=[]`，晚返回的旧请求被丢弃。
 - 良好：拖动 `provider-a` 到 `provider-b` 之后，列表立即投影新顺序；事务完成后刷新和重启仍
   使用该顺序，而 `config.toml`、当前 Provider 和 `auth.json` 字节不变。
+- 良好：当前 Provider 开启 Fast 后同时得到 `service_tier = "fast"` 与 `fast_mode = true`；关闭后
+  tier 消失而 feature gate 保留。非当前 Provider 修改 Fast 时当前 `config.toml` 字节不变。
 - 基线：v1 文件启动后只在内存显示“默认地址/默认密钥”，磁盘字节不变。
+- 基线：v2 偏好启动与 self-check 保持原字节，下一次成功用户事务写 v3 且 Fast 为 false。
 - 基线：外部不完整 Provider 仍可进入详情与补齐入口，但“使用”和测试按钮显示禁用原因。
 - 错误：把 Base URL 与 API Key 绑定成成对连接，导致用户不能独立切换。
 - 错误：读取到外部值后自动追加命名项，或列表刷新时自动升级文件。
 - 错误：把管理 DTO 放进 `useProviders`、Pinia、localStorage、通知或日志。
 - 错误：通过重排 `config.toml.model_providers` 或 localStorage 保存 Provider 顺序。
+- 错误：用 `service_tier = "off"` 关闭 Fast，或关闭时把全局 `fast_mode` 写成 false。
 
 ## 6. 必需测试
 
-- Rust 纯逻辑：名称/值唯一、稳定 ID、Provider/条目顺序、选中项、最后项、v1/v2、未知版本与脱敏 `Debug`。
+- Rust 纯逻辑：名称/值唯一、稳定 ID、Provider/条目顺序、选中项、最后项、v1/v2/v3、模型 Fast 能力、非法组合、未知版本与脱敏 `Debug`。
 - ProviderService 临时目录测试：创建、URL/Key 批量管理、独立选择、当前/非当前语义、
   应用、命名导入、外部状态、缺失私有文件只读、外部 Provider 常规编辑不纳管地址、指纹冲突和
-  Provider 重排、非法排列、指纹冲突和故障回滚。
-- TransactionService / Backup / SelfCheck：v1/v2 临时解析、新 operation 名、旧备份恢复、
+  Provider 重排、非法排列、Fast 当前/非当前矩阵、模型自动关闭、非法模型、指纹冲突和故障回滚。
+- TransactionService / Backup / SelfCheck：v1/v2/v3 临时解析、`update_provider_fast` operation 名、旧备份恢复、
   四文件写后验证和回滚失败保真。
 - typed service：精确命令名、`camelCase` 参数和 `{ input }` 包装；断言前脱敏 API Key 字段。
-- composable：排序乐观投影/失败恢复、mutation 后权威刷新、busy 防重、Provider 事件晚响应、密钥 manager 的
+- composable：排序乐观投影/失败恢复、Fast mutation 指纹与权威刷新、busy 防重、Provider 事件晚响应、密钥 manager 的
   load/save/clear/scope dispose/晚响应丢弃。
-- Vue：Provider 拖动/方向键排序与 busy 门禁、创建四个初始字段、编辑模式无 URL/Key 修改、两行 `ElSegmented` 独立事件、
+- Vue：Provider 拖动/方向键排序与 busy 门禁、创建/编辑 Fast 默认与回填、实际偏好模型、费用/不支持提示、模型回退自动关闭、同步选项、两行 `ElSegmented` 独立事件、
   760px 横向滚动、外部/缺失状态、两个批量对话框、默认明文、统一隐藏/显示、复制和关闭清空。
 - 路径与密钥审计：只使用 `test-key-*-not-real`，真实默认目录前后递归快照完全不变，
   Git、任务、规范、日志和快照无真实密钥。
@@ -290,4 +326,23 @@ keyManager.clear() // 关闭、卸载或作废请求时立即清空
 normalize(config.toml.base_url) == normalize(baseUrls[i].url)
   -> selectedBaseUrlId = baseUrls[i].id
   -> 未匹配则 baseUrlStatus = external
+```
+
+### 错误：在组件复制 Fast 支持列表并直接改 Provider
+
+```ts
+const supportsFast = ['gpt-5.6-sol', 'gpt-5.5'].includes(provider.selectedModel ?? '')
+provider.fastEnabled = true
+```
+
+### 正确：目录能力下发，事件交给 composable 和后端事务
+
+```ts
+const fastSupported = computed(() =>
+  modelCatalog.some((model) => model.id === provider.selectedModel && model.supportsFast),
+)
+if (fastSupported.value) emit('update-fast', true)
+
+// 父级只编排动作，最终状态来自 mutation 后刷新。
+await providerState.updateFast(provider.id, true)
 ```

@@ -1,0 +1,47 @@
+{
+  "version": 2,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [
+        {
+          "id": "65c7650d-d20d-4dca-b445-8aa47fcbe92c",
+          "name": "主用地址",
+          "url": "https://provider-a.example.com/v1"
+        }
+      ],
+      "modelPreference": {
+        "models": [
+          "gpt-5.6-sol",
+          "gpt-5.4-mini"
+        ],
+        "selectedModel": "gpt-5.6-sol",
+        "reasoningEfforts": {
+          "gpt-5.4-mini": "none",
+          "gpt-5.6-sol": "medium"
+        }
+      }
+    },
+    "provider-b": {
+      "baseUrls": [
+        {
+          "id": "f8e62dc2-46df-4234-92d5-7d318d879ff7",
+          "name": "主用地址",
+          "url": "https://provider-b.example.com/v1"
+        }
+      ],
+      "modelPreference": {
+        "models": [
+          "gpt-5.5"
+        ],
+        "selectedModel": "gpt-5.5",
+        "reasoningEfforts": {
+          "gpt-5.5": "medium"
+        }
+      }
+    }
+  },
+  "providerOrder": [
+    "provider-a",
+    "provider-b"
+  ]
+}

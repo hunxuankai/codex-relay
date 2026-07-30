@@ -98,6 +98,7 @@ pub struct ProviderProfile {
     pub models: Vec<String>,
     pub selected_model: Option<String>,
     pub reasoning_efforts: BTreeMap<String, String>,
+    pub fast_enabled: bool,
     pub preference_configured: bool,
     pub api_key_configured: bool,
     pub configuration_complete: bool,
@@ -116,6 +117,7 @@ pub struct CreateProviderInput {
     pub base_url: String,
     pub wire_api: String,
     pub models: Vec<String>,
+    pub fast_enabled: bool,
     pub api_key_name: String,
     pub api_key: String,
     pub activate_after_save: bool,
@@ -132,6 +134,7 @@ impl fmt::Debug for CreateProviderInput {
             .field("base_url", &self.base_url)
             .field("wire_api", &self.wire_api)
             .field("models", &self.models)
+            .field("fast_enabled", &self.fast_enabled)
             .field("api_key_name", &self.api_key_name)
             .field("api_key_configured", &!self.api_key.is_empty())
             .field("activate_after_save", &self.activate_after_save)
@@ -147,6 +150,7 @@ pub struct UpdateProviderInput {
     pub name: String,
     pub wire_api: String,
     pub models: Vec<String>,
+    pub fast_enabled: bool,
     pub sync_if_active: bool,
     pub expected_files: FileSetFingerprint,
 }
@@ -237,6 +241,7 @@ impl fmt::Debug for UpdateProviderInput {
             .field("name", &self.name)
             .field("wire_api", &self.wire_api)
             .field("models", &self.models)
+            .field("fast_enabled", &self.fast_enabled)
             .field("sync_if_active", &self.sync_if_active)
             .field("expected_files", &self.expected_files)
             .finish()
@@ -259,6 +264,7 @@ pub struct ModelCatalogItem {
     pub id: String,
     pub reasoning_efforts: Vec<String>,
     pub default_reasoning_effort: String,
+    pub supports_fast: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -267,6 +273,14 @@ pub struct UpdateProviderPreferenceInput {
     pub provider_id: String,
     pub model: String,
     pub reasoning_effort: String,
+    pub expected_files: FileSetFingerprint,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProviderFastInput {
+    pub provider_id: String,
+    pub enabled: bool,
     pub expected_files: FileSetFingerprint,
 }
 
@@ -319,6 +333,7 @@ mod tests {
             models: vec!["gpt-5.6-sol".into()],
             selected_model: Some("gpt-5.6-sol".into()),
             reasoning_efforts: BTreeMap::from([("gpt-5.6-sol".into(), "medium".into())]),
+            fast_enabled: false,
             preference_configured: true,
             api_key_configured: true,
             configuration_complete: true,
@@ -352,6 +367,7 @@ mod tests {
             base_url: "https://provider-a.example.com/v1".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.6-sol".into()],
+            fast_enabled: false,
             api_key_name: "主用密钥".into(),
             api_key: "test-key-a-not-real".into(),
             activate_after_save: false,

@@ -18,6 +18,7 @@ import type {
   SelectProviderApiKeyInput,
   SelectProviderBaseUrlInput,
   SwitchOutcome,
+  UpdateProviderFastInput,
   UpdateProviderInput,
 } from '../types/provider'
 import type { Settings, SettingsState } from '../types/settings'
@@ -52,6 +53,7 @@ import {
   testProviderCodexCompatibility,
   testUpdateProxy,
   updateProvider,
+  updateProviderFast,
 } from './tauri'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
@@ -211,6 +213,7 @@ describe('Tauri service boundary', () => {
       models: ['model-a'],
       apiKeyName: '主用密钥',
       apiKey: 'test-key-create-not-real',
+      fastEnabled: false,
       activateAfterSave: true,
       expectedFiles: fingerprints,
     }
@@ -219,6 +222,7 @@ describe('Tauri service boundary', () => {
       name: 'Provider A',
       wireApi: 'responses',
       models: ['model-a'],
+      fastEnabled: false,
       syncIfActive: true,
       expectedFiles: fingerprints,
     }
@@ -339,6 +343,19 @@ describe('Tauri service boundary', () => {
     await reorderProviders(input)
 
     expect(invokeMock).toHaveBeenCalledWith('reorder_providers', { input })
+  })
+
+  it('wraps Provider Fast input with the exact command name', async () => {
+    invokeMock.mockResolvedValueOnce(success(mutation))
+    const input: UpdateProviderFastInput = {
+      providerId: 'provider-a',
+      enabled: true,
+      expectedFiles: fingerprints,
+    }
+
+    await updateProviderFast(input)
+
+    expect(invokeMock).toHaveBeenCalledWith('update_provider_fast', { input })
   })
 
   it('subscribes to typed Provider refresh events', async () => {

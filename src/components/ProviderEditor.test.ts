@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { ElSelect } from 'element-plus'
+import { ElSelect, ElSwitch } from 'element-plus'
 import { nextTick } from 'vue'
 import { describe, expect, it } from 'vitest'
 import type { CreateProviderInput, FileSetFingerprint, ProviderProfile } from '../types/provider'
@@ -13,8 +13,8 @@ const fingerprints: FileSetFingerprint = {
 }
 
 const modelCatalog = [
-  { id: 'gpt-5.6-sol', reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'], defaultReasoningEffort: 'medium' },
-  { id: 'gpt-5.4-mini', reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'], defaultReasoningEffort: 'none' },
+  { id: 'gpt-5.6-sol', reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'], defaultReasoningEffort: 'medium', supportsFast: true },
+  { id: 'gpt-5.4-mini', reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'], defaultReasoningEffort: 'none', supportsFast: false },
 ] as const
 
 const existing: ProviderProfile = {
@@ -37,6 +37,7 @@ const existing: ProviderProfile = {
   models: ['gpt-5.6-sol', 'gpt-5.4-mini'],
   selectedModel: 'gpt-5.6-sol',
   reasoningEfforts: { 'gpt-5.6-sol': 'high', 'gpt-5.4-mini': 'none' },
+  fastEnabled: false,
   preferenceConfigured: true,
   apiKeyConfigured: true,
   configurationComplete: true,
@@ -52,6 +53,8 @@ describe('ProviderEditor', () => {
       attachTo: document.body,
       props: { mode: 'create', provider: null, fingerprints, busy: false, modelCatalog },
     })
+
+    expect(wrapper.getComponent(ElSwitch).props('modelValue')).toBe(false)
 
     await wrapper.get('form').trigger('submit')
     await nextTick()
@@ -89,6 +92,7 @@ describe('ProviderEditor', () => {
       models: ['gpt-5.6-sol', 'gpt-5.4-mini'],
       apiKeyName: '主用密钥',
       apiKey: '<redacted>',
+      fastEnabled: false,
       activateAfterSave: false,
       expectedFiles: fingerprints,
     })
@@ -145,8 +149,75 @@ describe('ProviderEditor', () => {
       name: 'Provider A',
       wireApi: 'responses',
       models: ['gpt-5.6-sol', 'gpt-5.4-mini'],
+      fastEnabled: false,
       syncIfActive: false,
       expectedFiles: fingerprints,
+    })
+  })
+
+  it('restores and submits the saved Fast preference during edit', async () => {
+    const wrapper = mount(ProviderEditor, {
+      props: {
+        mode: 'edit',
+        provider: { ...existing, fastEnabled: true },
+        fingerprints,
+        busy: false,
+        modelCatalog,
+      },
+    })
+
+    expect(wrapper.getComponent(ElSwitch).props('modelValue')).toBe(true)
+
+    await wrapper.get('form').trigger('submit')
+
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({
+      id: 'provider-a',
+      fastEnabled: true,
+    })
+  })
+
+  it('uses the actual saved preference model to determine Fast support', () => {
+    const wrapper = mount(ProviderEditor, {
+      props: {
+        mode: 'edit',
+        provider: { ...existing, selectedModel: 'gpt-5.4-mini' },
+        fingerprints,
+        busy: false,
+        modelCatalog,
+      },
+    })
+    const fastSwitch = wrapper.getComponent(ElSwitch)
+
+    expect(fastSwitch.props('modelValue')).toBe(false)
+    expect(fastSwitch.props('disabled')).toBe(true)
+    expect(wrapper.get('#provider-editor-fast-description').text()).toContain(
+      'gpt-5.4-mini 不支持 Fast',
+    )
+  })
+
+  it('turns Fast off when the edited model set falls back to an unsupported model', async () => {
+    const wrapper = mount(ProviderEditor, {
+      props: {
+        mode: 'edit',
+        provider: { ...existing, fastEnabled: true },
+        fingerprints,
+        busy: false,
+        modelCatalog,
+      },
+    })
+
+    wrapper.getComponent(ElSelect).vm.$emit('update:modelValue', ['gpt-5.4-mini'])
+    await nextTick()
+
+    const fastSwitch = wrapper.getComponent(ElSwitch)
+    expect(fastSwitch.props('modelValue')).toBe(false)
+    expect(fastSwitch.props('disabled')).toBe(true)
+
+    await wrapper.get('form').trigger('submit')
+
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({
+      models: ['gpt-5.4-mini'],
+      fastEnabled: false,
     })
   })
 
@@ -162,6 +233,24 @@ describe('ProviderEditor', () => {
 
     expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({
       name: 'Provider A Updated',
+      syncIfActive: true,
+    })
+  })
+
+  it('offers immediate sync when only Fast changes on the active Provider', async () => {
+    const wrapper = mount(ProviderEditor, {
+      props: { mode: 'edit', provider: existing, fingerprints, busy: false, modelCatalog },
+    })
+
+    wrapper.getComponent(ElSwitch).vm.$emit('update:modelValue', true)
+    await nextTick()
+
+    expect(wrapper.find('[name="sync-if-active"]').exists()).toBe(true)
+    await wrapper.get('[name="sync-if-active"]').setValue(true)
+    await wrapper.get('form').trigger('submit')
+
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({
+      fastEnabled: true,
       syncIfActive: true,
     })
   })

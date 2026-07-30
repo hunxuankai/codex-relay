@@ -15,6 +15,7 @@ import type {
   SelectProviderApiKeyInput,
   SelectProviderBaseUrlInput,
   SwitchOutcome,
+  UpdateProviderFastInput,
   UpdateProviderInput,
   UpdateProviderPreferenceInput,
 } from '../types/provider'
@@ -30,6 +31,7 @@ export interface ProviderClient {
   updateProviderPreference?: (
     input: UpdateProviderPreferenceInput,
   ) => Promise<ProviderMutationOutcome>
+  updateProviderFast(input: UpdateProviderFastInput): Promise<ProviderMutationOutcome>
   deleteProvider(
     providerId: string,
     expectedFiles: FileSetFingerprint,
@@ -53,6 +55,7 @@ const defaultClient: ProviderClient = {
   selectProviderBaseUrl: relay.selectProviderBaseUrl,
   selectProviderApiKey: relay.selectProviderApiKey,
   updateProviderPreference: relay.updateProviderPreference,
+  updateProviderFast: relay.updateProviderFast,
   deleteProvider: relay.deleteProvider,
   switchProvider: relay.switchProvider,
   importCurrentAuthKey: relay.importCurrentAuthKey,
@@ -221,6 +224,12 @@ export function useProviders(options: UseProvidersOptions = {}) {
       }))
   }
 
+  async function updateFast(providerId: string, enabled: boolean) {
+    const expectedFiles = await currentExpectedFiles()
+    if (!expectedFiles) return undefined
+    return mutate(() => client.updateProviderFast({ providerId, enabled, expectedFiles }))
+  }
+
   async function remove(providerId: string) {
     const expectedFiles = await currentExpectedFiles()
     if (!expectedFiles) return undefined
@@ -287,6 +296,7 @@ export function useProviders(options: UseProvidersOptions = {}) {
     selectBaseUrl,
     selectApiKey,
     updatePreference,
+    updateFast,
     remove,
     switchTo,
     importCurrentKey,

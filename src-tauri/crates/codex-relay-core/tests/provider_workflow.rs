@@ -78,6 +78,7 @@ async fn provider_workflow_preserves_unknown_config_and_restores_original_bytes(
             base_url: "https://provider-b.example.test/v1".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.6-sol".into(), "gpt-5.4-mini".into()],
+            fast_enabled: false,
             api_key_name: "主用密钥".into(),
             api_key: "test-key-b-not-real".into(),
             activate_after_save: false,
@@ -93,6 +94,7 @@ async fn provider_workflow_preserves_unknown_config_and_restores_original_bytes(
             name: "Provider B Updated".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.4-mini".into()],
+            fast_enabled: false,
             sync_if_active: false,
             expected_files: state.fingerprints,
         })

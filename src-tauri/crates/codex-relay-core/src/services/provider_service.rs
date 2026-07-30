@@ -7,8 +7,8 @@ use crate::models::provider::{
     ProviderApiKeyManagementState, ProviderApiKeyStatus, ProviderApiKeySummary,
     ProviderBaseUrlStatus, ProviderBaseUrlSummary, ProviderListState, ProviderMutationOutcome,
     ProviderProfile, ReorderProvidersInput, SaveProviderApiKeysInput, SaveProviderBaseUrlsInput,
-    SelectProviderApiKeyInput, SelectProviderBaseUrlInput, SwitchOutcome, UpdateProviderInput,
-    UpdateProviderPreferenceInput, WireApi,
+    SelectProviderApiKeyInput, SelectProviderBaseUrlInput, SwitchOutcome, UpdateProviderFastInput,
+    UpdateProviderInput, UpdateProviderPreferenceInput, WireApi,
 };
 use crate::models::provider_availability::ProviderAvailabilityTarget;
 use crate::models::transaction::TransactionOperation;
@@ -254,7 +254,8 @@ impl ProviderService {
             base_url: input.base_url,
             wire_api: input.wire_api,
         })?;
-        let preference = ProviderPreference::from_models(&input.models)?;
+        let mut preference = ProviderPreference::from_models(&input.models)?;
+        preference.set_fast(input.fast_enabled)?;
         let api_key = normalize_api_key(&input.api_key)?;
         let disk = self.read_consistent_state(AuthReadMode::Lenient)?;
         let mut new_config = config_service::create_provider(&disk.config_source, &validated)?;
@@ -285,6 +286,7 @@ impl ProviderService {
                 &validated.id,
                 &preference.selected_model,
                 &preference.reasoning_efforts[&preference.selected_model],
+                preference.fast_enabled,
             )?;
             FileChange::Write(render_auth_json(&api_key)?)
         } else {
@@ -356,10 +358,14 @@ impl ProviderService {
         let new_config =
             config_service::update_provider(&disk.config_source, &validated.id, &validated)?;
         let mut new_preferences = disk.preference_store.clone();
+        let mut fast_automatically_disabled = false;
         let selected_changed =
             if let Some(private_preference) = new_preferences.providers.get_mut(&validated.id) {
                 if let Some(preference) = private_preference.model_preference.as_mut() {
-                    preference.reconcile_models(&input.models)?
+                    let fast_was_enabled = preference.fast_enabled;
+                    let selected_changed = preference.reconcile_models(&input.models)?;
+                    fast_automatically_disabled = fast_was_enabled && !preference.fast_enabled;
+                    selected_changed
                 } else {
                     private_preference.model_preference =
                         Some(ProviderPreference::from_models(&input.models)?);
@@ -375,10 +381,15 @@ impl ProviderService {
                 );
                 false
             };
-        let preference = new_preferences.providers[&validated.id]
+        let preference = new_preferences
+            .providers
+            .get_mut(&validated.id)
+            .expect("model preference container was initialized above")
             .model_preference
-            .clone()
+            .as_mut()
             .expect("model preference was initialized above");
+        preference.set_fast(input.fast_enabled)?;
+        let preference = preference.clone();
         let effective_key = configured_key(&disk.store, &validated.id);
 
         let sync_active = is_active && input.sync_if_active;
@@ -392,6 +403,7 @@ impl ProviderService {
                     &validated.id,
                     &preference.selected_model,
                     &preference.reasoning_efforts[&preference.selected_model],
+                    preference.fast_enabled,
                 )?,
                 FileChange::Write(render_auth_json(api_key)?),
             )
@@ -431,13 +443,21 @@ impl ProviderService {
         } else {
             String::new()
         };
+        let fast_note = if fast_automatically_disabled {
+            " Fast 已因当前模型不支持而自动关闭。"
+        } else {
+            ""
+        };
         let message = if is_active {
             format!(
-                "Provider「{}」已更新。{}请重启 Codex 后生效。",
-                validated.name, fallback_note
+                "Provider「{}」已更新。{}{}请重启 Codex 后生效。",
+                validated.name, fallback_note, fast_note
             )
         } else {
-            format!("Provider「{}」已更新。{}", validated.name, fallback_note)
+            format!(
+                "Provider「{}」已更新。{}{}",
+                validated.name, fallback_note, fast_note
+            )
         };
         Ok(ProviderMutationOutcome {
             providers: self.list_providers()?.providers,
@@ -1066,6 +1086,7 @@ impl ProviderService {
             &provider_id,
             &preference.selected_model,
             &preference.reasoning_efforts[&preference.selected_model],
+            preference.fast_enabled,
         )?;
 
         self.transaction_service
@@ -1134,7 +1155,8 @@ impl ProviderService {
             .model_preference
             .as_mut()
             .ok_or_else(provider_preference_missing)?;
-        preference.select(&input.model, &input.reasoning_effort)?;
+        let fast_automatically_disabled =
+            preference.select(&input.model, &input.reasoning_effort)?;
         let expected_preference = preference.clone();
         let is_active = config_service::current_provider_id(&disk.document).as_deref()
             == Some(provider_id.as_str());
@@ -1145,6 +1167,7 @@ impl ProviderService {
                     &provider_id,
                     &expected_preference.selected_model,
                     &expected_preference.reasoning_efforts[&expected_preference.selected_model],
+                    expected_preference.fast_enabled,
                 )?
                 .into_bytes(),
             )
@@ -1180,10 +1203,89 @@ impl ProviderService {
 
         Ok(ProviderMutationOutcome {
             providers: self.list_providers()?.providers,
+            message: match (is_active, fast_automatically_disabled) {
+                (true, true) => "模型偏好已写入当前 Codex 配置。Fast 已因当前模型不支持而自动关闭。请重启 Codex 后生效。".into(),
+                (true, false) => "模型偏好已写入当前 Codex 配置，请重启 Codex 后生效。".into(),
+                (false, true) => "模型偏好已保存。Fast 已因当前模型不支持而自动关闭，将在应用此 Provider 时生效。".into(),
+                (false, false) => "模型偏好已保存，将在应用此 Provider 时生效。".into(),
+            },
+        })
+    }
+
+    pub async fn update_provider_fast(
+        &self,
+        input: UpdateProviderFastInput,
+    ) -> Result<ProviderMutationOutcome, AppError> {
+        let provider_id = config_service::validate_provider_id(&input.provider_id)?;
+        let disk = self.read_consistent_state(AuthReadMode::Lenient)?;
+        if !disk
+            .provider_configs
+            .iter()
+            .any(|provider| provider.id == provider_id)
+        {
+            return Err(provider_not_found(&provider_id));
+        }
+
+        let mut new_preferences = disk.preference_store.clone();
+        let preference = new_preferences
+            .providers
+            .get_mut(&provider_id)
+            .ok_or_else(provider_preference_missing)?
+            .model_preference
+            .as_mut()
+            .ok_or_else(provider_preference_missing)?;
+        preference.set_fast(input.enabled)?;
+        let expected_preference = preference.clone();
+        let is_active = config_service::current_provider_id(&disk.document).as_deref()
+            == Some(provider_id.as_str());
+        let config_change = if is_active {
+            FileChange::Write(
+                config_service::select_provider_with_preference(
+                    &disk.config_source,
+                    &provider_id,
+                    &expected_preference.selected_model,
+                    &expected_preference.reasoning_efforts[&expected_preference.selected_model],
+                    expected_preference.fast_enabled,
+                )?
+                .into_bytes(),
+            )
+        } else {
+            FileChange::Unchanged
+        };
+
+        self.transaction_service
+            .execute(
+                TransactionRequest {
+                    operation: TransactionOperation::UpdateProviderFast,
+                    provider_id: Some(provider_id.clone()),
+                    expected_files: Some(input.expected_files),
+                    changes: FileChanges {
+                        config: config_change,
+                        auth: FileChange::Unchanged,
+                        providers: secret_upgrade_change(&disk)?,
+                        preferences: FileChange::Write(serialize_preference_store(
+                            &new_preferences,
+                        )?),
+                    },
+                },
+                |paths| {
+                    validate_preference_written(
+                        paths,
+                        &provider_id,
+                        &expected_preference,
+                        is_active,
+                    )
+                },
+            )
+            .await?;
+
+        let state = if input.enabled { "开启" } else { "关闭" };
+        Ok(ProviderMutationOutcome {
+            providers: self.list_providers()?.providers,
             message: if is_active {
-                "模型偏好已写入当前 Codex 配置，请重启 Codex 后生效。".into()
+                format!("Fast 已{state}，已写入当前 Codex 配置，请重启 Codex 后生效。")
             } else {
-                "模型偏好已保存，将在应用此 Provider 时生效。".into()
+                format!("Fast 偏好已{state}，将在应用此 Provider 时生效。")
             },
         })
     }
@@ -1393,6 +1495,7 @@ impl ProviderService {
                         .map(|effort| (*effort).into())
                         .collect(),
                     default_reasoning_effort: entry.default_reasoning_effort.into(),
+                    supports_fast: entry.supports_fast,
                 })
                 .collect(),
         }
@@ -1635,6 +1738,7 @@ fn build_provider_profile(
         reasoning_efforts: preference
             .map(|value| value.reasoning_efforts.clone())
             .unwrap_or_default(),
+        fast_enabled: preference.map(|value| value.fast_enabled).unwrap_or(false),
         preference_configured,
         api_key_configured,
         configuration_complete,
@@ -1860,6 +1964,14 @@ fn validate_preference_written(
         let effort = document
             .get("model_reasoning_effort")
             .and_then(toml_edit::Item::as_str);
+        let service_tier = document
+            .get("service_tier")
+            .and_then(toml_edit::Item::as_str);
+        let fast_mode = document
+            .get("features")
+            .and_then(toml_edit::Item::as_table_like)
+            .and_then(|features| features.get("fast_mode"))
+            .and_then(toml_edit::Item::as_bool);
         if config_service::current_provider_id(&document).as_deref() != Some(provider_id)
             || model != Some(expected.selected_model.as_str())
             || effort
@@ -1867,6 +1979,8 @@ fn validate_preference_written(
                     .reasoning_efforts
                     .get(&expected.selected_model)
                     .map(String::as_str)
+            || (expected.fast_enabled && (service_tier != Some("fast") || fast_mode != Some(true)))
+            || (!expected.fast_enabled && service_tier.is_some())
         {
             return Err(post_write_validation_error(
                 "top-level model preference does not match expected value",
@@ -2000,10 +2114,13 @@ mod tests {
         CreateProviderInput, ImportCurrentApiKeyInput, ProviderApiKeyDraft, ProviderApiKeyStatus,
         ProviderBaseUrlDraft, ProviderBaseUrlStatus, ReorderProvidersInput,
         SaveProviderApiKeysInput, SaveProviderBaseUrlsInput, SelectProviderApiKeyInput,
-        SelectProviderBaseUrlInput, UpdateProviderInput,
+        SelectProviderBaseUrlInput, UpdateProviderFastInput, UpdateProviderInput,
+        UpdateProviderPreferenceInput,
     };
+    use crate::services::transaction_service::{ManagedFileKind, WritePhase};
     use std::fs;
-    use std::sync::Arc;
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
 
     const MULTIPLE: &str = include_str!("../../../../../fixtures/config-multiple-providers.toml");
     const WITH_COMMENTS: &str = include_str!("../../../../../fixtures/config-with-comments.toml");
@@ -2015,6 +2132,8 @@ mod tests {
     const PROVIDERS_EMPTY: &str = include_str!("../../../../../fixtures/providers-empty.json");
     const PREFERENCES_MULTIPLE: &str =
         include_str!("../../../../../fixtures/provider-preferences-multiple.json");
+    const PREFERENCES_V2: &str =
+        include_str!("../../../../../fixtures/provider-preferences-v2.json");
 
     fn create_paths(directory: &tempfile::TempDir) -> AppPaths {
         let codex = directory.path().join("codex");
@@ -2031,6 +2150,55 @@ mod tests {
         fs::write(&paths.provider_preferences_file, PREFERENCES_MULTIPLE).unwrap();
     }
 
+    struct FailPreferenceWriteOnce {
+        inner: StdFileOps,
+        should_fail: Mutex<bool>,
+    }
+
+    impl FailPreferenceWriteOnce {
+        fn new() -> Self {
+            Self {
+                inner: StdFileOps,
+                should_fail: Mutex::new(true),
+            }
+        }
+    }
+
+    impl FileOps for FailPreferenceWriteOnce {
+        fn read_optional(&self, path: &Path) -> Result<Option<Vec<u8>>, AppError> {
+            self.inner.read_optional(path)
+        }
+
+        fn write(
+            &self,
+            path: &Path,
+            bytes: &[u8],
+            kind: ManagedFileKind,
+            phase: WritePhase,
+        ) -> Result<(), AppError> {
+            let fail = kind == ManagedFileKind::Preferences
+                && phase == WritePhase::Forward
+                && std::mem::take(&mut *self.should_fail.lock().unwrap());
+            if fail {
+                return Err(AppError::new(
+                    "INJECTED_WRITE_FAILURE",
+                    "注入的偏好写入失败。",
+                    "injected provider preference write failure",
+                ));
+            }
+            self.inner.write(path, bytes, kind, phase)
+        }
+
+        fn remove_if_exists(
+            &self,
+            path: &Path,
+            kind: ManagedFileKind,
+            phase: WritePhase,
+        ) -> Result<(), AppError> {
+            self.inner.remove_if_exists(path, kind, phase)
+        }
+    }
+
     fn create_input(state: &ProviderListState, activate_after_save: bool) -> CreateProviderInput {
         CreateProviderInput {
             id: "provider-c".into(),
@@ -2039,6 +2207,7 @@ mod tests {
             base_url: "https://provider-c.example.com/v1".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.6-sol".into(), "gpt-5.4-mini".into()],
+            fast_enabled: false,
             api_key_name: "主用密钥".into(),
             api_key: "test-key-c-not-real".into(),
             activate_after_save,
@@ -2083,6 +2252,23 @@ mod tests {
             ProviderApiKeyStatus::Managed
         );
         assert!(state.providers[0].configuration_complete);
+        assert!(!state.providers[0].fast_enabled);
+        assert!(
+            state
+                .model_catalog
+                .iter()
+                .find(|model| model.id == "gpt-5.6-sol")
+                .unwrap()
+                .supports_fast
+        );
+        assert!(
+            !state
+                .model_catalog
+                .iter()
+                .find(|model| model.id == "gpt-5.4-mini")
+                .unwrap()
+                .supports_fast
+        );
         assert_eq!(state.active_provider_id.as_deref(), Some("provider-a"));
         assert!(!state.current_auth_import_available);
         assert!(!json.contains("test-key-a-not-real"));
@@ -2142,6 +2328,7 @@ mod tests {
                 name: "Provider B 已更新".into(),
                 wire_api: "responses".into(),
                 models: vec!["gpt-5.5".into()],
+                fast_enabled: false,
                 sync_if_active: false,
                 expected_files: before.fingerprints,
             })
@@ -2608,6 +2795,108 @@ wire_api = "chat_completions"
     }
 
     #[tokio::test]
+    async fn create_and_activate_fast_projects_preference_and_global_config_atomically() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, WITH_COMMENTS, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let mut input = create_input(&before, true);
+        input.fast_enabled = true;
+
+        service.create_provider(input).await.unwrap();
+
+        let preferences = ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+            .load()
+            .unwrap();
+        assert!(
+            preferences.providers["provider-c"]
+                .model_preference
+                .as_ref()
+                .unwrap()
+                .fast_enabled
+        );
+        let config = fs::read_to_string(&paths.config_file).unwrap();
+        let document = config_service::parse_document(&config).unwrap();
+        assert_eq!(
+            document
+                .get("service_tier")
+                .and_then(toml_edit::Item::as_str),
+            Some("fast")
+        );
+        assert_eq!(document["features"]["fast_mode"].as_bool(), Some(true));
+        assert_eq!(
+            AuthService::new(paths.auth_file.clone())
+                .read_api_key()
+                .unwrap()
+                .as_deref(),
+            Some("test-key-c-not-real")
+        );
+    }
+
+    #[tokio::test]
+    async fn create_fast_without_activation_only_saves_the_private_preference() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, WITH_COMMENTS, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let mut input = create_input(&before, false);
+        input.fast_enabled = true;
+
+        service.create_provider(input).await.unwrap();
+
+        let preferences = ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+            .load()
+            .unwrap();
+        assert!(
+            preferences.providers["provider-c"]
+                .model_preference
+                .as_ref()
+                .unwrap()
+                .fast_enabled
+        );
+        let config = fs::read_to_string(&paths.config_file).unwrap();
+        let document = config_service::parse_document(&config).unwrap();
+        assert_eq!(
+            config_service::current_provider_id(&document).as_deref(),
+            Some("provider-a")
+        );
+        assert!(document.get("service_tier").is_none());
+        assert!(document["features"].get("fast_mode").is_none());
+    }
+
+    #[tokio::test]
+    async fn create_rejects_fast_for_an_unsupported_model_without_writing() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, WITH_COMMENTS, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let original = [
+            fs::read(&paths.config_file).unwrap(),
+            fs::read(&paths.auth_file).unwrap(),
+            fs::read(&paths.providers_file).unwrap(),
+            fs::read(&paths.provider_preferences_file).unwrap(),
+        ];
+        let mut input = create_input(&before, true);
+        input.models = vec!["gpt-5.4-mini".into()];
+        input.fast_enabled = true;
+
+        let error = service.create_provider(input).await.unwrap_err();
+
+        assert_eq!(error.code(), "MODEL_FAST_UNSUPPORTED");
+        assert_eq!(fs::read(&paths.config_file).unwrap(), original[0]);
+        assert_eq!(fs::read(&paths.auth_file).unwrap(), original[1]);
+        assert_eq!(fs::read(&paths.providers_file).unwrap(), original[2]);
+        assert_eq!(
+            fs::read(&paths.provider_preferences_file).unwrap(),
+            original[3]
+        );
+        assert!(service.list_backups().unwrap().backups.is_empty());
+    }
+
+    #[tokio::test]
     async fn update_preserves_unknown_fields_and_unchanged_key() {
         let directory = tempfile::tempdir().unwrap();
         let paths = create_paths(&directory);
@@ -2619,6 +2908,7 @@ wire_api = "chat_completions"
             name: "Updated Provider A".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.6-sol".into()],
+            fast_enabled: false,
             sync_if_active: false,
             expected_files: before.fingerprints,
         };
@@ -2661,6 +2951,7 @@ wire_api = "chat_completions"
             name: "Provider A".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.4-mini".into()],
+            fast_enabled: false,
             sync_if_active: true,
             expected_files: before.fingerprints,
         };
@@ -2681,6 +2972,601 @@ wire_api = "chat_completions"
     }
 
     #[tokio::test]
+    async fn updating_active_provider_with_sync_projects_fast() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, WITH_COMMENTS, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        service
+            .update_provider(UpdateProviderInput {
+                id: "provider-a".into(),
+                name: "Provider A".into(),
+                wire_api: "responses".into(),
+                models: vec!["gpt-5.6-sol".into()],
+                fast_enabled: true,
+                sync_if_active: true,
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        let preferences = ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+            .load()
+            .unwrap();
+        assert!(
+            preferences.providers["provider-a"]
+                .model_preference
+                .as_ref()
+                .unwrap()
+                .fast_enabled
+        );
+        let config = fs::read_to_string(&paths.config_file).unwrap();
+        let document = config_service::parse_document(&config).unwrap();
+        assert_eq!(
+            document
+                .get("service_tier")
+                .and_then(toml_edit::Item::as_str),
+            Some("fast")
+        );
+        assert_eq!(document["features"]["fast_mode"].as_bool(), Some(true));
+    }
+
+    #[tokio::test]
+    async fn editing_to_an_unsupported_model_atomically_disables_fast_with_a_reason() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        let fast_config = config_service::select_provider_with_preference(
+            WITH_COMMENTS,
+            "provider-a",
+            "gpt-5.6-sol",
+            "medium",
+            true,
+        )
+        .unwrap();
+        write_state(&paths, &fast_config, AUTH_A, PROVIDERS_MULTIPLE);
+        let mut preferences =
+            ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+                .load_versioned()
+                .unwrap()
+                .store;
+        preferences
+            .providers
+            .get_mut("provider-a")
+            .unwrap()
+            .model_preference
+            .as_mut()
+            .unwrap()
+            .set_fast(true)
+            .unwrap();
+        fs::write(
+            &paths.provider_preferences_file,
+            serialize_preference_store(&preferences).unwrap(),
+        )
+        .unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        let outcome = service
+            .update_provider(UpdateProviderInput {
+                id: "provider-a".into(),
+                name: "Provider A".into(),
+                wire_api: "responses".into(),
+                models: vec!["gpt-5.4-mini".into()],
+                fast_enabled: false,
+                sync_if_active: true,
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        assert!(
+            outcome
+                .message
+                .contains("Fast 已因当前模型不支持而自动关闭")
+        );
+        assert!(!outcome.providers[0].fast_enabled);
+        let document =
+            config_service::parse_document(&fs::read_to_string(&paths.config_file).unwrap())
+                .unwrap();
+        assert!(document.get("service_tier").is_none());
+        assert_eq!(document["features"]["fast_mode"].as_bool(), Some(true));
+    }
+
+    #[tokio::test]
+    async fn updating_active_provider_without_sync_only_saves_fast_preference() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, WITH_COMMENTS, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        service
+            .update_provider(UpdateProviderInput {
+                id: "provider-a".into(),
+                name: "Provider A".into(),
+                wire_api: "responses".into(),
+                models: vec!["gpt-5.6-sol".into()],
+                fast_enabled: true,
+                sync_if_active: false,
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        let refreshed = service.list_providers().unwrap();
+        assert!(refreshed.providers[0].fast_enabled);
+        let document =
+            config_service::parse_document(&fs::read_to_string(&paths.config_file).unwrap())
+                .unwrap();
+        assert!(document.get("service_tier").is_none());
+        assert!(document["features"].get("fast_mode").is_none());
+    }
+
+    #[tokio::test]
+    async fn update_rejects_unsupported_fast_without_writing_any_managed_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, WITH_COMMENTS, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let original = [
+            fs::read(&paths.config_file).unwrap(),
+            fs::read(&paths.auth_file).unwrap(),
+            fs::read(&paths.providers_file).unwrap(),
+            fs::read(&paths.provider_preferences_file).unwrap(),
+        ];
+
+        let error = service
+            .update_provider(UpdateProviderInput {
+                id: "provider-a".into(),
+                name: "Provider A".into(),
+                wire_api: "responses".into(),
+                models: vec!["gpt-5.4-mini".into()],
+                fast_enabled: true,
+                sync_if_active: true,
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code(), "MODEL_FAST_UNSUPPORTED");
+        assert_eq!(fs::read(&paths.config_file).unwrap(), original[0]);
+        assert_eq!(fs::read(&paths.auth_file).unwrap(), original[1]);
+        assert_eq!(fs::read(&paths.providers_file).unwrap(), original[2]);
+        assert_eq!(
+            fs::read(&paths.provider_preferences_file).unwrap(),
+            original[3]
+        );
+        assert!(service.list_backups().unwrap().backups.is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_fast_for_active_provider_writes_preference_and_current_config() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, WITH_COMMENTS, AUTH_A, PROVIDERS_MULTIPLE);
+        let secrets = ProviderSecretService::new(paths.providers_file.clone())
+            .load_versioned()
+            .unwrap()
+            .store;
+        fs::write(&paths.providers_file, serialize_store(&secrets).unwrap()).unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let original_auth = fs::read(&paths.auth_file).unwrap();
+        let original_providers = fs::read(&paths.providers_file).unwrap();
+
+        let outcome = service
+            .update_provider_fast(UpdateProviderFastInput {
+                provider_id: "provider-a".into(),
+                enabled: true,
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        assert!(outcome.message.contains("已写入当前 Codex 配置"));
+        assert!(outcome.providers[0].fast_enabled);
+        let document =
+            config_service::parse_document(&fs::read_to_string(&paths.config_file).unwrap())
+                .unwrap();
+        assert_eq!(
+            document
+                .get("service_tier")
+                .and_then(toml_edit::Item::as_str),
+            Some("fast")
+        );
+        assert_eq!(document["features"]["fast_mode"].as_bool(), Some(true));
+        assert_eq!(fs::read(&paths.auth_file).unwrap(), original_auth);
+        assert_eq!(fs::read(&paths.providers_file).unwrap(), original_providers);
+    }
+
+    #[tokio::test]
+    async fn update_fast_for_non_active_provider_only_writes_preference() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, WITH_COMMENTS, AUTH_A, PROVIDERS_MULTIPLE);
+        let secrets = ProviderSecretService::new(paths.providers_file.clone())
+            .load_versioned()
+            .unwrap()
+            .store;
+        fs::write(&paths.providers_file, serialize_store(&secrets).unwrap()).unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let original_config = fs::read(&paths.config_file).unwrap();
+        let original_auth = fs::read(&paths.auth_file).unwrap();
+        let original_providers = fs::read(&paths.providers_file).unwrap();
+
+        let outcome = service
+            .update_provider_fast(UpdateProviderFastInput {
+                provider_id: "provider-b".into(),
+                enabled: true,
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        assert!(outcome.message.contains("将在应用此 Provider 时生效"));
+        let provider = outcome
+            .providers
+            .iter()
+            .find(|provider| provider.id == "provider-b")
+            .unwrap();
+        assert!(provider.fast_enabled);
+        assert_eq!(fs::read(&paths.config_file).unwrap(), original_config);
+        assert_eq!(fs::read(&paths.auth_file).unwrap(), original_auth);
+        assert_eq!(fs::read(&paths.providers_file).unwrap(), original_providers);
+    }
+
+    #[tokio::test]
+    async fn update_fast_off_for_active_provider_removes_tier_but_keeps_feature_gate() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        let fast_config = config_service::select_provider_with_preference(
+            WITH_COMMENTS,
+            "provider-a",
+            "gpt-5.6-sol",
+            "medium",
+            true,
+        )
+        .unwrap();
+        write_state(&paths, &fast_config, AUTH_A, PROVIDERS_MULTIPLE);
+        let mut preferences =
+            ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+                .load_versioned()
+                .unwrap()
+                .store;
+        preferences
+            .providers
+            .get_mut("provider-a")
+            .unwrap()
+            .model_preference
+            .as_mut()
+            .unwrap()
+            .set_fast(true)
+            .unwrap();
+        fs::write(
+            &paths.provider_preferences_file,
+            serialize_preference_store(&preferences).unwrap(),
+        )
+        .unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        let outcome = service
+            .update_provider_fast(UpdateProviderFastInput {
+                provider_id: "provider-a".into(),
+                enabled: false,
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        assert!(!outcome.providers[0].fast_enabled);
+        let document =
+            config_service::parse_document(&fs::read_to_string(&paths.config_file).unwrap())
+                .unwrap();
+        assert!(document.get("service_tier").is_none());
+        assert_eq!(document["features"]["fast_mode"].as_bool(), Some(true));
+    }
+
+    #[tokio::test]
+    async fn update_fast_rejects_an_unsupported_selected_model_without_writing() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, WITH_COMMENTS, AUTH_A, PROVIDERS_MULTIPLE);
+        let mut preferences =
+            ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+                .load_versioned()
+                .unwrap()
+                .store;
+        preferences
+            .providers
+            .get_mut("provider-a")
+            .unwrap()
+            .model_preference
+            .as_mut()
+            .unwrap()
+            .select("gpt-5.4-mini", "none")
+            .unwrap();
+        fs::write(
+            &paths.provider_preferences_file,
+            serialize_preference_store(&preferences).unwrap(),
+        )
+        .unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let original = [
+            fs::read(&paths.config_file).unwrap(),
+            fs::read(&paths.auth_file).unwrap(),
+            fs::read(&paths.providers_file).unwrap(),
+            fs::read(&paths.provider_preferences_file).unwrap(),
+        ];
+
+        let error = service
+            .update_provider_fast(UpdateProviderFastInput {
+                provider_id: "provider-a".into(),
+                enabled: true,
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code(), "MODEL_FAST_UNSUPPORTED");
+        assert_eq!(fs::read(&paths.config_file).unwrap(), original[0]);
+        assert_eq!(fs::read(&paths.auth_file).unwrap(), original[1]);
+        assert_eq!(fs::read(&paths.providers_file).unwrap(), original[2]);
+        assert_eq!(
+            fs::read(&paths.provider_preferences_file).unwrap(),
+            original[3]
+        );
+        assert!(service.list_backups().unwrap().backups.is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_fast_rejects_stale_fingerprints_without_overwriting_external_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, WITH_COMMENTS, AUTH_A, PROVIDERS_MULTIPLE);
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let original_preferences = fs::read(&paths.provider_preferences_file).unwrap();
+        let external_config = format!("{WITH_COMMENTS}\n# external change\n");
+        fs::write(&paths.config_file, &external_config).unwrap();
+
+        let error = service
+            .update_provider_fast(UpdateProviderFastInput {
+                provider_id: "provider-a".into(),
+                enabled: true,
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code(), "EXTERNAL_MODIFICATION_CONFLICT");
+        assert_eq!(
+            fs::read_to_string(&paths.config_file).unwrap(),
+            external_config
+        );
+        assert_eq!(
+            fs::read(&paths.provider_preferences_file).unwrap(),
+            original_preferences
+        );
+        assert!(service.list_backups().unwrap().backups.is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_fast_preference_write_failure_restores_all_original_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, WITH_COMMENTS, AUTH_A, PROVIDERS_MULTIPLE);
+        let original = [
+            fs::read(&paths.config_file).unwrap(),
+            fs::read(&paths.auth_file).unwrap(),
+            fs::read(&paths.providers_file).unwrap(),
+            fs::read(&paths.provider_preferences_file).unwrap(),
+        ];
+        let service = ProviderService::with_file_ops(
+            paths.clone(),
+            "0.1.0",
+            Arc::new(FailPreferenceWriteOnce::new()),
+        );
+        let before = service.list_providers().unwrap();
+
+        let error = service
+            .update_provider_fast(UpdateProviderFastInput {
+                provider_id: "provider-a".into(),
+                enabled: true,
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code(), "TRANSACTION_FAILED_ROLLED_BACK");
+        assert!(error.public_message().contains("原配置已恢复"));
+        assert_eq!(fs::read(&paths.config_file).unwrap(), original[0]);
+        assert_eq!(fs::read(&paths.auth_file).unwrap(), original[1]);
+        assert_eq!(fs::read(&paths.providers_file).unwrap(), original[2]);
+        assert_eq!(
+            fs::read(&paths.provider_preferences_file).unwrap(),
+            original[3]
+        );
+        assert!(!paths.app_data_dir.join("transaction.json").exists());
+        assert_eq!(service.list_backups().unwrap().backups.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn updating_preference_for_fast_active_provider_keeps_fast_projection() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        let fast_config = config_service::select_provider_with_preference(
+            WITH_COMMENTS,
+            "provider-a",
+            "gpt-5.6-sol",
+            "medium",
+            true,
+        )
+        .unwrap();
+        write_state(&paths, &fast_config, AUTH_A, PROVIDERS_MULTIPLE);
+        let mut preferences =
+            ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+                .load_versioned()
+                .unwrap()
+                .store;
+        preferences
+            .providers
+            .get_mut("provider-a")
+            .unwrap()
+            .model_preference
+            .as_mut()
+            .unwrap()
+            .set_fast(true)
+            .unwrap();
+        fs::write(
+            &paths.provider_preferences_file,
+            serialize_preference_store(&preferences).unwrap(),
+        )
+        .unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        let outcome = service
+            .update_provider_preference(UpdateProviderPreferenceInput {
+                provider_id: "provider-a".into(),
+                model: "gpt-5.6-sol".into(),
+                reasoning_effort: "high".into(),
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        assert!(outcome.providers[0].fast_enabled);
+        let document =
+            config_service::parse_document(&fs::read_to_string(&paths.config_file).unwrap())
+                .unwrap();
+        assert_eq!(
+            document
+                .get("service_tier")
+                .and_then(toml_edit::Item::as_str),
+            Some("fast")
+        );
+        assert_eq!(document["features"]["fast_mode"].as_bool(), Some(true));
+    }
+
+    #[tokio::test]
+    async fn selecting_unsupported_model_for_fast_active_provider_closes_fast_atomically() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        let fast_config = config_service::select_provider_with_preference(
+            WITH_COMMENTS,
+            "provider-a",
+            "gpt-5.6-sol",
+            "medium",
+            true,
+        )
+        .unwrap();
+        write_state(&paths, &fast_config, AUTH_A, PROVIDERS_MULTIPLE);
+        let mut preferences =
+            ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+                .load_versioned()
+                .unwrap()
+                .store;
+        preferences
+            .providers
+            .get_mut("provider-a")
+            .unwrap()
+            .model_preference
+            .as_mut()
+            .unwrap()
+            .set_fast(true)
+            .unwrap();
+        fs::write(
+            &paths.provider_preferences_file,
+            serialize_preference_store(&preferences).unwrap(),
+        )
+        .unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+
+        let outcome = service
+            .update_provider_preference(UpdateProviderPreferenceInput {
+                provider_id: "provider-a".into(),
+                model: "gpt-5.4-mini".into(),
+                reasoning_effort: "none".into(),
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        assert!(
+            outcome
+                .message
+                .contains("Fast 已因当前模型不支持而自动关闭")
+        );
+        assert!(!outcome.providers[0].fast_enabled);
+        let document =
+            config_service::parse_document(&fs::read_to_string(&paths.config_file).unwrap())
+                .unwrap();
+        assert!(document.get("service_tier").is_none());
+        assert_eq!(document["features"]["fast_mode"].as_bool(), Some(true));
+    }
+
+    #[tokio::test]
+    async fn selecting_unsupported_model_for_non_active_provider_only_changes_preference() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, WITH_COMMENTS, AUTH_A, PROVIDERS_MULTIPLE);
+        let mut preferences =
+            ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+                .load_versioned()
+                .unwrap()
+                .store;
+        let preference = preferences
+            .providers
+            .get_mut("provider-b")
+            .unwrap()
+            .model_preference
+            .as_mut()
+            .unwrap();
+        preference
+            .reconcile_models(&["gpt-5.5".into(), "gpt-5.4-mini".into()])
+            .unwrap();
+        preference.set_fast(true).unwrap();
+        fs::write(
+            &paths.provider_preferences_file,
+            serialize_preference_store(&preferences).unwrap(),
+        )
+        .unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        let original_config = fs::read(&paths.config_file).unwrap();
+
+        let outcome = service
+            .update_provider_preference(UpdateProviderPreferenceInput {
+                provider_id: "provider-b".into(),
+                model: "gpt-5.4-mini".into(),
+                reasoning_effort: "none".into(),
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        assert!(
+            outcome
+                .message
+                .contains("Fast 已因当前模型不支持而自动关闭")
+        );
+        let provider = outcome
+            .providers
+            .iter()
+            .find(|provider| provider.id == "provider-b")
+            .unwrap();
+        assert!(!provider.fast_enabled);
+        assert_eq!(fs::read(&paths.config_file).unwrap(), original_config);
+    }
+
+    #[tokio::test]
     async fn updating_non_current_regular_fields_preserves_all_keys_and_active_auth() {
         let directory = tempfile::tempdir().unwrap();
         let paths = create_paths(&directory);
@@ -2692,6 +3578,7 @@ wire_api = "chat_completions"
             name: "Provider B".into(),
             wire_api: "responses".into(),
             models: vec!["gpt-5.5".into()],
+            fast_enabled: false,
             sync_if_active: false,
             expected_files: before.fingerprints,
         };
@@ -2724,6 +3611,7 @@ wire_api = "chat_completions"
                 name: "Provider B".into(),
                 wire_api: "responses".into(),
                 models: vec!["gpt-5.5".into()],
+                fast_enabled: false,
                 sync_if_active: false,
                 expected_files: before.fingerprints,
             })
@@ -2754,7 +3642,42 @@ wire_api = "chat_completions"
 
         let preferences: serde_json::Value =
             serde_json::from_slice(&fs::read(&paths.provider_preferences_file).unwrap()).unwrap();
-        assert_eq!(preferences["version"], 2);
+        assert_eq!(preferences["version"], 3);
+        assert_eq!(
+            preferences["providers"]["provider-b"]["modelPreference"]["fastEnabled"],
+            false
+        );
+    }
+
+    #[tokio::test]
+    async fn successful_fast_transaction_upgrades_v2_preferences_with_fast_disabled() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        fs::write(&paths.provider_preferences_file, PREFERENCES_V2).unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+        let before = service.list_providers().unwrap();
+        assert_eq!(
+            fs::read_to_string(&paths.provider_preferences_file).unwrap(),
+            PREFERENCES_V2
+        );
+
+        service
+            .update_provider_fast(UpdateProviderFastInput {
+                provider_id: "provider-b".into(),
+                enabled: false,
+                expected_files: before.fingerprints,
+            })
+            .await
+            .unwrap();
+
+        let preferences: serde_json::Value =
+            serde_json::from_slice(&fs::read(&paths.provider_preferences_file).unwrap()).unwrap();
+        assert_eq!(preferences["version"], 3);
+        assert_eq!(
+            preferences["providers"]["provider-b"]["modelPreference"]["fastEnabled"],
+            false
+        );
     }
 
     #[tokio::test]
@@ -2798,6 +3721,7 @@ wire_api = "chat_completions"
                 name: "Provider A".into(),
                 wire_api: "responses".into(),
                 models: vec!["gpt-5.6-sol".into()],
+                fast_enabled: false,
                 sync_if_active: false,
                 expected_files: before.fingerprints,
             })
@@ -3575,6 +4499,77 @@ wire_api = "chat_completions"
             fs::read_to_string(&paths.auth_file)
                 .unwrap()
                 .contains("test-key-b-not-real")
+        );
+    }
+
+    #[tokio::test]
+    async fn switch_to_fast_provider_projects_tier_and_feature_gate() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_state(&paths, MULTIPLE, AUTH_A, PROVIDERS_MULTIPLE);
+        let mut preferences =
+            ProviderPreferenceService::new(paths.provider_preferences_file.clone())
+                .load_versioned()
+                .unwrap()
+                .store;
+        preferences
+            .providers
+            .get_mut("provider-a")
+            .unwrap()
+            .hydrate_legacy_base_url("https://provider-a.example.com/v1")
+            .unwrap();
+        let provider_b = preferences.providers.get_mut("provider-b").unwrap();
+        provider_b
+            .hydrate_legacy_base_url("https://provider-b.example.com/v1")
+            .unwrap();
+        provider_b
+            .model_preference
+            .as_mut()
+            .unwrap()
+            .set_fast(true)
+            .unwrap();
+        fs::write(
+            &paths.provider_preferences_file,
+            serialize_preference_store(&preferences).unwrap(),
+        )
+        .unwrap();
+        let service = ProviderService::new(paths.clone(), "0.1.0");
+
+        let outcome = service.switch_provider("provider-b").await.unwrap();
+
+        let provider = outcome
+            .providers
+            .iter()
+            .find(|provider| provider.id == "provider-b")
+            .unwrap();
+        assert!(provider.fast_enabled);
+        let document =
+            config_service::parse_document(&fs::read_to_string(&paths.config_file).unwrap())
+                .unwrap();
+        assert_eq!(
+            document
+                .get("service_tier")
+                .and_then(toml_edit::Item::as_str),
+            Some("fast")
+        );
+        assert_eq!(document["features"]["fast_mode"].as_bool(), Some(true));
+        assert!(
+            fs::read_to_string(&paths.auth_file)
+                .unwrap()
+                .contains("test-key-b-not-real")
+        );
+
+        service.switch_provider("provider-a").await.unwrap();
+
+        let document =
+            config_service::parse_document(&fs::read_to_string(&paths.config_file).unwrap())
+                .unwrap();
+        assert!(document.get("service_tier").is_none());
+        assert_eq!(document["features"]["fast_mode"].as_bool(), Some(true));
+        assert!(
+            fs::read_to_string(&paths.auth_file)
+                .unwrap()
+                .contains("test-key-a-not-real")
         );
     }
 

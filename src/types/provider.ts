@@ -42,6 +42,7 @@ export interface ProviderProfile {
   models: readonly string[]
   selectedModel: string | null
   reasoningEfforts: Readonly<Record<string, string>>
+  fastEnabled: boolean
   preferenceConfigured: boolean
   apiKeyConfigured: boolean
   configurationComplete: boolean
@@ -60,6 +61,7 @@ export interface CreateProviderInput {
   models: string[]
   apiKeyName: string
   apiKey: string
+  fastEnabled: boolean
   activateAfterSave: boolean
   expectedFiles: FileSetFingerprint
 }
@@ -69,6 +71,7 @@ export interface UpdateProviderInput {
   name: string
   wireApi: string
   models: string[]
+  fastEnabled: boolean
   syncIfActive: boolean
   expectedFiles: FileSetFingerprint
 }
@@ -141,12 +144,19 @@ export interface ModelCatalogItem {
   id: string
   reasoningEfforts: readonly string[]
   defaultReasoningEffort: string
+  supportsFast: boolean
 }
 
 export interface UpdateProviderPreferenceInput {
   providerId: string
   model: string
   reasoningEffort: string
+  expectedFiles: FileSetFingerprint
+}
+
+export interface UpdateProviderFastInput {
+  providerId: string
+  enabled: boolean
   expectedFiles: FileSetFingerprint
 }
 
