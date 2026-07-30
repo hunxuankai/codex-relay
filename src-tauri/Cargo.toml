@@ -4,7 +4,7 @@ resolver = "3"
 
 [package]
 name = "codex-relay"
-version = "0.2.1"
+version = "0.3.0"
 description = "Safely manage local Codex model providers"
 authors = ["Codex Relay contributors"]
 edition = "2024"
