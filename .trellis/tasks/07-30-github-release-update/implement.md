@@ -27,7 +27,11 @@
 - 2026-07-30：规范同步判断完成；本任务没有改变 updater、NSIS、签名、数据保留或
   发布接口契约，现有 release/testing/security 规范已完整覆盖，没有新增项目专属
   规则，因此不修改 `.trellis/spec/`。
-- 当前阶段：提交并推送本地候选，尚未触发发布工作流。
+- 2026-07-30：发布配置提交 `651ca7d`、准备证据提交 `3585504` 已推送到 GitHub
+  `main`；推送后 GitHub API 与本地 `HEAD` 均为
+  `3585504acc76ffdf9f4d5da324fd582f0a433702`。GitHub 状态页为
+  `All Systems Operational`，没有活动发布 Run。
+- 当前阶段：提交本阶段任务记录后触发唯一的 Draft 发布工作流。
 
 ## 执行清单
 
@@ -38,9 +42,9 @@
 3. [x] 运行专项发布结构测试，再运行 `npm run check`；修复所有真实失败。
 4. [x] 从当前 PowerShell 进程移除两个签名环境变量，运行 `npm run build`，枚举 EXE/NSIS
    路径、大小、时间和 SHA-256，并确认普通构建没有本次 updater `.sig`/`latest.json`。
-5. 运行版本搜索、`git diff --check`、状态/忽略文件/跟踪文件和高置信度秘密扫描；精确
+5. [x] 运行版本搜索、`git diff --check`、状态/忽略文件/跟踪文件和高置信度秘密扫描；精确
    暂存发布文件与任务材料，提交候选。
-6. 推送 `HEAD:main` 并确认远端 SHA；记录 GitHub Actions 状态和活动 Run，确保没有
+6. [x] 推送 `HEAD:main` 并确认远端 SHA；记录 GitHub Actions 状态和活动 Run，确保没有
    重复候选。
 7. [x] 下载公开 `v0.2.1` NSIS 到安全临时目录，核对 Release API 大小与 SHA-256，保留给
    后续隔离升级。
