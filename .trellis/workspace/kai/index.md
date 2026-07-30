@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **活动文件**：`journal-1.md`
-- **会话总数**：31
+- **会话总数**：32
 - **最近活动**：2026-07-30
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | 文件 | 行数 | 状态 |
 |------|-------|--------|
-| `journal-1.md` | ~1060 | 活动 |
+| `journal-1.md` | ~1096 | 活动 |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | 日期 | 标题 | 提交 | 分支 |
 |---|------|-------|---------|--------|
+| 32 | 2026-07-30 | 发布 Codex Relay v0.3.0 | `651ca7d`, `3585504`, `ce76f43`, `eac9a1c` | `master` |
 | 31 | 2026-07-30 | 为 README 添加软件界面截图 | `eb188fb` | `master` |
 | 30 | 2026-07-30 | 完成 Provider Fast 服务层配置 | `d350b6c` | `master` |
 | 29 | 2026-07-26 | 完成 Trellis 混合子代理策略调整 | `abaca13`, `74c93ff` | `master` |
