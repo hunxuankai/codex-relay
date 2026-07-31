@@ -202,4 +202,4 @@ git diff --cached --name-only
 - [x] 没有真实 GitHub Token、updater 私钥、API Key、认证文件或用户数据进入 Git/日志/任务材料；8 处高置信命中均为显式测试假值或脱敏断言。
 - [x] 正式 Codex Relay 普通 build 与独立控制台 build 都有实际证据，且没有误报签名/安装/升级。
 - [x] 运行 `trellis-check` 并完成规范更新判断。
-- [ ] 精确提交本任务改动并记录提交哈希。
+- [x] 精确提交本任务改动并记录提交哈希：`a8f5cc9`（`feat(release): 新增可视化一键发布控制台`）。
