@@ -19,7 +19,8 @@ defineEmits<{
         <p class="summary">
           Codex Relay 是一个本机 Provider 配置管理工具，通过受保护的文件事务让 Codex CLI
           在不同 Provider 之间切换，为每个 Provider 独立切换多个命名 Base URL 与 API Key，
-          并按个人习惯持久化 Provider 列表顺序。
+          并按个人习惯持久化 Provider 列表顺序；也可以保持 <code>model_provider</code> 身份，
+          只替换当前连接以继续使用既有会话。
         </p>
       </div>
     </header>
@@ -45,9 +46,11 @@ defineEmits<{
       <h2 id="workflow-title">工作原理</h2>
       <ol class="workflow-list">
         <li><code>config.toml</code> 保存每个 Provider 当前实际 Base URL，以及 Codex 顶层当前模型、推理强度等官方配置。</li>
-        <li><code>provider-preferences.json</code> 版本 3 保存 Provider 列表顺序、多个命名 Base URL、模型集合、逐模型推理强度和每个 Provider 的 Fast 偏好。</li>
+        <li><code>provider-preferences.json</code> 版本 4 保存 Provider 列表顺序、多个命名 Base URL、模型集合、逐模型推理强度、每个 Provider 的 Fast 偏好和可选连接覆盖关系。</li>
         <li><code>providers.json</code> 保存每个 Provider 的多个命名 API Key 与密钥预选。</li>
         <li>Base URL 与 API Key 可以独立切换；当前 Provider 立即同步，非当前 Provider 只保存预选。</li>
+        <li>“仅应用连接”保持 <code>model_provider</code> 不变，只使用来源 Provider 已选中的 Base URL 与 API Key；当前身份和来源的地址、密钥都必须先纳管。</li>
+        <li>首次覆盖时记录当前身份的恢复条目；“恢复自身连接”会回到首次覆盖前的地址与密钥，普通切换 Provider 会先复原旧目标再应用新 Provider。</li>
         <li>切换 Provider 时，将其预选地址、密钥、模型、推理强度和 Fast 偏好同步到 <code>config.toml</code> 与 <code>auth.json</code>。</li>
         <li>每次受管写入前创建备份；写入失败时尝试恢复所有已触及文件。</li>
       </ol>
@@ -103,8 +106,12 @@ defineEmits<{
               不会把私有偏好写入 <code>[model_providers.&lt;id&gt;]</code>。
             </li>
             <li>
+              仅应用连接时，只更新顶层 <code>model_provider</code> 当前所指 Provider 块的
+              <code>base_url</code>；顶层身份、模型、推理强度和 Fast 保持不变。
+            </li>
+            <li>
               <code>auth.json</code>：启用或切换时重新生成，只保存当前生效的
-              <code>OPENAI_API_KEY</code>。
+              <code>OPENAI_API_KEY</code>；应用或恢复连接时也会随目标地址在同一事务更新。
             </li>
           </ul>
           <p>
@@ -117,7 +124,7 @@ defineEmits<{
           <h3>Codex Relay 应用数据</h3>
           <ul>
             <li><code>providers.json</code>：各 Provider 的多个命名 API Key 和密钥预选。</li>
-            <li><code>provider-preferences.json</code> 版本 3：Provider 列表顺序，以及各 Provider 的多个命名 Base URL、可用模型、当前偏好、逐模型推理强度和 Fast 偏好。</li>
+            <li><code>provider-preferences.json</code> 版本 4：Provider 列表顺序、各 Provider 的多个命名 Base URL、模型与 Fast 偏好，以及连接目标、来源、已应用和恢复条目的稳定条目 ID；不会复制一份 URL 或 API Key。</li>
             <li><code>settings.json</code>：窗口、托盘、首次引导、自启动和应用网络代理设置。</li>
             <li>
               <code>backups/</code>：配置事务快照、元数据和设置备份；备份页可展开事务文件列表，
@@ -143,6 +150,7 @@ defineEmits<{
       <h2 id="security-title">数据与安全</h2>
       <ul>
         <li><code>providers.json</code>、<code>auth.json</code> 和配置备份可能包含明文 API Key。</li>
+        <li>连接覆盖关系只保存稳定条目 ID；API Key 明文仍只存在于既有密钥文件、当前认证和事务备份中。</li>
         <li>API Key 只在用户打开“管理与查看”对话框时返回前端，打开管理器后默认明文显示；关闭后清空该对话框的密钥状态。</li>
         <li>除用户显式启动 Provider 可用性或 Codex 兼容性测试外，本程序不会调用模型接口验证 Base URL 或 API Key；自动更新检查失败时静默处理，也不会自动下载或安装。</li>
         <li>删除或替换本机命名密钥不会在 Provider 平台吊销远端凭据；怀疑泄漏时必须在 Provider 平台轮换。</li>

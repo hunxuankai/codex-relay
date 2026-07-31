@@ -49,6 +49,7 @@ impl fmt::Debug for ProviderApiKeyManagementEntry {
 pub enum ProviderBaseUrlStatus {
     Managed,
     External,
+    Routed,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -57,6 +58,47 @@ pub enum ProviderApiKeyStatus {
     Managed,
     External,
     Missing,
+    Routed,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderConnectionRole {
+    Identity,
+    Source,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderConnectionAction {
+    Apply,
+    Applied,
+    Update,
+    Restore,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderConnectionStatus {
+    #[default]
+    None,
+    Active,
+    Stale,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderConnectionProjection {
+    pub role: Option<ProviderConnectionRole>,
+    pub status: ProviderConnectionStatus,
+    pub action: Option<ProviderConnectionAction>,
+    pub disabled_reason: Option<String>,
+    pub target_provider_id: Option<String>,
+    pub source_provider_name: Option<String>,
+    pub applied_base_url_name: Option<String>,
+    pub applied_api_key_name: Option<String>,
+    pub restore_base_url_name: Option<String>,
+    pub restore_api_key_name: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
@@ -103,9 +145,23 @@ pub struct ProviderProfile {
     pub api_key_configured: bool,
     pub configuration_complete: bool,
     pub disabled_reason: Option<String>,
+    pub connection: ProviderConnectionProjection,
     pub is_active: bool,
     pub is_valid: bool,
     pub validation_message: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyProviderConnectionInput {
+    pub source_provider_id: String,
+    pub expected_files: FileSetFingerprint,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreProviderConnectionInput {
+    pub expected_files: FileSetFingerprint,
 }
 
 #[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
@@ -338,6 +394,7 @@ mod tests {
             api_key_configured: true,
             configuration_complete: true,
             disabled_reason: None,
+            connection: ProviderConnectionProjection::default(),
             is_active: true,
             is_valid: true,
             validation_message: None,
@@ -348,8 +405,24 @@ mod tests {
         assert!(json.contains("apiKeyConfigured"));
         assert!(json.contains("isActive"));
         assert!(json.contains("isValid"));
+        assert!(json.contains("\"connection\":{\"role\":null,\"status\":\"none\""));
         assert!(!json.contains("\"apiKey\":"));
         assert!(!json.contains("test-key-a-not-real"));
+    }
+
+    #[test]
+    fn routed_connection_statuses_round_trip_as_safe_enum_values() {
+        let base_url_status = serde_json::from_str::<ProviderBaseUrlStatus>("\"routed\"").unwrap();
+        let api_key_status = serde_json::from_str::<ProviderApiKeyStatus>("\"routed\"").unwrap();
+
+        assert_eq!(
+            serde_json::to_string(&base_url_status).unwrap(),
+            "\"routed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&api_key_status).unwrap(),
+            "\"routed\""
+        );
     }
 
     #[test]

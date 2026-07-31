@@ -26,7 +26,8 @@ mod tests {
     use crate::models::backup::BackupFileName;
     use crate::models::health::HealthLevel;
     use crate::models::provider::{
-        CreateProviderInput, ReorderProvidersInput, UpdateProviderFastInput,
+        ApplyProviderConnectionInput, CreateProviderInput, ReorderProvidersInput,
+        RestoreProviderConnectionInput, UpdateProviderFastInput,
     };
     use crate::models::settings::Settings;
     use crate::services::autostart_service::{AutostartBackend, AutostartService};
@@ -157,6 +158,70 @@ mod tests {
         assert!(result.success);
         assert!(result.error.is_none());
         assert!(result.data.unwrap().providers[0].fast_enabled);
+    }
+
+    #[tokio::test]
+    async fn apply_provider_connection_command_returns_safe_typed_success() {
+        let (_directory, state) = create_state();
+        let current = state.provider_service.list_providers().unwrap();
+
+        let result = provider_commands::apply_provider_connection_inner(
+            &state,
+            ApplyProviderConnectionInput {
+                source_provider_id: "provider-b".into(),
+                expected_files: current.fingerprints,
+            },
+        )
+        .await;
+        let json = serde_json::to_string(&result).unwrap();
+
+        assert!(result.success);
+        assert!(result.error.is_none());
+        assert!(!json.contains("test-key-a-not-real"));
+        assert!(!json.contains("test-key-b-not-real"));
+        assert!(!json.contains("\"apiKey\":"));
+        assert!(!json.contains("CodexRelay"));
+    }
+
+    #[tokio::test]
+    async fn restore_provider_connection_command_returns_safe_typed_success() {
+        let (_directory, state) = create_state();
+        let current = state.provider_service.list_providers().unwrap();
+        state
+            .provider_service
+            .apply_provider_connection(ApplyProviderConnectionInput {
+                source_provider_id: "provider-b".into(),
+                expected_files: current.fingerprints,
+            })
+            .await
+            .unwrap();
+        let routed = state.provider_service.list_providers().unwrap();
+
+        let result = provider_commands::restore_provider_connection_inner(
+            &state,
+            RestoreProviderConnectionInput {
+                expected_files: routed.fingerprints,
+            },
+        )
+        .await;
+        let json = serde_json::to_string(&result).unwrap();
+
+        assert!(result.success);
+        assert!(result.error.is_none());
+        assert!(
+            result
+                .data
+                .as_ref()
+                .unwrap()
+                .providers
+                .iter()
+                .all(|provider| provider.connection.status
+                    == crate::models::provider::ProviderConnectionStatus::None)
+        );
+        assert!(!json.contains("test-key-a-not-real"));
+        assert!(!json.contains("test-key-b-not-real"));
+        assert!(!json.contains("\"apiKey\":"));
+        assert!(!json.contains("CodexRelay"));
     }
 
     #[tokio::test]

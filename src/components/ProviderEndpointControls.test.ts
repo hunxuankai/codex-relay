@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import type { ProviderProfile } from '../types/provider'
+import { providerConnection } from '../test-utils/provider'
 import ProviderEndpointControls from './ProviderEndpointControls.vue'
 
 function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
@@ -26,6 +27,7 @@ function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
     apiKeyConfigured: true,
     configurationComplete: true,
     disabledReason: null,
+    connection: providerConnection(),
     isActive: true,
     isValid: true,
     validationMessage: null,
@@ -73,5 +75,37 @@ describe('ProviderEndpointControls', () => {
     expect(wrapper.getComponent({ name: 'ElSegmented' }).props('modelValue')).toBeUndefined()
     expect(wrapper.text()).toContain('当前使用外部地址')
     expect(wrapper.text()).toContain('https://external.example.test/v1')
+  })
+
+  it('shows and locks the routed connection source until identity restore', async () => {
+    const wrapper = mount(ProviderEndpointControls, {
+      props: {
+        provider: provider({
+          selectedBaseUrlId: null,
+          baseUrlStatus: 'routed',
+          connection: providerConnection({
+            role: 'identity',
+            status: 'active',
+            action: 'restore',
+            sourceProviderName: 'Provider B',
+            appliedBaseUrlName: 'B 主用地址',
+          }),
+        }),
+        busy: false,
+      },
+    })
+    const segmented = wrapper.getComponent({ name: 'ElSegmented' })
+    const manage = wrapper.get('[aria-label="管理 Base URL"]')
+
+    expect(wrapper.text()).toContain('Provider B')
+    expect(wrapper.text()).toContain('B 主用地址')
+    expect(wrapper.text()).toContain('恢复自身连接后可管理')
+    expect(segmented.props('disabled')).toBe(true)
+    expect(manage.attributes('disabled')).toBeDefined()
+
+    segmented.vm.$emit('change', 'url-backup')
+    await manage.trigger('click')
+    expect(wrapper.emitted('select')).toBeUndefined()
+    expect(wrapper.emitted('manage')).toBeUndefined()
   })
 })

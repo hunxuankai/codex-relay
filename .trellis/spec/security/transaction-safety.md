@@ -2,7 +2,7 @@
 
 ## 适用操作
 
-Provider 创建、编辑、删除、列表排序、Fast 更新、切换、同步和备份恢复都必须经过 `TransactionService`。command、托盘、Vue 层和单个配置服务不得绕过它直接修改受管文件。
+Provider 创建、编辑、删除、列表排序、Fast 更新、普通切换、连接应用/更新、显式恢复和备份恢复都必须经过 `TransactionService`。command、托盘、Vue 层和单个配置服务不得绕过它直接修改受管文件。
 
 ## 强制顺序
 
@@ -22,8 +22,16 @@ Provider 创建、编辑、删除、列表排序、Fast 更新、切换、同步
 - `config.toml` 使用 `toml_edit::DocumentMut` 局部修改，保留注释、未知字段、其他 Provider、MCP、features、sandbox 和 profiles。
 - Fast 开启写顶层 `service_tier="fast"` 并单向确保 `features.fast_mode=true`；关闭只删除 `service_tier`。不得因关闭 Fast 重写或删除 feature gate。
 - 目标无默认模型时保留现有顶层 `model`。
-- JSON 使用两空格缩进和末尾换行；`providers.json` 只修改目标 ID，保留版本和其他条目；`provider-preferences.json` v1/v2 只读迁移只在成功用户事务写 v3。
+- JSON 使用两空格缩进和末尾换行；`providers.json` 只修改目标 ID，保留版本和其他条目；`provider-preferences.json` v1/v2/v3 只读迁移只在成功用户事务写 v4。
 - `metadata.json` 不含密钥，但原文件快照可能含明文密钥。
+
+## 连接覆盖与恢复
+
+- `connectionOverride` 必须与目标 `config.toml.base_url` 和当前 `auth.json` 在同一四文件事务中写入或清除；不得先写关系再写认证，也不得把事务备份当作产品恢复点。
+- 首次覆盖固定目标自身的 URL/Key 条目 ID；后续更新来源只替换来源和已应用条目 ID，不得形成嵌套恢复栈。
+- 普通切换和创建后立即启用新 Provider 必须先在同一事务恢复旧目标块，再应用新顶层选择/认证并清除关系。
+- stale 关系的读取、自检、watcher 和可用性解析保持只读；恢复点缺失时返回 `PROVIDER_CONNECTION_RESTORE_UNAVAILABLE` 并保留关系及备份入口。
+- 写后验证必须同时核对顶层身份、目标 URL、当前认证、六个稳定 ID 的归属和值匹配，以及首次恢复点仍可解析。
 
 ## 回滚契约
 
@@ -45,4 +53,4 @@ Provider 创建、编辑、删除、列表排序、Fast 更新、切换、同步
 
 ## 必测行为
 
-临时 TOML/JSON 无效、config/auth/preferences 写失败、Fast 写后不变量、替换后验证失败、回滚失败、并发事务、外部修改冲突、备份恢复、未知 TOML 保留和原始字节恢复。
+临时 TOML/JSON 无效、config/auth/preferences 写失败、Fast 写后不变量、连接应用/更新/恢复不变量、普通切换前复原、替换后验证失败、回滚失败、并发事务、外部修改冲突、备份恢复、未知 TOML 保留和原始字节/存在状态恢复。

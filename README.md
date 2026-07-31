@@ -10,6 +10,7 @@ Codex Relay 是一款面向 Windows 10/11 的轻量桌面工具，用于管理�
 - 新增、编辑、删除 Provider，保留无关 TOML 注释、未知字段和功能开关。
 - 为每个 Provider 保存多个命名 Base URL 和多个命名 API Key，在详情页按名称独立切换。
 - Base URL 与 API Key 分别管理；当前 Provider 的选择立即写入 Codex 配置，非当前 Provider 只保存预选。
+- 可保持顶层 `model_provider` 身份，仅把另一 Provider 已选中的 Base URL 与 API Key 应用为当前连接，并可显式恢复自身连接。
 - 为每个 Provider 保存独立 Fast 偏好；支持模型开启后投影到 Codex 的 Fast/priority 服务层。
 - API Key 管理器打开后直接查看全部明文密钥，可统一隐藏/显示并逐项复制；关闭后清空前端密钥状态。
 - 在 Provider 详情显式运行 API 可用性测试或 Codex 兼容性测试，分别验证最小 Responses 请求和一次正常 Codex 回合。
@@ -238,7 +239,7 @@ Codex 配置目录按以下优先级解析：
 
 ### `config.toml`
 
-Codex Provider 配置的主要数据源。每个 Provider 的实际 `base_url` 是当前 Base URL 选择的唯一真相。Codex Relay 只局部修改目标 Provider、顶层 `model_provider`、`model`、`model_reasoning_effort`、`cli_auth_credentials_store` 和 Fast 投影。Provider 块内不写入 Relay 私有列表或模型偏好；其他 Provider、注释、非 Fast feature 和未知字段必须保留。
+Codex Provider 配置的主要数据源。每个 Provider 的实际 `base_url` 是当前 Base URL 选择或连接覆盖的唯一真相。Codex Relay 只局部修改目标 Provider、顶层 `model_provider`、`model`、`model_reasoning_effort`、`cli_auth_credentials_store` 和 Fast 投影。“仅应用连接”只更新顶层当前身份对应 Provider 块的 `base_url`，不改变顶层 `model_provider`、模型、推理强度或 Fast。Provider 块内不写入 Relay 私有列表或模型偏好；其他 Provider、注释、非 Fast feature 和未知字段必须保留。
 
 ### `auth.json`
 
@@ -250,7 +251,7 @@ Codex Provider 配置的主要数据源。每个 Provider 的实际 `base_url` �
 }
 ```
 
-当前 Provider 切换命名密钥或切换 Provider 成功后写入目标密钥。普通 Provider 列表、通知和日志都不会返回该明文。
+当前 Provider 切换命名密钥、切换 Provider、应用连接或恢复连接成功后写入目标密钥。普通 Provider 列表、通知和日志都不会返回该明文。
 
 ### `providers.json`
 
@@ -258,7 +259,7 @@ Codex Provider 配置的主要数据源。每个 Provider 的实际 `base_url` �
 
 ### `provider-preferences.json`
 
-位于 `%LOCALAPPDATA%\CodexRelay\provider-preferences.json`。版本 3 保存 Provider 列表显示顺序，以及每个 Provider 有序的多个命名 Base URL、稳定条目 ID、可用模型、当前偏好模型、逐模型 `model_reasoning_effort` 和布尔 `fastEnabled`。列表顺序和 Fast 都是 Relay 私有偏好，不会写入 `[model_providers.<id>]`；未记录或外部新增的 Provider 按 `config.toml` 顺序追加。该文件不保存第二份 URL 选择游标；当前选择由 `config.toml.base_url` 与命名列表匹配得到。模型目录随软件版本发布，不支持在线更新。版本 1/2 只读兼容，迁移时 Fast 默认关闭，仅在下一次成功用户事务后写出 v3；旧版 Relay 可能拒绝 v3，降级前应保留当前备份。
+位于 `%LOCALAPPDATA%\CodexRelay\provider-preferences.json`。版本 4 保存 Provider 列表显示顺序，以及每个 Provider 有序的多个命名 Base URL、稳定条目 ID、可用模型、当前偏好模型、逐模型 `model_reasoning_effort` 和布尔 `fastEnabled`；可选的 `connectionOverride` 只记录目标、来源、已应用和恢复条目的稳定 ID，不复制 URL 或 API Key。列表顺序和 Fast 都是 Relay 私有偏好，不会写入 `[model_providers.<id>]`；未记录或外部新增的 Provider 按 `config.toml` 顺序追加。该文件不保存第二份 URL 选择游标；没有连接覆盖时，当前选择由 `config.toml.base_url` 与命名列表匹配得到。模型目录随软件版本发布，不支持在线更新。版本 1/2/3 只读兼容，并仅在下一次成功用户事务后写出 v4；旧版 Relay 可能拒绝 v4，降级前应先恢复活动连接并保留当前备份。
 
 ### Provider Fast 偏好
 
@@ -297,6 +298,10 @@ Fast 默认关闭。当前内置目录支持 `gpt-5.6-sol`、`gpt-5.6-terra`、`
 左侧 Provider 列表可通过拖动手柄排序，也可聚焦手柄后使用上下方向键调整。排序放开后立即显示，并通过只修改 `provider-preferences.json` 的受保护事务跨刷新和重启保留；它不会切换当前 Provider，也不会改写 `config.toml`、`auth.json` 或 `providers.json`。
 
 点击 Base URL 只切换地址，点击 API Key 只切换密钥。详情页修改当前 Provider 的地址、密钥、模型偏好或 Fast 会立即同步对应全局文件并提示重启 Codex；详情页修改非当前 Provider 只保存预选。编辑当前 Provider 时继续由“保存后立即同步当前 Codex 配置”选项决定是否投影。应用非当前 Provider 时，其预选地址、密钥、模型、推理强度和 Fast 一起生效。外部未命名地址或密钥只展示状态，显式命名纳管前不能应用或测试。
+
+左侧 Provider 卡片的“仅应用连接”保持 `model_provider` 不变，只使用来源 Provider 已选中的 Base URL 与 API Key，写入当前身份对应的 `[model_providers.<id>].base_url` 和当前 `auth.json`。需要更换组合时，先在来源详情页调整选择，再点击“更新连接”；当前身份与来源 Provider 的地址和密钥都必须先纳管。
+
+第一次应用连接会固定当前身份覆盖前的地址与密钥条目作为恢复点。覆盖期间，当前身份的 Base URL/API Key 控件保持锁定；“恢复自身连接”会恢复到首次覆盖前的条目并清除关系。普通切换到另一个 Provider 时，同一事务会先复原旧目标 Provider 块，再应用新 Provider 和认证，不会把上一连接留在旧身份下。
 
 切换步骤包括：重新读取四个受管文件、验证目标偏好与密钥、检查外部修改指纹、创建统一备份、生成内存结果、写入临时文件、解析验证、替换正式文件、再次验证、刷新托盘与界面。成功提示包含“请重启 Codex 后生效”。
 

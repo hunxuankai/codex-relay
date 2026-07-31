@@ -7,7 +7,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-const PROVIDER_PREFERENCE_VERSION: u32 = 3;
+const PROVIDER_PREFERENCE_VERSION: u32 = 4;
 const MAX_BASE_URL_ENTRY_NAME_LEN: usize = 100;
 const LEGACY_DEFAULT_ENTRY_ID: &str = "legacy-default";
 
@@ -17,6 +17,17 @@ pub struct NamedBaseUrl {
     pub id: String,
     pub name: String,
     pub url: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderConnectionOverride {
+    pub target_provider_id: String,
+    pub source_provider_id: String,
+    pub applied_base_url_id: String,
+    pub applied_api_key_id: String,
+    pub restore_base_url_id: String,
+    pub restore_api_key_id: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -170,6 +181,12 @@ pub struct ProviderPreferenceStore {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub provider_order: Vec<String>,
+    #[serde(
+        default,
+        rename = "connectionOverride",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub connection_override: Option<ProviderConnectionOverride>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -213,6 +230,14 @@ struct V2ProviderPreferenceStore {
     provider_order: Vec<String>,
 }
 
+#[derive(Deserialize)]
+struct V3ProviderPreferenceStore {
+    version: u32,
+    providers: BTreeMap<String, ProviderPrivatePreference>,
+    #[serde(default, rename = "providerOrder")]
+    provider_order: Vec<String>,
+}
+
 impl LegacyProviderPreference {
     fn into_current(self) -> ProviderPreference {
         ProviderPreference {
@@ -230,6 +255,7 @@ impl Default for ProviderPreferenceStore {
             version: PROVIDER_PREFERENCE_VERSION,
             providers: BTreeMap::new(),
             provider_order: Vec::new(),
+            connection_override: None,
         }
     }
 }
@@ -428,6 +454,7 @@ pub fn parse_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, AppErr
     match version.version {
         1 => parse_legacy_store(bytes),
         2 => parse_v2_store(bytes),
+        3 => parse_v3_store(bytes),
         PROVIDER_PREFERENCE_VERSION => {
             let store =
                 serde_json::from_slice::<ProviderPreferenceStore>(bytes).map_err(|error| {
@@ -485,6 +512,7 @@ fn parse_legacy_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, App
             version: PROVIDER_PREFERENCE_VERSION,
             providers,
             provider_order: Vec::new(),
+            connection_override: None,
         },
         needs_upgrade: true,
     })
@@ -524,10 +552,38 @@ fn parse_v2_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, AppErro
             })
             .collect(),
         provider_order: legacy.provider_order,
+        connection_override: None,
     };
 
     Ok(LoadedProviderPreferenceStore {
         store: normalize_store(store)?,
+        needs_upgrade: true,
+    })
+}
+
+fn parse_v3_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, AppError> {
+    let legacy = serde_json::from_slice::<V3ProviderPreferenceStore>(bytes).map_err(|error| {
+        AppError::new(
+            "INVALID_PROVIDER_PREFERENCES",
+            "无法解析 provider-preferences.json。",
+            error.to_string(),
+        )
+    })?;
+    if legacy.version != 3 {
+        return Err(AppError::new(
+            "INVALID_PROVIDER_PREFERENCES",
+            "provider-preferences.json 的版本不受支持。",
+            format!("legacy provider preference version is {}", legacy.version),
+        ));
+    }
+
+    Ok(LoadedProviderPreferenceStore {
+        store: normalize_store(ProviderPreferenceStore {
+            version: PROVIDER_PREFERENCE_VERSION,
+            providers: legacy.providers,
+            provider_order: legacy.provider_order,
+            connection_override: None,
+        })?,
         needs_upgrade: true,
     })
 }
@@ -572,7 +628,39 @@ fn normalize_store(
             ));
         }
     }
+    if let Some(connection_override) = &store.connection_override {
+        validate_connection_override(connection_override)?;
+    }
     Ok(store)
+}
+
+fn validate_connection_override(
+    connection_override: &ProviderConnectionOverride,
+) -> Result<(), AppError> {
+    validate_provider_store_id(&connection_override.target_provider_id)?;
+    validate_provider_store_id(&connection_override.source_provider_id)?;
+    if connection_override.target_provider_id == connection_override.source_provider_id {
+        return Err(AppError::new(
+            "INVALID_PROVIDER_PREFERENCES",
+            "provider-preferences.json 包含无效的连接覆盖关系。",
+            "connection override target and source provider ids are identical",
+        ));
+    }
+    for reference_id in [
+        &connection_override.applied_base_url_id,
+        &connection_override.applied_api_key_id,
+        &connection_override.restore_base_url_id,
+        &connection_override.restore_api_key_id,
+    ] {
+        if reference_id.trim().is_empty() || reference_id.trim() != reference_id {
+            return Err(AppError::new(
+                "INVALID_PROVIDER_PREFERENCES",
+                "provider-preferences.json 包含无效的连接覆盖关系。",
+                "connection override entry reference id is empty or not normalized",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_provider_store_id(provider_id: &str) -> Result<(), AppError> {
@@ -746,7 +834,7 @@ mod tests {
         assert_eq!(parsed.store, store);
         assert!(!parsed.needs_upgrade);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("\"version\": 3"));
+        assert!(text.contains("\"version\": 4"));
         assert!(text.contains("\"fastEnabled\": false"));
         assert!(text.ends_with('\n'));
     }
@@ -771,7 +859,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_v1_and_v2_upgrade_to_v3_with_fast_disabled() {
+    fn legacy_v1_and_v2_upgrade_to_v4_with_fast_disabled() {
         let sources: [&[u8]; 2] = [
             br#"{
   "version": 1,
@@ -804,11 +892,127 @@ mod tests {
 
             let migrated: serde_json::Value =
                 serde_json::from_slice(&serialize_store(&loaded.store).unwrap()).unwrap();
-            assert_eq!(migrated["version"], 3);
+            assert_eq!(migrated["version"], 4);
             assert_eq!(
                 migrated["providers"]["provider-a"]["modelPreference"]["fastEnabled"],
                 false
             );
+        }
+    }
+
+    #[test]
+    fn v3_loads_as_pending_v4_upgrade_without_writing() {
+        let v3 = br#"{
+  "version": 3,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [],
+      "modelPreference": {
+        "models": ["gpt-5.6-sol"],
+        "selectedModel": "gpt-5.6-sol",
+        "reasoningEfforts": { "gpt-5.6-sol": "medium" },
+        "fastEnabled": false
+      }
+    }
+  }
+}"#;
+
+        let loaded = parse_store(v3).unwrap();
+
+        assert_eq!(loaded.store.version, 4);
+        assert!(loaded.needs_upgrade);
+    }
+
+    #[test]
+    fn v4_connection_override_round_trips_stable_reference_ids() {
+        let source = br#"{
+  "version": 4,
+  "providers": {},
+  "connectionOverride": {
+    "targetProviderId": "provider-a",
+    "sourceProviderId": "provider-b",
+    "appliedBaseUrlId": "url-b-primary",
+    "appliedApiKeyId": "key-b-primary",
+    "restoreBaseUrlId": "url-a-primary",
+    "restoreApiKeyId": "key-a-primary"
+  }
+}"#;
+
+        let loaded = parse_store(source).unwrap();
+        let serialized: serde_json::Value =
+            serde_json::from_slice(&serialize_store(&loaded.store).unwrap()).unwrap();
+
+        assert_eq!(
+            serialized["connectionOverride"]["targetProviderId"],
+            "provider-a"
+        );
+        assert_eq!(
+            serialized["connectionOverride"]["sourceProviderId"],
+            "provider-b"
+        );
+        assert_eq!(
+            serialized["connectionOverride"]["appliedBaseUrlId"],
+            "url-b-primary"
+        );
+        assert_eq!(
+            serialized["connectionOverride"]["appliedApiKeyId"],
+            "key-b-primary"
+        );
+        assert_eq!(
+            serialized["connectionOverride"]["restoreBaseUrlId"],
+            "url-a-primary"
+        );
+        assert_eq!(
+            serialized["connectionOverride"]["restoreApiKeyId"],
+            "key-a-primary"
+        );
+    }
+
+    #[test]
+    fn v4_rejects_structurally_invalid_connection_overrides() {
+        let invalid_sources: [&[u8]; 3] = [
+            br#"{
+  "version": 4,
+  "providers": {},
+  "connectionOverride": {
+    "targetProviderId": "provider-a",
+    "sourceProviderId": "provider-a",
+    "appliedBaseUrlId": "url-b-primary",
+    "appliedApiKeyId": "key-b-primary",
+    "restoreBaseUrlId": "url-a-primary",
+    "restoreApiKeyId": "key-a-primary"
+  }
+}"#,
+            br#"{
+  "version": 4,
+  "providers": {},
+  "connectionOverride": {
+    "targetProviderId": "provider-a",
+    "sourceProviderId": "provider-b",
+    "appliedBaseUrlId": "",
+    "appliedApiKeyId": "key-b-primary",
+    "restoreBaseUrlId": "url-a-primary",
+    "restoreApiKeyId": "key-a-primary"
+  }
+}"#,
+            br#"{
+  "version": 4,
+  "providers": {},
+  "connectionOverride": {
+    "targetProviderId": "provider-a",
+    "sourceProviderId": "provider-b",
+    "appliedBaseUrlId": " url-b-primary ",
+    "appliedApiKeyId": "key-b-primary",
+    "restoreBaseUrlId": "url-a-primary",
+    "restoreApiKeyId": "key-a-primary"
+  }
+}"#,
+        ];
+
+        for source in invalid_sources {
+            let error = parse_store(source).unwrap_err();
+
+            assert_eq!(error.code(), "INVALID_PROVIDER_PREFERENCES");
         }
     }
 
@@ -983,7 +1187,7 @@ mod tests {
     }
 
     #[test]
-    fn preference_store_v1_is_loaded_for_upgrade_and_v3_round_trips() {
+    fn preference_store_v1_is_loaded_for_upgrade_and_v4_round_trips() {
         let legacy = br#"{
   "version": 1,
   "providers": {
@@ -999,7 +1203,7 @@ mod tests {
         let loaded = parse_store(legacy).unwrap();
 
         assert!(loaded.needs_upgrade);
-        assert_eq!(loaded.store.version, 3);
+        assert_eq!(loaded.store.version, 4);
         let migrated = &loaded.store.providers["provider-a"];
         assert!(migrated.base_urls.is_empty());
         assert_eq!(
@@ -1032,7 +1236,7 @@ mod tests {
         assert!(!reparsed.needs_upgrade);
         assert_eq!(reparsed.store, store);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("\"version\": 3"));
+        assert!(text.contains("\"version\": 4"));
         assert!(text.contains("\"baseUrls\""));
         assert!(text.contains("\"modelPreference\""));
         assert!(text.contains("\"fastEnabled\": false"));
@@ -1062,7 +1266,7 @@ mod tests {
         assert!(loaded.needs_upgrade);
         assert_eq!(fs::read(&path).unwrap(), legacy);
 
-        let unknown = br#"{"version":4,"providers":{}}"#;
+        let unknown = br#"{"version":5,"providers":{}}"#;
         fs::write(&path, unknown).unwrap();
         let unknown_error = service.load_versioned().unwrap_err();
         assert_eq!(unknown_error.code(), "INVALID_PROVIDER_PREFERENCES");

@@ -19,14 +19,35 @@ const options = computed(() =>
 const selectedEntry = computed(() =>
   props.provider.baseUrls.find((entry) => entry.id === props.provider.selectedBaseUrlId) ?? null,
 )
+const connectionLocked = computed(() =>
+  props.provider.connection.role === 'identity' && props.provider.connection.status !== 'none',
+)
+const lockedMessage = computed(() => {
+  if (!connectionLocked.value) return null
+  if (props.provider.connection.status === 'stale') {
+    return props.provider.connection.disabledReason ?? '当前连接已失效，请先恢复自身连接。'
+  }
+  const source = props.provider.connection.sourceProviderName ?? '连接来源 Provider'
+  const entry = props.provider.connection.appliedBaseUrlName ?? '已应用地址'
+  return `当前身份正在使用 ${source} 的「${entry}」；恢复自身连接后可管理自身 Base URL。`
+})
 const currentLabel = computed(() => {
+  if (connectionLocked.value && props.provider.connection.status === 'active') {
+    const source = props.provider.connection.sourceProviderName ?? '连接来源 Provider'
+    const entry = props.provider.connection.appliedBaseUrlName ?? '已应用地址'
+    return `当前连接：${source} · ${entry}`
+  }
   if (selectedEntry.value) return `当前地址：${selectedEntry.value.name}`
   if (props.provider.baseUrlStatus === 'external') return '当前使用外部地址'
   return '尚未选择受管地址'
 })
 
 function select(value: string | number | boolean) {
-  if (typeof value === 'string') emit('select', value)
+  if (!connectionLocked.value && typeof value === 'string') emit('select', value)
+}
+
+function manage() {
+  if (!connectionLocked.value) emit('manage')
 }
 </script>
 
@@ -41,8 +62,9 @@ function select(value: string | number | boolean) {
         size="small"
         native-type="button"
         aria-label="管理 Base URL"
-        :disabled="busy"
-        @click="emit('manage')"
+        :aria-describedby="connectionLocked ? 'base-url-connection-lock' : undefined"
+        :disabled="busy || connectionLocked"
+        @click="manage"
       >
         管理
       </ElButton>
@@ -54,12 +76,17 @@ function select(value: string | number | boolean) {
         size="small"
         :model-value="provider.selectedBaseUrlId ?? undefined"
         :options="options"
-        :disabled="busy"
+        :aria-describedby="connectionLocked ? 'base-url-connection-lock' : undefined"
+        :disabled="busy || connectionLocked"
         aria-label="选择 Base URL"
         @change="select"
       />
       <p v-else class="empty-message">没有受管地址，请先添加。</p>
     </div>
+
+    <p v-if="lockedMessage" id="base-url-connection-lock" class="locked-message" role="note">
+      {{ lockedMessage }}
+    </p>
 
     <p class="actual-value">
       <span>当前实际地址</span>
@@ -94,7 +121,8 @@ function select(value: string | number | boolean) {
 .control-title,
 .current-label,
 .actual-value,
-.empty-message {
+.empty-message,
+.locked-message {
   margin: 0;
 }
 
@@ -107,6 +135,11 @@ function select(value: string | number | boolean) {
 .actual-value span {
   color: var(--text-secondary);
   font-size: 0.78rem;
+}
+
+.locked-message {
+  color: var(--warning-text);
+  font-size: 0.82rem;
 }
 
 .segmented-scroll {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { shallowRef } from 'vue'
 import { ElButton, ElCard, ElEmpty } from 'element-plus'
-import type { ProviderProfile } from '../types/provider'
+import type { ProviderConnectionAction, ProviderProfile } from '../types/provider'
 import ProviderStatus from './ProviderStatus.vue'
 
 const props = defineProps<{
@@ -15,12 +15,31 @@ const emit = defineEmits<{
   select: [providerId: string]
   edit: [providerId: string]
   use: [providerId: string]
+  connection: [providerId: string]
   delete: [providerId: string]
   reorder: [providerIds: string[]]
 }>()
 
 const draggedProviderId = shallowRef<string | null>(null)
 const dropTargetId = shallowRef<string | null>(null)
+
+const connectionActionLabels: Record<ProviderConnectionAction, string> = {
+  apply: '仅应用连接',
+  applied: '已应用',
+  update: '更新连接',
+  restore: '恢复自身连接',
+}
+
+function connectionActionDisabled(provider: ProviderProfile) {
+  const action = provider.connection.action
+  if (!action) return true
+  if (props.busy || action === 'applied') return true
+  return action !== 'restore' && Boolean(provider.connection.disabledReason)
+}
+
+function connectionPreventsDeletion(provider: ProviderProfile) {
+  return provider.connection.role !== null && provider.connection.status !== 'none'
+}
 
 function resetDrag() {
   draggedProviderId.value = null
@@ -206,16 +225,46 @@ function moveProviderBy(providerId: string, offset: -1 | 1) {
               使用
             </ElButton>
             <ElButton
+              v-if="provider.connection.action"
+              :type="
+                provider.connection.action === 'restore'
+                  ? 'primary'
+                  : provider.connection.action === 'applied'
+                    ? 'info'
+                    : 'warning'
+              "
+              plain
+              native-type="button"
+              :aria-label="`${connectionActionLabels[provider.connection.action]} ${provider.name}`"
+              :aria-describedby="
+                provider.connection.disabledReason
+                  ? `provider-connection-reason-${provider.id}`
+                  : undefined
+              "
+              :disabled="connectionActionDisabled(provider)"
+              @click="emit('connection', provider.id)"
+            >
+              {{ connectionActionLabels[provider.connection.action] }}
+            </ElButton>
+            <ElButton
               type="danger"
               plain
               native-type="button"
               :aria-label="`删除 ${provider.name}`"
-              :disabled="busy || provider.isActive"
+              :disabled="busy || provider.isActive || connectionPreventsDeletion(provider)"
               @click="emit('delete', provider.id)"
             >
               删除
             </ElButton>
           </div>
+          <p
+            v-if="provider.connection.disabledReason"
+            :id="`provider-connection-reason-${provider.id}`"
+            class="connection-reason"
+            role="note"
+          >
+            {{ provider.connection.disabledReason }}
+          </p>
         </ElCard>
       </li>
     </ul>
@@ -239,6 +288,11 @@ function moveProviderBy(providerId: string, offset: -1 | 1) {
 
 .provider-list-header {
   justify-content: space-between;
+}
+
+.provider-list-header :deep(.el-button) {
+  flex: 0 0 auto;
+  width: auto;
 }
 
 .eyebrow,
@@ -267,7 +321,9 @@ function moveProviderBy(providerId: string, offset: -1 | 1) {
 }
 
 .provider-drag-handle {
-  flex: 0 0 auto;
+  flex: 0 0 36px;
+  width: 36px;
+  padding-inline: 0;
   cursor: grab;
   font-size: 1.05rem;
 }
@@ -356,9 +412,18 @@ function moveProviderBy(providerId: string, offset: -1 | 1) {
   overflow-wrap: anywhere;
 }
 
-.validation-message {
+.validation-message,
+.connection-reason {
   margin: 0;
+}
+
+.validation-message {
   color: var(--danger);
+}
+
+.connection-reason {
+  color: var(--warning-text);
+  font-size: 0.82rem;
 }
 
 .provider-actions {

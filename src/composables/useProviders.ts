@@ -2,6 +2,7 @@ import { computed, getCurrentScope, onScopeDispose, readonly, ref, shallowRef } 
 import * as relay from '../services/tauri'
 import type { RelayUiError } from '../types/command'
 import type {
+  ApplyProviderConnectionInput,
   CreateProviderInput,
   FileSetFingerprint,
   ImportCurrentApiKeyInput,
@@ -11,6 +12,7 @@ import type {
   ProviderBaseUrlDraft,
   ModelCatalogItem,
   ReorderProvidersInput,
+  RestoreProviderConnectionInput,
   SaveProviderBaseUrlsInput,
   SelectProviderApiKeyInput,
   SelectProviderBaseUrlInput,
@@ -32,6 +34,10 @@ export interface ProviderClient {
     input: UpdateProviderPreferenceInput,
   ) => Promise<ProviderMutationOutcome>
   updateProviderFast(input: UpdateProviderFastInput): Promise<ProviderMutationOutcome>
+  applyProviderConnection(input: ApplyProviderConnectionInput): Promise<ProviderMutationOutcome>
+  restoreProviderConnection(
+    input: RestoreProviderConnectionInput,
+  ): Promise<ProviderMutationOutcome>
   deleteProvider(
     providerId: string,
     expectedFiles: FileSetFingerprint,
@@ -56,6 +62,8 @@ const defaultClient: ProviderClient = {
   selectProviderApiKey: relay.selectProviderApiKey,
   updateProviderPreference: relay.updateProviderPreference,
   updateProviderFast: relay.updateProviderFast,
+  applyProviderConnection: relay.applyProviderConnection,
+  restoreProviderConnection: relay.restoreProviderConnection,
   deleteProvider: relay.deleteProvider,
   switchProvider: relay.switchProvider,
   importCurrentAuthKey: relay.importCurrentAuthKey,
@@ -230,6 +238,18 @@ export function useProviders(options: UseProvidersOptions = {}) {
     return mutate(() => client.updateProviderFast({ providerId, enabled, expectedFiles }))
   }
 
+  async function applyConnection(sourceProviderId: string) {
+    const expectedFiles = await currentExpectedFiles()
+    if (!expectedFiles) return undefined
+    return mutate(() => client.applyProviderConnection({ sourceProviderId, expectedFiles }))
+  }
+
+  async function restoreConnection() {
+    const expectedFiles = await currentExpectedFiles()
+    if (!expectedFiles) return undefined
+    return mutate(() => client.restoreProviderConnection({ expectedFiles }))
+  }
+
   async function remove(providerId: string) {
     const expectedFiles = await currentExpectedFiles()
     if (!expectedFiles) return undefined
@@ -297,6 +317,8 @@ export function useProviders(options: UseProvidersOptions = {}) {
     selectApiKey,
     updatePreference,
     updateFast,
+    applyConnection,
+    restoreConnection,
     remove,
     switchTo,
     importCurrentKey,

@@ -1,7 +1,9 @@
 use crate::infrastructure::file_fingerprint::FileSetFingerprint;
 use crate::infrastructure::path_service::AppPaths;
 use crate::models::health::{HealthCheck, HealthLevel, HealthReport};
-use crate::models::provider::{ProviderApiKeyStatus, ProviderBaseUrlStatus};
+use crate::models::provider::{
+    ProviderApiKeyStatus, ProviderBaseUrlStatus, ProviderConnectionStatus,
+};
 use crate::services::autostart_service::AutostartService;
 use crate::services::backup_service::BackupService;
 use crate::services::config_service;
@@ -311,6 +313,18 @@ impl SelfCheckService {
                 }
             };
 
+        if provider_state
+            .providers
+            .iter()
+            .any(|provider| provider.connection.status == ProviderConnectionStatus::Stale)
+        {
+            checks.push(error_check(
+                "provider-connection-override",
+                "Provider 连接覆盖",
+                "当前连接覆盖与配置不一致，请先恢复自身连接；若无法恢复，请使用备份。",
+            ));
+        }
+
         if let Some(active) = active {
             let Some(provider) = provider_state
                 .providers
@@ -329,6 +343,11 @@ impl SelfCheckService {
                     "managed-base-url",
                     "当前 Base URL",
                     "当前地址尚未命名纳入 Relay 管理。",
+                )),
+                ProviderBaseUrlStatus::Routed => checks.push(normal_check(
+                    "managed-base-url",
+                    "当前 Base URL",
+                    "当前连接来源地址已纳入 Relay 管理。",
                 )),
             }
 
@@ -396,6 +415,23 @@ impl SelfCheckService {
                         "auth-key-match",
                         "API Key 一致性",
                         "当前认证密钥缺失。",
+                    ));
+                }
+                ProviderApiKeyStatus::Routed => {
+                    checks.push(normal_check(
+                        "current-provider-key",
+                        "当前 Provider API Key",
+                        "当前连接来源密钥已纳入 Relay 管理。",
+                    ));
+                    checks.push(normal_check(
+                        "auth-json",
+                        "Codex 认证",
+                        "auth.json 包含已纳管的来源 OPENAI_API_KEY。",
+                    ));
+                    checks.push(normal_check(
+                        "auth-key-match",
+                        "API Key 一致性",
+                        "当前认证密钥与连接来源条目一致。",
                     ));
                 }
             }
@@ -696,6 +732,67 @@ mod tests {
         (directory, paths, service)
     }
 
+    fn routed_service(
+        probe: Arc<FakeCodexProbe>,
+    ) -> (tempfile::TempDir, AppPaths, SelfCheckService) {
+        let (directory, paths, service) = valid_service(probe, false);
+        let config = include_str!("../../../fixtures/config-multiple-providers.toml").replacen(
+            "base_url = \"https://provider-a.example.com/v1\"",
+            "base_url = \"https://provider-b.example.com/v1\"",
+            1,
+        );
+        fs::write(&paths.config_file, config).unwrap();
+        fs::write(
+            &paths.auth_file,
+            "{\n  \"OPENAI_API_KEY\": \"test-key-b-not-real\"\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            &paths.provider_preferences_file,
+            r#"{
+  "version": 4,
+  "providers": {
+    "provider-a": {
+      "baseUrls": [{
+        "id": "legacy-default",
+        "name": "默认地址",
+        "url": "https://provider-a.example.com/v1"
+      }],
+      "modelPreference": {
+        "models": ["gpt-5.6-sol"],
+        "selectedModel": "gpt-5.6-sol",
+        "reasoningEfforts": { "gpt-5.6-sol": "medium" },
+        "fastEnabled": false
+      }
+    },
+    "provider-b": {
+      "baseUrls": [{
+        "id": "legacy-default",
+        "name": "默认地址",
+        "url": "https://provider-b.example.com/v1"
+      }],
+      "modelPreference": {
+        "models": ["gpt-5.5"],
+        "selectedModel": "gpt-5.5",
+        "reasoningEfforts": { "gpt-5.5": "medium" },
+        "fastEnabled": false
+      }
+    }
+  },
+  "connectionOverride": {
+    "targetProviderId": "provider-a",
+    "sourceProviderId": "provider-b",
+    "appliedBaseUrlId": "legacy-default",
+    "appliedApiKeyId": "legacy-default",
+    "restoreBaseUrlId": "legacy-default",
+    "restoreApiKeyId": "legacy-default"
+  }
+}"#,
+        )
+        .unwrap();
+        (directory, paths, service)
+    }
+
     #[test]
     fn critical_checks_are_local_and_never_invoke_codex_command() {
         let probe = Arc::new(FakeCodexProbe::new(CodexProbeResult::Detected(
@@ -753,6 +850,83 @@ mod tests {
                 .checks
                 .iter()
                 .any(|check| check.id == "autostart" && check.level == HealthLevel::Normal)
+        );
+    }
+
+    #[tokio::test]
+    async fn extended_self_check_accepts_active_routed_connection_without_writing() {
+        let probe = Arc::new(FakeCodexProbe::new(CodexProbeResult::Detected(
+            "codex-cli 1.0.0".into(),
+        )));
+        let (_directory, paths, service) = routed_service(probe);
+        let original = [
+            fs::read(&paths.config_file).unwrap(),
+            fs::read(&paths.auth_file).unwrap(),
+            fs::read(&paths.providers_file).unwrap(),
+            fs::read(&paths.provider_preferences_file).unwrap(),
+        ];
+
+        let report = service.run_extended_checks().await;
+        let json = serde_json::to_string(&report).unwrap();
+
+        assert!(
+            report.checks.iter().any(|check| {
+                check.id == "managed-base-url" && check.level == HealthLevel::Normal
+            })
+        );
+        assert!(
+            report.checks.iter().any(|check| {
+                check.id == "auth-key-match" && check.level == HealthLevel::Normal
+            })
+        );
+        assert!(!json.contains("test-key-b-not-real"));
+        assert_eq!(
+            [
+                fs::read(&paths.config_file).unwrap(),
+                fs::read(&paths.auth_file).unwrap(),
+                fs::read(&paths.providers_file).unwrap(),
+                fs::read(&paths.provider_preferences_file).unwrap(),
+            ],
+            original
+        );
+    }
+
+    #[tokio::test]
+    async fn extended_self_check_reports_stale_connection_after_external_provider_switch_without_writing()
+     {
+        let probe = Arc::new(FakeCodexProbe::new(CodexProbeResult::Detected(
+            "codex-cli 1.0.0".into(),
+        )));
+        let (_directory, paths, service) = routed_service(probe);
+        let config = fs::read_to_string(&paths.config_file).unwrap().replacen(
+            "model_provider = \"provider-a\"",
+            "model_provider = \"provider-b\"",
+            1,
+        );
+        fs::write(&paths.config_file, config).unwrap();
+        let original = [
+            fs::read(&paths.config_file).unwrap(),
+            fs::read(&paths.auth_file).unwrap(),
+            fs::read(&paths.providers_file).unwrap(),
+            fs::read(&paths.provider_preferences_file).unwrap(),
+        ];
+
+        let report = service.run_extended_checks().await;
+        let json = serde_json::to_string(&report).unwrap();
+
+        assert_eq!(report.level, HealthLevel::Error);
+        assert!(report.checks.iter().any(|check| {
+            check.id == "provider-connection-override" && check.level == HealthLevel::Error
+        }));
+        assert!(!json.contains("test-key-b-not-real"));
+        assert_eq!(
+            [
+                fs::read(&paths.config_file).unwrap(),
+                fs::read(&paths.auth_file).unwrap(),
+                fs::read(&paths.providers_file).unwrap(),
+                fs::read(&paths.provider_preferences_file).unwrap(),
+            ],
+            original
         );
     }
 

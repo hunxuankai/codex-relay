@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import type { ProviderProfile } from '../types/provider'
+import { providerConnection } from '../test-utils/provider'
 import type {
   ProviderAvailabilityTrace,
   ProviderAvailabilityResult,
@@ -28,6 +29,7 @@ const provider: ProviderProfile = {
   apiKeyConfigured: true,
   configurationComplete: true,
   disabledReason: null,
+  connection: providerConnection(),
   isActive: false,
   isValid: true,
   validationMessage: null,

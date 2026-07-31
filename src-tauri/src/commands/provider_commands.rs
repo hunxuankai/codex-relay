@@ -3,8 +3,9 @@ use crate::commands::command_result;
 use crate::error::CommandResult;
 use crate::infrastructure::file_fingerprint::FileSetFingerprint;
 use crate::models::provider::{
-    CreateProviderInput, ImportCurrentApiKeyInput, ProviderApiKeyManagementState,
-    ProviderListState, ProviderMutationOutcome, ReorderProvidersInput, SaveProviderApiKeysInput,
+    ApplyProviderConnectionInput, CreateProviderInput, ImportCurrentApiKeyInput,
+    ProviderApiKeyManagementState, ProviderListState, ProviderMutationOutcome,
+    ReorderProvidersInput, RestoreProviderConnectionInput, SaveProviderApiKeysInput,
     SaveProviderBaseUrlsInput, SelectProviderApiKeyInput, SelectProviderBaseUrlInput,
     SwitchOutcome, UpdateProviderFastInput, UpdateProviderInput, UpdateProviderPreferenceInput,
 };
@@ -292,6 +293,66 @@ pub async fn delete_provider(
         Err(error) => return Ok(CommandResult::failure(&error)),
     };
     let result = delete_provider_inner(&state, provider_id, expected_files).await;
+    drop(application_write);
+    if let Some(outcome) = result.data.as_ref() {
+        crate::tray::after_provider_mutation(&app, outcome.message.clone(), false);
+    }
+    Ok(result)
+}
+
+pub(crate) async fn apply_provider_connection_inner(
+    state: &AppState,
+    input: ApplyProviderConnectionInput,
+) -> CommandResult<ProviderMutationOutcome> {
+    command_result(
+        state
+            .provider_service
+            .apply_provider_connection(input)
+            .await,
+    )
+}
+
+#[tauri::command]
+pub async fn apply_provider_connection(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    input: ApplyProviderConnectionInput,
+) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+    let application_write = match state.begin_application_write() {
+        Ok(application_write) => application_write,
+        Err(error) => return Ok(CommandResult::failure(&error)),
+    };
+    let result = apply_provider_connection_inner(&state, input).await;
+    drop(application_write);
+    if let Some(outcome) = result.data.as_ref() {
+        crate::tray::after_provider_mutation(&app, outcome.message.clone(), false);
+    }
+    Ok(result)
+}
+
+pub(crate) async fn restore_provider_connection_inner(
+    state: &AppState,
+    input: RestoreProviderConnectionInput,
+) -> CommandResult<ProviderMutationOutcome> {
+    command_result(
+        state
+            .provider_service
+            .restore_provider_connection(input)
+            .await,
+    )
+}
+
+#[tauri::command]
+pub async fn restore_provider_connection(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    input: RestoreProviderConnectionInput,
+) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+    let application_write = match state.begin_application_write() {
+        Ok(application_write) => application_write,
+        Err(error) => return Ok(CommandResult::failure(&error)),
+    };
+    let result = restore_provider_connection_inner(&state, input).await;
     drop(application_write);
     if let Some(outcome) = result.data.as_ref() {
         crate::tray::after_provider_mutation(&app, outcome.message.clone(), false);

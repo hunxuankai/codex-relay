@@ -39,6 +39,18 @@ function provider(id: string, active = false, fastEnabled = false): ProviderProf
     apiKeyConfigured: true,
     configurationComplete: true,
     disabledReason: null,
+    connection: {
+      role: null,
+      status: 'none',
+      action: null,
+      disabledReason: null,
+      targetProviderId: null,
+      sourceProviderName: null,
+      appliedBaseUrlName: null,
+      appliedApiKeyName: null,
+      restoreBaseUrlName: null,
+      restoreApiKeyName: null,
+    },
     isActive: active,
     isValid: true,
     validationMessage: null,
@@ -69,6 +81,8 @@ function client(overrides: Partial<ProviderClient> = {}): ProviderClient {
     selectProviderBaseUrl: vi.fn().mockResolvedValue(mutation('地址已切换。')),
     selectProviderApiKey: vi.fn().mockResolvedValue(mutation('密钥已切换。')),
     updateProviderFast: vi.fn().mockResolvedValue(mutation('Fast 偏好已更新。')),
+    applyProviderConnection: vi.fn().mockResolvedValue(mutation('连接已应用。')),
+    restoreProviderConnection: vi.fn().mockResolvedValue(mutation('当前 Provider 连接已恢复。')),
     deleteProvider: vi.fn().mockResolvedValue(mutation('已删除。')),
     switchProvider: vi.fn().mockResolvedValue({
       providers: [],
@@ -352,6 +366,37 @@ describe('useProviders', () => {
     expect(listProviders).toHaveBeenCalledTimes(2)
     expect(providers.providers.value[0]?.fastEnabled).toBe(true)
     expect(providers.successMessage.value).toBe('Fast 已开启。')
+  })
+
+  it('applies and restores a connection with the shared fingerprint mutation flow', async () => {
+    const listProviders = vi.fn().mockResolvedValue(state([
+      provider('provider-a', true),
+      provider('provider-b'),
+    ]))
+    const applyProviderConnection = vi.fn().mockResolvedValue(mutation('连接已应用。'))
+    const restoreProviderConnection = vi
+      .fn()
+      .mockResolvedValue(mutation('当前 Provider 连接已恢复。'))
+    const providers = useProviders({
+      client: client({
+        listProviders,
+        applyProviderConnection,
+        restoreProviderConnection,
+      }),
+      subscribe: false,
+    })
+    await flushPromises()
+
+    await providers.applyConnection('provider-b')
+    await providers.restoreConnection()
+
+    expect(applyProviderConnection).toHaveBeenCalledWith({
+      sourceProviderId: 'provider-b',
+      expectedFiles: fingerprints,
+    })
+    expect(restoreProviderConnection).toHaveBeenCalledWith({ expectedFiles: fingerprints })
+    expect(listProviders).toHaveBeenCalledTimes(3)
+    expect(providers.successMessage.value).toBe('当前 Provider 连接已恢复。')
   })
 
   it('preserves the backend error when Fast is unsupported', async () => {

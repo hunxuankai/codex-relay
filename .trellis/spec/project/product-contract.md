@@ -10,8 +10,9 @@ Codex Relay 是面向 Windows 10/11、当前登录用户和个人可信计算机
 - 仅支持 `responses` Wire API；Provider ID 创建后不可修改。
 - 每个 Provider 可保存多个命名 Base URL 和多个命名 API Key，并在详情页独立选择；两组列表不配对。
 - 在 `providers.json` v2 保存命名密钥集合和密钥预选，在 `auth.json` 保存当前生效密钥。
-- 在 `provider-preferences.json` v3 保存 Provider 列表顺序、命名 Base URL 集合、模型集合、当前偏好、逐模型推理强度和默认关闭的 `fastEnabled`；v1/v2 只读迁移时 Fast 默认关闭，只在下一次成功用户事务写出 v3。
+- 在 `provider-preferences.json` v4 保存 Provider 列表顺序、命名 Base URL 集合、模型集合、当前偏好、逐模型推理强度、默认关闭的 `fastEnabled`，以及可选的无密连接覆盖关系；v1/v2/v3 只读迁移只在下一次成功用户事务写出 v4。
 - Provider 详情和编辑页提供模型目录驱动的 Fast 布尔开关。当前目录支持 GPT-5.6 Sol/Terra/Luna、GPT-5.5 和 GPT-5.4，不支持 GPT-5.4 Mini；不支持时保持关闭并显示原因，模型回退时在同一事务自动关闭。
+- Provider 列表卡片支持在不改变顶层 `model_provider` 的前提下，把另一个 Provider 已选中的 Base URL 和 API Key 应用到当前身份。覆盖关系只保存目标、来源及首次恢复点的稳定条目 ID；用户可显式“恢复自身连接”，普通 Provider 切换也会在同一事务先复原旧目标块。
 - 左侧 Provider 列表支持拖动排序和聚焦手柄后的上下方向键排序；放开后立即展示，并通过受保护事务跨刷新和重启保留，不改变当前 Provider 或 Codex 官方配置。
 - 使用统一事务提供备份、冲突检测、原子替换、写后验证和失败回滚。
 - 支持关键/扩展自检、文件监控、系统托盘、单实例、当前用户开机启动和 Windows 通知。
@@ -30,7 +31,8 @@ Codex Relay 是面向 Windows 10/11、当前登录用户和个人可信计算机
 
 ## 数据与卸载契约
 
-- `config.toml` 是 Codex 官方 Provider/顶层选择、实际 Base URL 和当前 Fast 投影真相；`provider-preferences.json` 是 Relay Provider 显示顺序、命名 URL、模型与 Fast 偏好真相；`providers.json` 是命名密钥与密钥预选存储；`auth.json` 是当前生效认证。
+- `config.toml` 是 Codex 官方 Provider/顶层选择、实际 Base URL 和当前 Fast 投影真相；`provider-preferences.json` 是 Relay Provider 显示顺序、命名 URL、模型/Fast 偏好及无密连接覆盖关系真相；`providers.json` 是命名密钥与密钥预选存储；`auth.json` 是当前生效认证。
+- 有效连接覆盖期间，当前身份的实际 URL/认证来自来源 Provider，但模型、推理强度、Fast 和顶层 `model_provider` 仍属于目标身份。外部修改造成关系失效时只显示安全错误并保留恢复入口，不在启动、刷新、自检或文件监控中自动清除或修复。
 - 应用 Fast 时写顶层 `service_tier = "fast"` 并单向确保 `[features].fast_mode = true`；关闭时只删除 `service_tier`。当前 Provider 修改立即投影，非当前 Provider 只保存偏好。
 - 普通 Provider 列表只暴露命名 URL、密钥名称/状态和配置完整性，不得返回密钥值。完整密钥只在用户显式打开管理器后进入短生命周期前端状态。
 - 卸载器只移除程序和快捷方式，不删除 `.codex`、Codex Relay 应用数据、密钥、日志或备份。

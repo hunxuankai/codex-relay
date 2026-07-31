@@ -22,6 +22,16 @@ describe('Element Plus layout integration', () => {
     expect(source).toContain(':deep(.provider-select > span)')
   })
 
+  it('keeps compact Provider list controls from consuming narrow rows', () => {
+    const source = readFileSync('src/components/ProviderList.vue', 'utf8')
+
+    expect(source).toMatch(
+      /\.provider-list-header :deep\(\.el-button\)\s*\{[^}]*\bwidth:\s*auto/,
+    )
+    expect(source).toMatch(/\.provider-drag-handle\s*\{[^}]*\bwidth:\s*36px/)
+    expect(source).toMatch(/\.provider-drag-handle\s*\{[^}]*\bflex:\s*0 0 36px/)
+  })
+
   it('applies navigation icon spacing to the content wrapper created by ElButton', () => {
     expect(readFileSync('src/App.vue', 'utf8')).toContain('.app-nav :deep(.el-button > span)')
   })

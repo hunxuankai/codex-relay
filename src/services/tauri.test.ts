@@ -7,12 +7,14 @@ import type { BackupInventory } from '../types/backup'
 import type { HealthReport } from '../types/health'
 import type { ProviderAvailabilityResult } from '../types/providerAvailability'
 import type {
+  ApplyProviderConnectionInput,
   CreateProviderInput,
   ImportCurrentApiKeyInput,
   ProviderApiKeyManagementState,
   ProviderListState,
   ProviderMutationOutcome,
   ReorderProvidersInput,
+  RestoreProviderConnectionInput,
   SaveProviderApiKeysInput,
   SaveProviderBaseUrlsInput,
   SelectProviderApiKeyInput,
@@ -24,6 +26,7 @@ import type {
 import type { Settings, SettingsState } from '../types/settings'
 import {
   RelayCommandError,
+  applyProviderConnection,
   createProvider,
   deleteProvider,
   checkForUpdate,
@@ -39,6 +42,7 @@ import {
   openBackupFile,
   openCodexDirectory,
   restoreBackup,
+  restoreProviderConnection,
   reorderProviders,
   runCriticalSelfCheck,
   runExtendedSelfCheck,
@@ -356,6 +360,29 @@ describe('Tauri service boundary', () => {
     await updateProviderFast(input)
 
     expect(invokeMock).toHaveBeenCalledWith('update_provider_fast', { input })
+  })
+
+  it('wraps Provider connection inputs without credentials', async () => {
+    invokeMock
+      .mockResolvedValueOnce(success(mutation))
+      .mockResolvedValueOnce(success(mutation))
+    const applyInput: ApplyProviderConnectionInput = {
+      sourceProviderId: 'provider-b',
+      expectedFiles: fingerprints,
+    }
+    const restoreInput: RestoreProviderConnectionInput = {
+      expectedFiles: fingerprints,
+    }
+
+    await applyProviderConnection(applyInput)
+    await restoreProviderConnection(restoreInput)
+
+    expect(invokeMock.mock.calls).toEqual([
+      ['apply_provider_connection', { input: applyInput }],
+      ['restore_provider_connection', { input: restoreInput }],
+    ])
+    expect(JSON.stringify(invokeMock.mock.calls)).not.toContain('apiKey')
+    expect(JSON.stringify(invokeMock.mock.calls)).not.toContain('test-key')
   })
 
   it('subscribes to typed Provider refresh events', async () => {

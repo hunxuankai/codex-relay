@@ -3,6 +3,7 @@ import { ElSelect, ElSwitch } from 'element-plus'
 import { nextTick } from 'vue'
 import { describe, expect, it } from 'vitest'
 import type { CreateProviderInput, FileSetFingerprint, ProviderProfile } from '../types/provider'
+import { providerConnection } from '../test-utils/provider'
 import ProviderEditor from './ProviderEditor.vue'
 
 const fingerprints: FileSetFingerprint = {
@@ -42,6 +43,7 @@ const existing: ProviderProfile = {
   apiKeyConfigured: true,
   configurationComplete: true,
   disabledReason: null,
+  connection: providerConnection(),
   isActive: true,
   isValid: true,
   validationMessage: null,

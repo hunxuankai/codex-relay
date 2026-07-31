@@ -645,7 +645,7 @@ mod tests {
     use super::*;
     use crate::models::provider::{
         ProviderApiKeyStatus, ProviderApiKeySummary, ProviderBaseUrlStatus, ProviderBaseUrlSummary,
-        ProviderProfile, WireApi,
+        ProviderConnectionProjection, ProviderProfile, WireApi,
     };
     use crate::models::settings::{Settings, WindowBounds};
 
@@ -692,6 +692,7 @@ mod tests {
             api_key_configured,
             configuration_complete: valid && api_key_configured,
             disabled_reason: (!valid || !api_key_configured).then(|| "配置不完整".into()),
+            connection: ProviderConnectionProjection::default(),
             is_active: active,
             is_valid: valid,
             validation_message: None,

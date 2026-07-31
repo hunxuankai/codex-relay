@@ -7,6 +7,7 @@ import type { CommandResult } from '../types/command'
 import type { HealthReport } from '../types/health'
 import type { ProviderAvailabilityResult } from '../types/providerAvailability'
 import type {
+  ApplyProviderConnectionInput,
   CreateProviderInput,
   FileSetFingerprint,
   ImportCurrentApiKeyInput,
@@ -14,6 +15,7 @@ import type {
   ProviderListState,
   ProviderMutationOutcome,
   ReorderProvidersInput,
+  RestoreProviderConnectionInput,
   SaveProviderApiKeysInput,
   SaveProviderBaseUrlsInput,
   SelectProviderApiKeyInput,
@@ -128,6 +130,18 @@ export function deleteProvider(
   expectedFiles: FileSetFingerprint,
 ): Promise<ProviderMutationOutcome> {
   return call('delete_provider', { providerId, expectedFiles })
+}
+
+export function applyProviderConnection(
+  input: ApplyProviderConnectionInput,
+): Promise<ProviderMutationOutcome> {
+  return call('apply_provider_connection', { input })
+}
+
+export function restoreProviderConnection(
+  input: RestoreProviderConnectionInput,
+): Promise<ProviderMutationOutcome> {
+  return call('restore_provider_connection', { input })
 }
 
 export function switchProvider(providerId: string): Promise<SwitchOutcome> {

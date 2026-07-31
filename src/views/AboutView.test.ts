@@ -23,7 +23,7 @@ describe('AboutView', () => {
     expect(wrapper.text()).toContain('auth.json')
     expect(wrapper.text()).toContain('providers.json')
     expect(wrapper.text()).toContain('provider-preferences.json')
-    expect(wrapper.text()).toContain('版本 3')
+    expect(wrapper.text()).toContain('版本 4')
     expect(wrapper.text()).toContain('每个 Provider 的 Fast 偏好')
     expect(wrapper.text()).toContain('service_tier = "fast"')
     expect(wrapper.text()).toContain('features.fast_mode = true')
@@ -59,5 +59,23 @@ describe('AboutView', () => {
     await wrapper.get('[aria-label="打开当前 Codex 配置目录"]').trigger('click')
 
     expect(wrapper.emitted('openDirectory')).toHaveLength(1)
+  })
+
+  it('describes connection routing and explicit recovery without overstating secret handling', () => {
+    const text = mount(AboutView, {
+      props: {
+        appVersion: '0.3.0',
+        configDirectory: 'C:\\safe-test\\codex',
+      },
+    }).text()
+
+    expect(text).toContain('保持 model_provider')
+    expect(text).toContain('恢复自身连接')
+    expect(text).toContain('首次覆盖前')
+    expect(text).toContain('普通切换')
+    expect(text).toContain('稳定条目 ID')
+    expect(text).toContain('已选中的 Base URL 与 API Key')
+    expect(text).not.toContain('自动验证 API Key')
+    expect(text).not.toContain('加密 API Key')
   })
 })

@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import type { ProviderProfile } from '../types/provider'
+import { providerConnection } from '../test-utils/provider'
 import ProviderCredentialControls from './ProviderCredentialControls.vue'
 
 function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
@@ -26,6 +27,7 @@ function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
     apiKeyConfigured: true,
     configurationComplete: true,
     disabledReason: null,
+    connection: providerConnection(),
     isActive: true,
     isValid: true,
     validationMessage: null,
@@ -77,5 +79,38 @@ describe('ProviderCredentialControls', () => {
     })
     expect(external.text()).toContain('尚未配置受管密钥')
     expect(external.text()).toContain('缺少受管 API Key。')
+  })
+
+  it('shows and locks the routed key source until identity restore', async () => {
+    const wrapper = mount(ProviderCredentialControls, {
+      props: {
+        provider: provider({
+          selectedApiKeyId: null,
+          apiKeyStatus: 'routed',
+          connection: providerConnection({
+            role: 'identity',
+            status: 'active',
+            action: 'restore',
+            sourceProviderName: 'Provider B',
+            appliedApiKeyName: 'B 主用密钥',
+          }),
+        }),
+        busy: false,
+      },
+    })
+    const segmented = wrapper.getComponent({ name: 'ElSegmented' })
+    const manage = wrapper.get('[aria-label="管理 API Key"]')
+
+    expect(wrapper.text()).toContain('Provider B')
+    expect(wrapper.text()).toContain('B 主用密钥')
+    expect(wrapper.text()).toContain('恢复自身连接后可管理')
+    expect(wrapper.text()).not.toContain('test-key')
+    expect(segmented.props('disabled')).toBe(true)
+    expect(manage.attributes('disabled')).toBeDefined()
+
+    segmented.vm.$emit('change', 'key-backup')
+    await manage.trigger('click')
+    expect(wrapper.emitted('select')).toBeUndefined()
+    expect(wrapper.emitted('manage')).toBeUndefined()
   })
 })

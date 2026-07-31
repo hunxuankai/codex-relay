@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick, ref, shallowRef } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProviderProfile } from '../types/provider'
+import { providerConnection } from '../test-utils/provider'
 import type { ProviderAvailabilityResult, ProviderTestKind } from '../types/providerAvailability'
 import ProviderApiKeyManagerDialog from '../components/ProviderApiKeyManagerDialog.vue'
 import ProviderAvailabilityPanel from '../components/ProviderAvailabilityPanel.vue'
@@ -68,6 +69,7 @@ function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
     apiKeyConfigured: true,
     configurationComplete: true,
     disabledReason: null,
+    connection: providerConnection(),
     isActive: false,
     isValid: true,
     validationMessage: null,
@@ -119,6 +121,8 @@ function controller() {
     importCurrentKey: vi.fn(),
     updatePreference: vi.fn(),
     updateFast: vi.fn(),
+    applyConnection: vi.fn().mockResolvedValue({ providers: [], message: '连接已应用。' }),
+    restoreConnection: vi.fn().mockResolvedValue({ providers: [], message: '连接已恢复。' }),
     selectProvider: vi.fn((id: string) => {
       selectedProviderId.value = id
       selectedProvider.value = providers.value.find((item) => item.id === id) ?? null
@@ -260,6 +264,46 @@ describe('ProvidersView', () => {
     expect(state.remove).toHaveBeenCalledWith('provider-a')
   })
 
+  it('disables detail deletion while the selected identity owns a recovery point', async () => {
+    const state = controller()
+    const identity = provider({
+      isActive: false,
+      connection: providerConnection({
+        role: 'identity',
+        status: 'stale',
+        action: 'restore',
+        disabledReason: '当前连接已失效；请恢复自身连接。',
+      }),
+    })
+    state.providers.value = [identity]
+    state.selectedProvider.value = identity
+    mockUseProviders.mockReturnValue(state)
+    const wrapper = mount(ProvidersView)
+
+    const button = wrapper.get('[aria-label="删除所选 Provider"]')
+    expect(button.attributes('disabled')).toBeDefined()
+    await button.trigger('click')
+    expect(state.remove).not.toHaveBeenCalled()
+  })
+
+  it('disables detail deletion while the selected Provider is the connection source', () => {
+    const state = controller()
+    const source = provider({
+      isActive: false,
+      connection: providerConnection({
+        role: 'source',
+        status: 'active',
+        action: 'applied',
+      }),
+    })
+    state.providers.value = [source]
+    state.selectedProvider.value = source
+    mockUseProviders.mockReturnValue(state)
+    const wrapper = mount(ProvidersView)
+
+    expect(wrapper.get('[aria-label="删除所选 Provider"]').attributes('disabled')).toBeDefined()
+  })
+
   it('shows the selected Provider details and actions in the right pane', () => {
     const state = controller()
     mockUseProviders.mockReturnValue(state)
@@ -274,6 +318,92 @@ describe('ProvidersView', () => {
     expect(detail.text()).toContain('当前地址：主用地址')
     expect(detail.text()).toContain('当前密钥：主用密钥')
     expect(detail.find('[aria-label="编辑所选 Provider"]').exists()).toBe(true)
+  })
+
+  it('confirms a safe connection summary and does not apply on cancel', async () => {
+    const state = controller()
+    const target = provider({ id: 'provider-a', name: 'Provider A', isActive: true })
+    const source = provider({
+      id: 'provider-b',
+      name: 'Provider B',
+      isActive: false,
+      connection: providerConnection({
+        action: 'apply',
+        targetProviderId: 'provider-a',
+        sourceProviderName: 'Provider B',
+        appliedBaseUrlName: 'B 主用地址',
+        appliedApiKeyName: 'B 主用密钥',
+      }),
+    })
+    state.providers.value = [target, source]
+    state.activeProvider.value = target
+    state.selectedProviderId.value = 'provider-b'
+    state.selectedProvider.value = source
+    mockUseProviders.mockReturnValue(state)
+    const wrapper = mount(ProvidersView, { attachTo: document.body })
+
+    await wrapper.get('[aria-label="仅应用连接 Provider B"]').trigger('click')
+    await flushPromises()
+    const summary = document.body.textContent ?? ''
+    expect(summary).toContain('Provider B')
+    expect(summary).toContain('provider-a')
+    expect(summary).toContain('B 主用地址')
+    expect(summary).toContain('B 主用密钥')
+    expect(summary).toContain('顶层 model_provider 保持不变')
+    expect(summary).not.toContain('test-key')
+    expect(state.applyConnection).not.toHaveBeenCalled()
+
+    await wrapper.get('[aria-label="取消连接确认"]').trigger('click')
+    expect(state.applyConnection).not.toHaveBeenCalled()
+
+    await wrapper.get('[aria-label="仅应用连接 Provider B"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[aria-label="确认应用连接"]').trigger('click')
+    await flushPromises()
+    expect(state.applyConnection).toHaveBeenCalledOnce()
+    expect(state.applyConnection).toHaveBeenCalledWith('provider-b')
+  })
+
+  it('confirms the fixed recovery entries before restoring the current identity', async () => {
+    const state = controller()
+    const identity = provider({
+      id: 'provider-a',
+      name: 'Provider A',
+      isActive: true,
+      selectedBaseUrlId: null,
+      selectedApiKeyId: null,
+      baseUrlStatus: 'routed',
+      apiKeyStatus: 'routed',
+      connection: providerConnection({
+        role: 'identity',
+        status: 'active',
+        action: 'restore',
+        targetProviderId: 'provider-a',
+        sourceProviderName: 'Provider B',
+        appliedBaseUrlName: 'B 主用地址',
+        appliedApiKeyName: 'B 主用密钥',
+        restoreBaseUrlName: 'A 原地址',
+        restoreApiKeyName: 'A 原密钥',
+      }),
+    })
+    state.providers.value = [identity]
+    state.activeProvider.value = identity
+    state.selectedProviderId.value = 'provider-a'
+    state.selectedProvider.value = identity
+    mockUseProviders.mockReturnValue(state)
+    const wrapper = mount(ProvidersView, { attachTo: document.body })
+
+    await wrapper.get('[aria-label="恢复自身连接 Provider A"]').trigger('click')
+    await flushPromises()
+    const summary = document.body.textContent ?? ''
+    expect(summary).toContain('A 原地址')
+    expect(summary).toContain('A 原密钥')
+    expect(summary).not.toContain('test-key')
+
+    await wrapper.get('[aria-label="确认恢复连接"]').trigger('click')
+    await flushPromises()
+    expect(state.restoreConnection).toHaveBeenCalledOnce()
+    expect(state.applyConnection).not.toHaveBeenCalled()
   })
 
   it('forwards detail Fast changes without copying Provider state in the view', async () => {

@@ -499,7 +499,7 @@ impl TransactionService {
 
         match first_error {
             Some(error) => Err(error),
-            None => Ok(()),
+            None => validate_rollback_matches(&self.paths, snapshot),
         }
     }
 
@@ -618,7 +618,7 @@ fn change_from_snapshot(bytes: Option<&[u8]>) -> FileChange {
     }
 }
 
-fn validate_snapshot_matches(paths: &AppPaths, snapshot: &FileSnapshot) -> Result<(), AppError> {
+fn snapshot_matches(paths: &AppPaths, snapshot: &FileSnapshot) -> Result<bool, AppError> {
     for (path, expected) in [
         (&paths.config_file, snapshot.config.as_deref()),
         (&paths.auth_file, snapshot.auth.as_deref()),
@@ -634,15 +634,30 @@ fn validate_snapshot_matches(paths: &AppPaths, snapshot: &FileSnapshot) -> Resul
             Err(error) => return Err(AppError::from(error)),
         };
         if actual.as_deref() != expected {
-            return Err(AppError::new(
-                "RESTORE_VERIFICATION_FAILED",
-                "备份恢复后的文件验证失败。",
-                format!(
-                    "restored file does not match selected snapshot: {}",
-                    path.display()
-                ),
-            ));
+            return Ok(false);
         }
+    }
+    Ok(true)
+}
+
+fn validate_snapshot_matches(paths: &AppPaths, snapshot: &FileSnapshot) -> Result<(), AppError> {
+    if !snapshot_matches(paths, snapshot)? {
+        return Err(AppError::new(
+            "RESTORE_VERIFICATION_FAILED",
+            "备份恢复后的文件验证失败。",
+            "restored file does not match selected snapshot",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_rollback_matches(paths: &AppPaths, snapshot: &FileSnapshot) -> Result<(), AppError> {
+    if !snapshot_matches(paths, snapshot)? {
+        return Err(AppError::new(
+            "ROLLBACK_VERIFICATION_FAILED",
+            "配置回滚后的文件验证失败。",
+            "rollback files do not match the transaction snapshot",
+        ));
     }
     Ok(())
 }
@@ -937,6 +952,38 @@ wire_api = "responses"
         }
     }
 
+    struct SilentRollbackConfigFileOps {
+        inner: StdFileOps,
+    }
+
+    impl FileOps for SilentRollbackConfigFileOps {
+        fn read_optional(&self, path: &std::path::Path) -> Result<Option<Vec<u8>>, AppError> {
+            self.inner.read_optional(path)
+        }
+
+        fn write(
+            &self,
+            path: &std::path::Path,
+            bytes: &[u8],
+            kind: ManagedFileKind,
+            phase: WritePhase,
+        ) -> Result<(), AppError> {
+            if kind == ManagedFileKind::Config && phase == WritePhase::Rollback {
+                return Ok(());
+            }
+            self.inner.write(path, bytes, kind, phase)
+        }
+
+        fn remove_if_exists(
+            &self,
+            path: &std::path::Path,
+            kind: ManagedFileKind,
+            phase: WritePhase,
+        ) -> Result<(), AppError> {
+            self.inner.remove_if_exists(path, kind, phase)
+        }
+    }
+
     #[tokio::test]
     async fn auth_write_failure_restores_original_files() {
         let directory = tempfile::tempdir().unwrap();
@@ -1099,6 +1146,11 @@ wire_api = "responses"
             br#"{"version":3,"providers":{}}"#,
         )
         .unwrap();
+        validate_managed_file(
+            ManagedFileKind::Preferences,
+            br#"{"version":4,"providers":{}}"#,
+        )
+        .unwrap();
         assert_eq!(
             validate_managed_file(
                 ManagedFileKind::Providers,
@@ -1111,7 +1163,7 @@ wire_api = "responses"
         assert_eq!(
             validate_managed_file(
                 ManagedFileKind::Preferences,
-                br#"{"version":4,"providers":{}}"#,
+                br#"{"version":5,"providers":{}}"#,
             )
             .unwrap_err()
             .code(),
@@ -1157,6 +1209,34 @@ wire_api = "responses"
         assert_eq!(error.code(), "ROLLBACK_INCOMPLETE");
         assert!(!error.public_message().contains("原配置已恢复"));
         assert!(paths.app_data_dir.join("transaction.json").exists());
+    }
+
+    #[tokio::test]
+    async fn silent_rollback_write_is_reported_as_incomplete_and_keeps_the_marker() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = create_paths(&directory);
+        write_initial_files(&paths);
+        let service = TransactionService::with_file_ops(
+            paths.clone(),
+            BackupService::new(paths.backups_dir.clone(), "0.1.0"),
+            Arc::new(SilentRollbackConfigFileOps { inner: StdFileOps }),
+        );
+
+        let error = service
+            .execute(request(None), |_| {
+                Err(AppError::new(
+                    "POST_WRITE_VALIDATION_FAILED",
+                    "写入后验证失败。",
+                    "injected validation failure",
+                ))
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code(), "ROLLBACK_INCOMPLETE");
+        assert!(!error.public_message().contains("原配置已恢复"));
+        assert!(paths.app_data_dir.join("transaction.json").exists());
+        assert_eq!(fs::read(&paths.config_file).unwrap(), CONFIG_B);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

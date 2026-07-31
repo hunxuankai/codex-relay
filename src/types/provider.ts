@@ -25,8 +25,24 @@ export interface ProviderApiKeySummary {
   name: string
 }
 
-export type ProviderBaseUrlStatus = 'managed' | 'external'
-export type ProviderApiKeyStatus = 'managed' | 'external' | 'missing'
+export type ProviderBaseUrlStatus = 'managed' | 'external' | 'routed'
+export type ProviderApiKeyStatus = 'managed' | 'external' | 'missing' | 'routed'
+export type ProviderConnectionRole = 'identity' | 'source'
+export type ProviderConnectionStatus = 'none' | 'active' | 'stale'
+export type ProviderConnectionAction = 'apply' | 'applied' | 'update' | 'restore'
+
+export interface ProviderConnectionProjection {
+  role: ProviderConnectionRole | null
+  status: ProviderConnectionStatus
+  action: ProviderConnectionAction | null
+  disabledReason: string | null
+  targetProviderId: string | null
+  sourceProviderName: string | null
+  appliedBaseUrlName: string | null
+  appliedApiKeyName: string | null
+  restoreBaseUrlName: string | null
+  restoreApiKeyName: string | null
+}
 
 export interface ProviderProfile {
   id: string
@@ -47,9 +63,19 @@ export interface ProviderProfile {
   apiKeyConfigured: boolean
   configurationComplete: boolean
   disabledReason: string | null
+  connection: ProviderConnectionProjection
   isActive: boolean
   isValid: boolean
   validationMessage: string | null
+}
+
+export interface ApplyProviderConnectionInput {
+  sourceProviderId: string
+  expectedFiles: FileSetFingerprint
+}
+
+export interface RestoreProviderConnectionInput {
+  expectedFiles: FileSetFingerprint
 }
 
 export interface CreateProviderInput {

@@ -6,6 +6,7 @@ import type { ProviderProfile } from './types/provider'
 import type { Settings, SettingsState } from './types/settings'
 import type { UpdaterController, UseUpdaterOptions } from './composables/useUpdater'
 import type { UpdateProgress, UpdateReleaseInfo } from './types/update'
+import { providerConnection } from './test-utils/provider'
 import App from './App.vue'
 
 const mocks = vi.hoisted(() => ({
@@ -48,6 +49,7 @@ const provider: ProviderProfile = {
   apiKeyConfigured: true,
   configurationComplete: true,
   disabledReason: null,
+  connection: providerConnection(),
   isActive: true,
   isValid: true,
   validationMessage: null,
