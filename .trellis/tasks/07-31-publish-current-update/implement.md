@@ -114,14 +114,14 @@ Sandbox 准备脚本。
 
   结果：`git diff --check` 与任务材料校验通过；高置信度秘密命中 0，受跟踪敏感路径命中
   0，受忽略文件被跟踪命中 0。构建产物、依赖和安全开发数据均保持 ignored。
-- [ ] 精确暂存本次文件，检查 `git diff --cached --name-status` 与
-  `git diff --cached --check`，提交：
+- [x] 精确暂存 14 个发布、测试规范与任务文件，`git diff --cached --check` 通过，提交：
 
   ```text
   chore(release): 准备 v0.4.0 发布
   ```
-- [ ] 推送 `git push origin HEAD:main`，读取远端 `main` 并确认完整 SHA 等于本地候选；
-  不创建本地或远端 Tag。
+- [x] 发布准备提交 `2bc2a89639c553ed4365ff8f9d057c24a048e300` 已推送到
+  `origin/main`，推送前远端基线为 `0eb8fc34cd09b6e326b5c71293e35b3e415bd2f5`，推送后
+  远端 SHA 与本地一致；未创建 Tag。发布证据提交后将再次固定最终候选 SHA。
 
 ## Task 5：保存 v0.3.0 升级基线
 
@@ -129,10 +129,16 @@ Sandbox 准备脚本。
 
 - 写入：系统临时目录中的独立只读基线目录。
 
-- [ ] 通过 GitHub API 读取 `v0.3.0` Release 的 NSIS 资产 ID、名称、大小和 digest。
-- [ ] 创建空的系统临时目录真子路径，检查目标及父路径没有 reparse point，按
+- [x] 通过 GitHub API 读取 `v0.3.0` Release ID `362221700`；NSIS 资产 ID
+  `494995775`、名称 `Codex.Relay_0.3.0_x64-setup.exe`、大小 4,644,968 字节、digest
+  `sha256:1af72eaccbfec0b65716ad2334830000cb4e4bd623b61bcf66c212a87734fde1`。
+- [x] 创建空的系统临时目录真子路径，检查目标及父路径没有 reparse point，按
   `Accept: application/octet-stream` 下载基线安装器。
-- [ ] 核对实际字节数与 SHA-256 等于 Release API；记录临时路径但不把安装器纳入 Git。
+- [x] 基线保存到
+  `D:\Users\23869\AppData\Local\Temp\codex-relay-v0.4.0-baseline-2befab081d664d68928bf4a375f6d166\Codex.Relay_0.3.0_x64-setup.exe`；
+  实际大小 4,644,968 字节、SHA-256
+  `1af72eaccbfec0b65716ad2334830000cb4e4bd623b61bcf66c212a87734fde1`，与 API 一致，
+  目录不含 reparse point且不纳入 Git。
 
 ## Task 6：触发并监控唯一 Draft 发布 Run
 
