@@ -1,5 +1,8 @@
 [workspace]
-members = ["crates/codex-relay-core"]
+members = [
+    "crates/codex-relay-core",
+    "../tools/release-console/src-tauri",
+]
 resolver = "3"
 
 [package]

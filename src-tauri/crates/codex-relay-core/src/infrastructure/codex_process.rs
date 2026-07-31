@@ -1,7 +1,10 @@
 use crate::infrastructure::codex_runner::{CodexInvocation, filter_inherited_environment};
+use std::ffi::OsString;
 use std::fmt;
+use std::fs::OpenOptions;
 use std::future::Future;
-use std::io::Read;
+use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -11,49 +14,96 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
-pub(crate) const MAX_PROCESS_OUTPUT_BYTES: usize = 1024 * 1024;
+pub const MAX_PROCESS_OUTPUT_BYTES: usize = 1024 * 1024;
+pub const MAX_PROCESS_STDIN_BYTES: usize = 1024 * 1024;
 const PROCESS_TERMINATION_GRACE: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 const MAX_JOB_PROCESS_IDS: usize = 4096;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
-pub(crate) enum CodexProcessError {
+pub enum ProcessError {
     #[error("无法创建 Windows Job Object")]
     JobUnavailable,
-    #[error("无法将 Codex 进程加入 Windows Job Object")]
+    #[error("无法将子进程加入 Windows Job Object")]
     JobAssignment,
-    #[error("Codex 进程启动失败")]
+    #[error("子进程启动失败")]
     ProcessStart,
-    #[error("Codex 进程无法从安全挂起状态恢复")]
+    #[error("子进程无法从安全挂起状态恢复")]
     ProcessResume,
-    #[error("Codex 输出超过安全上限")]
+    #[error("子进程输出超过安全上限")]
     OutputTooLarge,
-    #[error("Codex 进程超时")]
+    #[error("子进程超时")]
     Timeout,
-    #[error("Codex 测试已取消")]
+    #[error("子进程已取消")]
     Cancelled,
-    #[error("Codex 进程树未能安全终止")]
+    #[error("子进程树未能安全终止")]
     ProcessTreeTermination,
-    #[error("读取 Codex 输出失败")]
+    #[error("读取子进程输出失败")]
     OutputRead,
+    #[error("子进程输入超过安全上限")]
+    InputTooLarge,
+    #[error("写入子进程输入失败")]
+    InputWrite,
 }
 
-pub(crate) struct CodexProcessOutput {
-    pub(crate) exit_code: Option<i32>,
-    pub(crate) stdout: Vec<u8>,
-    pub(crate) stderr: Vec<u8>,
+pub struct ProcessOutput {
+    pub exit_code: Option<i32>,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
 }
 
-impl fmt::Debug for CodexProcessOutput {
+impl fmt::Debug for ProcessOutput {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("CodexProcessOutput")
+            .debug_struct("ProcessOutput")
             .field("exit_code", &self.exit_code)
             .field("stdout_len", &self.stdout.len())
             .field("stderr_len", &self.stderr.len())
             .finish()
     }
 }
+
+#[derive(Clone)]
+pub struct ProcessInvocation {
+    pub executable: PathBuf,
+    pub args: Vec<OsString>,
+    pub env: Vec<(OsString, OsString)>,
+    pub workdir: PathBuf,
+    pub stdin: Option<Vec<u8>>,
+    pub stdout_file: Option<PathBuf>,
+}
+
+impl fmt::Debug for ProcessInvocation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let env_names = self
+            .env
+            .iter()
+            .map(|(name, _)| name.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        formatter
+            .debug_struct("ProcessInvocation")
+            .field("executable", &self.executable)
+            .field("arg_count", &self.args.len())
+            .field("env_names", &env_names)
+            .field("workdir", &self.workdir)
+            .field("stdin_len", &self.stdin.as_ref().map(Vec::len))
+            .field("stdout_file", &self.stdout_file)
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProcessStream {
+    Stdout,
+    Stderr,
+}
+
+pub trait ProcessEventSink: Send + Sync + 'static {
+    fn on_output(&self, stream: ProcessStream, bytes: &[u8]);
+}
+
+pub(crate) type CodexProcessError = ProcessError;
+pub(crate) type CodexProcessOutput = ProcessOutput;
 
 pub(crate) trait CodexProcessBackend: Send + Sync {
     fn run(
@@ -79,11 +129,11 @@ pub(crate) trait JobFactory: Send + Sync {
 }
 
 #[derive(Clone)]
-pub(crate) struct SystemCodexProcessBackend {
+pub struct SafeProcessRunner {
     job_factory: Arc<dyn JobFactory>,
 }
 
-impl Default for SystemCodexProcessBackend {
+impl Default for SafeProcessRunner {
     fn default() -> Self {
         Self {
             job_factory: Arc::new(SystemJobFactory),
@@ -91,10 +141,39 @@ impl Default for SystemCodexProcessBackend {
     }
 }
 
+impl SafeProcessRunner {
+    #[cfg(test)]
+    fn with_job_factory(job_factory: Arc<dyn JobFactory>) -> Self {
+        Self { job_factory }
+    }
+
+    pub async fn run(
+        &self,
+        invocation: ProcessInvocation,
+        timeout: Duration,
+        cancel: watch::Receiver<bool>,
+        event_sink: Option<Arc<dyn ProcessEventSink>>,
+    ) -> Result<ProcessOutput, ProcessError> {
+        let job_factory = Arc::clone(&self.job_factory);
+        tokio::task::spawn_blocking(move || {
+            run_blocking(invocation, timeout, cancel, job_factory, event_sink)
+        })
+        .await
+        .map_err(|_| ProcessError::ProcessStart)?
+    }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct SystemCodexProcessBackend {
+    runner: SafeProcessRunner,
+}
+
 impl SystemCodexProcessBackend {
     #[cfg(test)]
     pub(crate) fn with_job_factory(job_factory: Arc<dyn JobFactory>) -> Self {
-        Self { job_factory }
+        Self {
+            runner: SafeProcessRunner::with_job_factory(job_factory),
+        }
     }
 }
 
@@ -105,34 +184,58 @@ impl CodexProcessBackend for SystemCodexProcessBackend {
         timeout: Duration,
         cancel: watch::Receiver<bool>,
     ) -> Pin<Box<dyn Future<Output = Result<CodexProcessOutput, CodexProcessError>> + Send>> {
-        let job_factory = Arc::clone(&self.job_factory);
-        Box::pin(async move {
-            tokio::task::spawn_blocking(move || {
-                run_blocking(invocation, timeout, cancel, job_factory)
-            })
-            .await
-            .map_err(|_| CodexProcessError::ProcessStart)?
-        })
+        let mut env = filter_inherited_environment(std::env::vars_os());
+        env.extend(invocation.env);
+        let invocation = ProcessInvocation {
+            executable: invocation.executable,
+            args: invocation.args,
+            env,
+            workdir: invocation.workdir,
+            stdin: None,
+            stdout_file: None,
+        };
+        let runner = self.runner.clone();
+        Box::pin(async move { runner.run(invocation, timeout, cancel, None).await })
     }
 }
 
 fn run_blocking(
-    invocation: CodexInvocation,
+    invocation: ProcessInvocation,
     timeout: Duration,
     cancel: watch::Receiver<bool>,
     job_factory: Arc<dyn JobFactory>,
+    event_sink: Option<Arc<dyn ProcessEventSink>>,
 ) -> Result<CodexProcessOutput, CodexProcessError> {
+    if invocation
+        .stdin
+        .as_ref()
+        .is_some_and(|stdin| stdin.len() > MAX_PROCESS_STDIN_BYTES)
+    {
+        return Err(CodexProcessError::InputTooLarge);
+    }
+    let stdout_to_file = invocation.stdout_file.is_some();
+    let stdout = match &invocation.stdout_file {
+        Some(path) => Stdio::from(
+            OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(path)
+                .map_err(|_| CodexProcessError::ProcessStart)?,
+        ),
+        None => Stdio::piped(),
+    };
     let mut command = Command::new(&invocation.executable);
     command
         .args(&invocation.args)
         .current_dir(&invocation.workdir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
+        .stdin(if invocation.stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(stdout)
         .stderr(Stdio::piped())
         .env_clear();
-    for (name, value) in filter_inherited_environment(std::env::vars_os()) {
-        command.env(name, value);
-    }
     for (name, value) in invocation.env {
         command.env(name, value);
     }
@@ -154,11 +257,38 @@ fn run_blocking(
         return Err(error);
     }
 
-    let stdout = child.stdout.take().ok_or(CodexProcessError::ProcessStart)?;
+    let stdout: Box<dyn Read + Send> = match child.stdout.take() {
+        Some(stdout) => Box::new(stdout),
+        None if stdout_to_file => Box::new(std::io::empty()),
+        None => return Err(CodexProcessError::ProcessStart),
+    };
     let stderr = child.stderr.take().ok_or(CodexProcessError::ProcessStart)?;
     let (output_sender, output_receiver) = mpsc::channel();
-    let stdout_thread = spawn_reader(stdout, OutputStream::Stdout, output_sender.clone());
-    let stderr_thread = spawn_reader(stderr, OutputStream::Stderr, output_sender);
+    let stdout_thread = spawn_reader(
+        stdout,
+        OutputStream::Stdout,
+        output_sender.clone(),
+        event_sink.clone(),
+    );
+    let stderr_thread = spawn_reader(stderr, OutputStream::Stderr, output_sender, event_sink);
+    if let Some(stdin) = invocation.stdin {
+        let write_result = child
+            .stdin
+            .take()
+            .ok_or(CodexProcessError::InputWrite)
+            .and_then(|mut child_stdin| {
+                child_stdin
+                    .write_all(&stdin)
+                    .and_then(|()| child_stdin.flush())
+                    .map_err(|_| CodexProcessError::InputWrite)
+            });
+        if let Err(error) = write_result {
+            let _ = terminate_job_and_wait(&*job, &mut child);
+            join_reader(stdout_thread);
+            join_reader(stderr_thread);
+            return Err(error);
+        }
+    }
     let deadline = Instant::now() + timeout;
     let mut stdout_result = None;
     let mut stderr_result = None;
@@ -366,9 +496,19 @@ fn fallback_terminate_process_tree(process_id: u32) {
     let _ = process_id;
 }
 
+#[derive(Clone, Copy)]
 enum OutputStream {
     Stdout,
     Stderr,
+}
+
+impl From<OutputStream> for ProcessStream {
+    fn from(value: OutputStream) -> Self {
+        match value {
+            OutputStream::Stdout => Self::Stdout,
+            OutputStream::Stderr => Self::Stderr,
+        }
+    }
 }
 
 enum ReaderMessage {
@@ -380,12 +520,13 @@ fn spawn_reader<R>(
     reader: R,
     stream: OutputStream,
     sender: mpsc::Sender<ReaderMessage>,
+    event_sink: Option<Arc<dyn ProcessEventSink>>,
 ) -> thread::JoinHandle<()>
 where
     R: Read + Send + 'static,
 {
     thread::spawn(move || {
-        let result = read_bounded(reader);
+        let result = read_bounded(reader, stream, event_sink.as_deref());
         let message = match stream {
             OutputStream::Stdout => ReaderMessage::Stdout(result),
             OutputStream::Stderr => ReaderMessage::Stderr(result),
@@ -394,7 +535,11 @@ where
     })
 }
 
-fn read_bounded<R: Read>(mut reader: R) -> Result<Vec<u8>, CodexProcessError> {
+fn read_bounded<R: Read>(
+    mut reader: R,
+    stream: OutputStream,
+    event_sink: Option<&dyn ProcessEventSink>,
+) -> Result<Vec<u8>, CodexProcessError> {
     let mut output = Vec::new();
     let mut buffer = [0_u8; 8192];
     loop {
@@ -406,6 +551,9 @@ fn read_bounded<R: Read>(mut reader: R) -> Result<Vec<u8>, CodexProcessError> {
         }
         if output.len().saturating_add(read) > MAX_PROCESS_OUTPUT_BYTES {
             return Err(CodexProcessError::OutputTooLarge);
+        }
+        if let Some(sink) = event_sink {
+            sink.on_output(stream.into(), &buffer[..read]);
         }
         output.extend_from_slice(&buffer[..read]);
     }
@@ -850,5 +998,141 @@ try {
             CodexProcessError::Cancelled
         );
         assert!(!is_process_running(child_pid));
+    }
+
+    struct ChannelSink {
+        sender: tokio::sync::mpsc::UnboundedSender<(ProcessStream, Vec<u8>)>,
+    }
+
+    impl ProcessEventSink for ChannelSink {
+        fn on_output(&self, stream: ProcessStream, bytes: &[u8]) {
+            let _ = self.sender.send((stream, bytes.to_vec()));
+        }
+    }
+
+    #[tokio::test]
+    #[serial(codex_process)]
+    async fn generic_runner_streams_output_before_process_completion() {
+        let directory = tempfile::tempdir().unwrap();
+        let (event_sender, mut events) = tokio::sync::mpsc::unbounded_channel();
+        let sink = Arc::new(ChannelSink {
+            sender: event_sender,
+        });
+        let (_cancel_sender, cancel) = tokio::sync::watch::channel(false);
+        let run = tokio::spawn(async move {
+            SafeProcessRunner::default()
+                .run(
+                    ProcessInvocation {
+                        executable: powershell(),
+                        args: vec![
+                            "-NoLogo".into(),
+                            "-NoProfile".into(),
+                            "-NonInteractive".into(),
+                            "-Command".into(),
+                            "[Console]::Out.Write('first'); [Console]::Out.Flush(); Start-Sleep -Milliseconds 500; [Console]::Out.Write('second')".into(),
+                        ],
+                        env: filter_inherited_environment(std::env::vars_os()),
+                        workdir: directory.path().to_owned(),
+                        stdin: None,
+                        stdout_file: None,
+                    },
+                    Duration::from_secs(5),
+                    cancel,
+                    Some(sink),
+                )
+                .await
+        });
+
+        let (stream, first_chunk) = tokio::time::timeout(Duration::from_secs(2), events.recv())
+            .await
+            .expect("first output should arrive while the process is running")
+            .expect("output channel should remain open");
+        assert_eq!(
+            stream,
+            ProcessStream::Stdout,
+            "unexpected first event: {}",
+            String::from_utf8_lossy(&first_chunk)
+        );
+        assert_eq!(first_chunk, b"first");
+        assert!(!run.is_finished());
+
+        let output = run.await.unwrap().unwrap();
+        assert_eq!(output.exit_code, Some(0));
+        assert_eq!(output.stdout, b"firstsecond");
+        assert!(output.stderr.is_empty());
+    }
+
+    #[tokio::test]
+    #[serial(codex_process)]
+    async fn generic_runner_writes_structured_stdin_without_debug_exposure() {
+        let directory = tempfile::tempdir().unwrap();
+        let (_cancel_sender, cancel) = tokio::sync::watch::channel(false);
+        let invocation = ProcessInvocation {
+            executable: powershell(),
+            args: vec![
+                "-NoLogo".into(),
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-Command".into(),
+                "$value = [Console]::In.ReadToEnd(); [Console]::Out.Write($value.Length)".into(),
+            ],
+            env: filter_inherited_environment(std::env::vars_os()),
+            workdir: directory.path().to_owned(),
+            stdin: Some(b"structured-input".to_vec()),
+            stdout_file: None,
+        };
+        let debug = format!("{invocation:?}");
+        assert!(!debug.contains("structured-input"));
+
+        let output = SafeProcessRunner::default()
+            .run(invocation, Duration::from_secs(5), cancel, None)
+            .await
+            .unwrap();
+
+        assert_eq!(output.exit_code, Some(0));
+        assert_eq!(output.stdout, b"16");
+        assert!(output.stderr.is_empty());
+    }
+
+    #[tokio::test]
+    #[serial(codex_process)]
+    async fn generic_runner_streams_large_stdout_directly_to_new_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("asset.bin");
+        let (_cancel_sender, cancel) = tokio::sync::watch::channel(false);
+        let output = SafeProcessRunner::default()
+            .run(
+                ProcessInvocation {
+                    executable: powershell(),
+                    args: vec![
+                        "-NoLogo".into(),
+                        "-NoProfile".into(),
+                        "-NonInteractive".into(),
+                        "-Command".into(),
+                        format!(
+                            "$bytes = New-Object byte[] {}; [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length)",
+                            MAX_PROCESS_OUTPUT_BYTES + 1
+                        )
+                        .into(),
+                    ],
+                    env: filter_inherited_environment(std::env::vars_os()),
+                    workdir: directory.path().to_owned(),
+                    stdin: None,
+                    stdout_file: Some(destination.clone()),
+                },
+                PROCESS_TREE_TEST_TIMEOUT,
+                cancel,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output.exit_code, Some(0));
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.is_empty());
+        assert_eq!(
+            fs::metadata(destination).unwrap().len(),
+            (MAX_PROCESS_OUTPUT_BYTES + 1) as u64
+        );
     }
 }

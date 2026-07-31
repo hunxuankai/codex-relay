@@ -1,0 +1,32 @@
+{
+  "name": "@codex-relay/release-console",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "dev:frontend": "vite",
+    "build:frontend": "vite build",
+    "test": "vitest run",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.app.json",
+    "build:app": "tauri build --no-bundle"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "element-plus": "^2.14.3",
+    "vue": "^3.5"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^24",
+    "@vitejs/plugin-vue": "^6",
+    "@vue/test-utils": "^2",
+    "@vue/tsconfig": "^0.8",
+    "jsdom": "^26",
+    "typescript": "~5.9",
+    "unplugin-element-plus": "^0.11.2",
+    "vite": "^7",
+    "vitest": "^3",
+    "vue-tsc": "^3"
+  }
+}

@@ -6,6 +6,9 @@
 
 ## 2. 签名与入口
 
+- 维护者入口：独立的“Codex Relay 发布控制台”通过固定 typed command、Git 与 `gh` 编排候选、
+  Draft 审计和人工公开；它不进入正式 Codex Relay 安装包，不读取签名私钥，也不替代
+  GitHub Actions 的 updater 构建与签名边界。
 - 基础配置：`src-tauri/tauri.conf.json` 的 `plugins.updater.endpoints: string[]` 与 `plugins.updater.pubkey: string`。
 - 发布覆盖：`src-tauri/tauri.updater.conf.json` 的 `bundle.createUpdaterArtifacts: true`。
 - 普通构建：`npm run build`，不得引用发布覆盖或要求更新私钥。

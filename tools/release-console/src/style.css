@@ -1,0 +1,84 @@
+:root {
+  color: #172033;
+  background: #eef2f7;
+  font-family: Inter, "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --surface-color: #ffffff;
+  --surface-muted: #f7f9fc;
+  --border-color: #d8e0ea;
+  --text-muted: #5b6879;
+  --accent-color: #315fdd;
+  --accent-soft: #eaf0ff;
+  --success-color: #16845b;
+  --warning-color: #a35a00;
+  --danger-color: #c43c45;
+  --log-background: #101827;
+  --log-text: #d9e5f5;
+  --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  --el-color-primary: var(--accent-color);
+  --el-border-color: var(--border-color);
+  --el-fill-color-blank: var(--surface-color);
+  --el-bg-color: var(--surface-color);
+  --el-text-color-primary: #172033;
+  --el-text-color-regular: #334155;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.el-button,
+.el-input__wrapper {
+  min-height: 36px;
+}
+
+.el-button--small {
+  min-height: 32px;
+}
+
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent-color) 48%, transparent);
+  outline-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #ecf2fa;
+    background: #101722;
+    --surface-color: #182231;
+    --surface-muted: #202c3d;
+    --border-color: #334155;
+    --text-muted: #a9b6c7;
+    --accent-color: #83a6ff;
+    --accent-soft: #22345f;
+    --success-color: #69d5a9;
+    --warning-color: #ffbd66;
+    --danger-color: #ff8992;
+    --log-background: #0a101a;
+    --log-text: #dce8f7;
+    --el-text-color-primary: #ecf2fa;
+    --el-text-color-regular: #cfdae8;
+    --el-fill-color-blank: var(--surface-color);
+    --el-bg-color: var(--surface-color);
+  }
+}

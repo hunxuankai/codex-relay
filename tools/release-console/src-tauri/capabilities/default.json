@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Core permissions for the Codex Relay release console",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

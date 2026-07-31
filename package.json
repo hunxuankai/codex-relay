@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.4.0",
   "type": "module",
+  "workspaces": [
+    "tools/release-console"
+  ],
   "scripts": {
     "dev": "tauri dev",
     "dev:safe": "powershell -ExecutionPolicy Bypass -File scripts/prepare-dev-data.ps1",
@@ -13,6 +16,11 @@
     "bundle:nsis": "tauri build --bundles nsis",
     "build:frontend": "vite build",
     "build:debug": "tauri build --debug --no-bundle",
+    "dev:release-console": "npm run dev --workspace @codex-relay/release-console",
+    "test:release-console": "npm run test --workspace @codex-relay/release-console",
+    "typecheck:release-console": "npm run typecheck --workspace @codex-relay/release-console",
+    "build:release-console": "npm run build:app --workspace @codex-relay/release-console",
+    "postbuild:release-console": "pwsh -NoProfile -File scripts/package-release-console.ps1",
     "typecheck": "vue-tsc --noEmit -p tsconfig.app.json",
     "test": "vitest run",
     "test:trellis": "python -m unittest discover -s .trellis/scripts/tests -p \"test_*.py\"",
@@ -27,7 +35,7 @@
     "pretest:rust:provider-workflow": "npm run check:rust-dev-env",
     "test:rust:provider-workflow": "cargo test --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target -p codex-relay-core --test provider_workflow",
     "test:watch": "vitest",
-    "check:frontend": "npm run typecheck && npm run test",
+    "check:frontend": "npm run typecheck && npm run test && npm run typecheck:release-console && npm run test:release-console",
     "check:rust": "npm run check:rust:deps && cargo fmt --all --check --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml --workspace",
     "check": "npm run test:trellis && npm run check:frontend && npm run check:rust"
   },

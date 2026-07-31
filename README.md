@@ -187,6 +187,34 @@ Rust 单元与集成测试使用 `tempfile`，并通过 `AppPaths::for_test` 或
 
 禁止让测试回退到真实用户路径。禁止把真实 API Key 写入 fixture、日志、快照或 Git。
 
+## Codex Relay 发布控制台
+
+仓库内包含独立的维护者工具“Codex Relay 发布控制台”。它是便携 Windows EXE，不进入正式
+Codex Relay 主程序或 NSIS 安装包，也不会读取 updater 私钥。发布构建和 Tauri updater 签名仍只在
+GitHub Actions 中完成。
+
+发布电脑需预先安装 Git、Node/npm、Rust/Cargo、GitHub CLI，并完成 `gh auth login`。构建控制台：
+
+```powershell
+npm run build:release-console
+```
+
+命令会构建 `CodexRelayReleaseConsole.exe`，再复制到被 Git 忽略的
+`dist/release-console/CodexRelayReleaseConsole.exe`，并输出实际路径、大小、时间和 SHA-256。
+
+日常发布时直接运行该 EXE：
+
+1. 选择 Codex Relay 仓库并执行预检。
+2. 输入严格更高的目标 SemVer，检查或编辑简体中文发布说明与六个计划文件。
+3. 点击“开始发布”；控制台依次完成候选事务、本地门禁、精确提交推送、GitHub Run 和 Draft 审计。
+4. Draft 审计全部通过后，核对版本、候选 SHA 与 Release ID，再在确认对话框中正式公开。
+5. 等待 Latest、tag、manifest、公开资产和历史清理复核，必要时导出不含秘密的结果摘要。
+
+控制台重启后可选择同一仓库并加载活动会话；push 失败且本地提交已创建时会保留 `Committed`
+检查点，只重试推送，不重复创建发布提交。首版不执行 Windows Sandbox、真实安装、UAC、应用内升级、
+重启、卸载或数据保留验证，也不会把这些未执行行为显示为成功。完整操作和失败边界见
+[Windows 更新发布操作指南](.trellis/spec/release/publishing.md)。
+
 ## Debug、Release 与 NSIS 构建
 
 Debug 构建只生成主程序，不创建安装包：

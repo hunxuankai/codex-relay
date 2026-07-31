@@ -1,0 +1,32 @@
+[package]
+name = "codex-relay-release-console"
+version = "0.1.0"
+description = "Visual release console for Codex Relay maintainers"
+authors = ["Codex Relay contributors"]
+edition = "2024"
+workspace = "../../../src-tauri"
+
+[lib]
+name = "codex_relay_release_console_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "CodexRelayReleaseConsole"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+codex-relay-core = { path = "../../../src-tauri/crates/codex-relay-core" }
+chrono = { version = "0.4.45", features = ["serde"] }
+fs2 = "0.4.3"
+semver = "1.0.27"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.150"
+sha2 = "0.11.0"
+tauri = { version = "2.11.5", features = [] }
+tempfile = "3.27.0"
+thiserror = "2.0.19"
+tokio = { version = "1.53.0", features = ["sync"] }
+toml_edit = "0.25.13"

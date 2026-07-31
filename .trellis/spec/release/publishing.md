@@ -2,6 +2,106 @@
 
 本文面向 Codex Relay 维护者，说明如何把已经完成并验证的改动发布为 Windows NSIS 安装包和 Tauri 应用内更新。发布工作流只允许手动触发，并且必须先生成 Draft Release，核对完成后再人工公开；公开后由独立清理工作流只保留当前 Latest。
 
+## 0. 推荐入口：Codex Relay 发布控制台
+
+默认使用仓库内独立的便携 EXE 完成候选准备、检查、精确提交推送、GitHub Run、Draft 审计、
+人工公开和在线复核。控制台不进入正式 Codex Relay 安装包，不读取 updater 私钥，也不会把
+GitHub Actions 替换成本地发布后端。
+
+发布电脑需已有 Git、Node/npm、Rust/Cargo、GitHub CLI，并完成 `gh auth login`。构建入口：
+
+```powershell
+npm run build:release-console
+```
+
+构建后运行 `dist/release-console/CodexRelayReleaseConsole.exe`。日常操作顺序：
+
+1. 选择仓库，确认目标远端为 `hunxuankai/codex-relay`、默认分支为 `main`，并完成只读预检。
+2. 输入严格更高的 SemVer，检查自动生成的简体中文说明和固定六文件计划。
+3. 点击“开始发布”，等待本地门禁、精确提交推送和唯一 GitHub Run 完成。
+4. 核对 Draft Release ID、tag、候选 SHA、说明、NSIS、`.sig`、`latest.json`、大小、SHA-256 与签名关联。
+5. 在控制台的独立确认对话框中公开同一 Release ID，再等待 Latest、tag、manifest、公开资产和清理 Run 复核。
+6. 导出不含秘密的发布摘要；失败、未执行项和 cleanup warning 必须保留。
+
+控制台通过 workflow 的必填 `expected_version` 与 `expected_sha` 输入绑定候选版本和提交，最终说明
+来自 `.github/release-notes.md`。push 失败但候选提交已创建时，会话保持 `Committed` 检查点，恢复时
+只重试 push。push 后不执行伪回滚，也不自动删除错误 Draft。
+
+首版明确不执行 Windows Sandbox、真实安装、UAC、应用内升级、重启、卸载或数据保留验证；这些
+行为未执行时必须在结果中保持“未验证”。下文的命令行与 GitHub 页面步骤是控制台不可用时的人工
+恢复入口，也是核对控制台行为的权威契约。
+
+### 0.1 发布控制台运行时安全与恢复契约
+
+#### 1. 范围/触发条件
+
+修改发布控制台的会话状态、Git 提交推送、子进程取消、GitHub Run 发现/轮询或恢复逻辑时，必须遵循本节。
+这些边界决定一次点击是否可能重复发布、在取消后继续 push，或因真实冷构建超过 30 分钟而误报失败。
+
+#### 2. 签名
+
+- `ReleaseStateStore::initialize(session)`：只能在持有 `RepositorySessionLock` 时初始化新会话。
+- `GitBackend::new_cancellable(executable, environment, cancel)`：本地提交与 push 使用会话取消信号。
+- `ReleasePushBackend::rollback_uncommitted(repository, plan)`：提交检查点创建前失败时精确清理计划文件暂存项。
+- Run 发现预算至少 2 分钟；发布 Run 与 cleanup Run 监控预算至少 4 小时，当前轮询间隔为 5 秒。
+
+#### 3. 契约
+
+- 同一 Git dir 只允许一个非终态 session；同一 session 只允许一个已注册后台管线。
+- `idle`、`inspected`、`planned` 等已落盘但尚未写源码的会话必须可安全取消，防止启动瞬间崩溃后永久卡住。
+- commit 创建前失败或取消：先用不可取消的短 Git 操作清理计划文件暂存项，再恢复六文件原字节并验证；任一步失败都保留真实失败与恢复标记。
+- commit 已创建、push 失败：持久化 `Committed` 与候选 SHA，恢复只重试 push，不重复 commit，也不自动重写本地历史。
+- local check、普通构建、Git commit/push 共享 Windows Job Object 取消边界；取消信号不得阻断索引和文件回滚本身。
+- Run 暂时不可见时在发现预算内继续查询；状态为 queued/in_progress 时在 4 小时预算内持续监控，不把本次已观测的 1 小时以上冷构建误判为超时。
+
+#### 4. 验证与错误矩阵
+
+| 条件 | 必需结果 |
+|---|---|
+| 同仓库已有非终态 session | `RELEASE_SESSION_ALREADY_ACTIVE`，不覆盖 `session.json` |
+| 同 session 已有后台管线 | `RELEASE_SESSION_ALREADY_RUNNING`，不启动第二个任务 |
+| commit 前失败且索引/六文件恢复完成 | session=`failed`，暂存区为空，六文件等于原字节 |
+| 索引清理或六文件恢复任一失败 | `RELEASE_ROLLBACK_INCOMPLETE`，不得声称已恢复 |
+| commit 成功、push 失败 | session=`committed`，保留候选 SHA 和事务标记供 push 重试 |
+| 本地 Git 运行中取消 | 终止整个进程树，再执行不可取消的清理与回滚 |
+| Run 在 30 分钟后仍运行、但未超过 4 小时 | 继续监控，不返回 `GITHUB_RUN_TIMEOUT` |
+
+#### 5. 良好/基线/错误用例
+
+- 良好：1 小时 09 分的 Windows 冷构建持续显示 `workflowRunning`，完成后进入 Draft 审计。
+- 良好：`git commit` 失败后，计划文件取消暂存、六文件逐字节恢复，session 进入 `failed`。
+- 基线：push 失败保留 `Committed`，点击继续只执行 push 与后续远端阶段。
+- 错误：固定轮询 900×2 秒后把仍正常运行的 Action 报为超时。
+- 错误：用户取消时只终止 npm，却让 Git push 继续；或让已取消信号同时阻止回滚 Git 命令。
+- 错误：第二次点击“开始/继续”覆盖活动 `session.json` 或启动并发远端管线。
+
+#### 6. 必需测试
+
+- `remote_monitor_budgets_cover_slow_github_actions_runs`：断言发现预算 ≥2 分钟、监控预算 ≥4 小时。
+- `cancellable_backend_terminates_the_active_process_tree`：断言 Git 子进程收到取消并在测试预算内退出。
+- `commit_failure_unstages_and_rolls_back_candidate_before_marking_failed`：断言索引清理、原字节恢复、marker 删除和 `failed` 状态。
+- `unstage_candidate_clears_the_planned_index_without_reverting_candidate_bytes`：断言只清暂存，不提前修改候选工作树。
+- `active_session_blocks_reinitialization_until_it_reaches_a_terminal_phase` 与重复管线注册测试：断言会话和后台任务互斥。
+
+#### 7. 错误与正确做法
+
+错误：
+
+```rust
+for _ in 0..900 {
+    sleep(Duration::from_secs(2)).await;
+}
+// 真实构建超过 30 分钟即误报失败
+```
+
+正确：
+
+```rust
+// 发现至少 2 分钟；远端运行最多监控 4 小时、每 5 秒刷新。
+// commit 前失败：不可取消地清索引 -> 六文件回滚 -> 验证 -> failed。
+// commit 后 push 失败：持久化 Committed，只重试 push。
+```
+
 ## 1. 发布边界
 
 - 默认发布源是 GitHub 默认分支 `main`，工作流为 `.github/workflows/release.yml`。
@@ -76,7 +176,7 @@ rg -n -A 2 '^name = "codex-relay"$' src-tauri/Cargo.lock
 
 ### 3.4 写入最终发布说明
 
-在 `.github/workflows/release.yml` 的 `releaseBody` 中直接写入可以公开的最终简体中文说明，至少包含：
+在 `.github/release-notes.md` 中写入可以公开的最终简体中文说明，至少包含：
 
 - 本版本的用户可见变化；
 - 从哪个已公开版本更新；
@@ -84,7 +184,7 @@ rg -n -A 2 '^name = "codex-relay"$' src-tauri/Cargo.lock
 - 当前没有 Windows Authenticode、可能显示“未知发布者”；
 - 升级不会主动删除 Codex 配置、Codex Relay 应用数据、日志或备份。
 
-`releaseBody` 会同时进入 Release 页面和 `latest.json.notes`。Draft 生成后只编辑 GitHub 页面说明不会重写已经上传的 `latest.json`；发现说明错误时必须修正工作流并重新生成 Draft。
+workflow 的“验证发布请求”步骤会校验该文件并把正文作为 `tauri-action.releaseBody`，因此同一内容会同时进入 Release 页面和 `latest.json.notes`。Draft 生成后只编辑 GitHub 页面说明不会重写已经上传的 `latest.json`；发现说明错误时必须修正该文件、创建新候选提交并重新生成 Draft。
 
 最后搜索待发布版本和上一版本，人工确认没有遗漏需要同步的位置：
 
@@ -160,11 +260,16 @@ git push origin HEAD:main
 
 ## 6. 触发发布工作流
 
+控制台会使用 `gh workflow run release.yml --ref main --json`，通过 stdin 传入
+`expected_version` 和 `expected_sha`，然后按 Run URL 或 workflow/main/SHA/触发时间唯一定位 Run。
+
+人工恢复入口：
+
 1. 打开 GitHub 仓库的 `Actions` 页面。
 2. 选择“发布 Windows 更新”。
-3. 点击 `Run workflow`。
-4. 选择 `main`，再次确认后启动。
-5. 等待所有步骤完成：检出源码、配置 Node.js、配置 Rust、`npm ci`、`npm run check` 和“构建 Draft Release”。
+3. 点击 `Run workflow`，选择 `main`。
+4. 填写与远端 `main` 完全一致的 `expected_version` 和 `expected_sha`，再次确认后启动。
+5. 等待所有步骤完成：检出源码、验证发布请求、配置 Node.js、配置 Rust、`npm ci`、`npm run check` 和“构建 Draft Release”。
 
 工作流失败时不得创建或描述为成功发布。先记录失败步骤、日志边界和对应提交，修复后使用新提交重新运行。
 
@@ -202,6 +307,7 @@ Action 成功后，Release 必须仍为 Draft。发布前逐项核对：
 - 安装器、`.sig` 和 `latest.json` 的实际大小与 SHA-256 已记录；
 - 没有私钥、密码、Token、认证 Header 或用户数据进入说明和资产。
 
+发布控制台会自动完成上述身份、资产、manifest、size、GitHub digest、SHA-256 和签名关联审计。
 如果平台 URL 是 GitHub REST asset API，按 updater 的下载语义核对实际字节，而不是使用普通 GET：
 
 ```powershell
@@ -212,11 +318,14 @@ Get-FileHash -Algorithm SHA256 "$env:TEMP\codex-relay-updater.exe"
 Remove-Item -LiteralPath "$env:TEMP\codex-relay-updater.exe"
 ```
 
-Draft 说明、版本、签名或资产有任何问题时不要公开。删除错误 Draft，修正源码或工作流，提交推送后重新运行。
+Draft 说明、版本、签名或资产有任何问题时不要公开。控制台首版不会自动删除错误 Draft；维护者需在
+GitHub 明确处理后，修正源码或 workflow、创建新候选提交并重新运行。
 
 ## 8. 人工公开 Release
 
-只有 Draft 核对全部通过后，才在 GitHub Release 页面点击 `Publish release`。公开后立即确认：
+只有 Draft 核对全部通过后，才在控制台确认对话框中核对版本、候选 SHA 和 Release ID 并公开；
+控制台会在 PATCH 前完整重做同一 Draft 审计，并只按 Release ID 更新 `draft=false`。控制台不可用时，
+才在 GitHub Release 页面点击 `Publish release`。公开后立即确认：
 
 ```powershell
 $headers = @{ "User-Agent" = "Codex-Relay-Release-Check" }

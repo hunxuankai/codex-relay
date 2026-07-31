@@ -1,0 +1,13 @@
+{
+  "extends": "@vue/tsconfig/tsconfig.dom.json",
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue", "vitest.setup.ts"],
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.tmp/release-console-tsconfig.app.tsbuildinfo",
+    "types": ["vitest/globals"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  }
+}

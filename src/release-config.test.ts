@@ -18,6 +18,10 @@ const releaseWorkflowPath = '.github/workflows/release.yml'
 const releaseWorkflow = existsSync(releaseWorkflowPath)
   ? readFileSync(releaseWorkflowPath, 'utf8')
   : ''
+const releaseNotesPath = '.github/release-notes.md'
+const releaseNotes = existsSync(releaseNotesPath)
+  ? readFileSync(releaseNotesPath, 'utf8')
+  : ''
 const updaterEndpoint =
   'https://github.com/hunxuankai/codex-relay/releases/latest/download/latest.json'
 const updaterPublicKey =
@@ -83,6 +87,8 @@ describe('Windows release configuration', () => {
 
   it('publishes updater assets only through a manually triggered draft workflow', () => {
     expect(releaseWorkflow).toContain('workflow_dispatch:')
+    expect(releaseWorkflow).toContain('expected_version:')
+    expect(releaseWorkflow).toContain('expected_sha:')
     expect(releaseWorkflow).toContain('contents: write')
     expect(releaseWorkflow).toContain('npm run check')
     expect(releaseWorkflow).toContain('windows-latest')
@@ -92,15 +98,27 @@ describe('Windows release configuration', () => {
     expect(releaseWorkflow).toContain('TAURI_SIGNING_PRIVATE_KEY:')
     expect(releaseWorkflow).toContain('TAURI_SIGNING_PRIVATE_KEY_PASSWORD:')
     expect(releaseWorkflow.match(/TAURI_SIGNING_PRIVATE_KEY:/g)).toHaveLength(1)
-    expect(releaseWorkflow).toContain('releaseBody: |')
-    expect(releaseWorkflow).toContain('已安装 `v0.3.0` 的用户可在设置页点击“检查更新”')
-    expect(releaseWorkflow).not.toContain('请在发布前补充本版本的变更说明')
+    expect(releaseWorkflow).toContain('name: 验证发布请求')
+    expect(releaseWorkflow).toContain('id: release_request')
+    expect(releaseWorkflow).toContain('scripts/validate-release-request.ps1')
+    expect(releaseWorkflow).toContain('EXPECTED_VERSION: ${{ inputs.expected_version }}')
+    expect(releaseWorkflow).toContain('EXPECTED_SHA: ${{ inputs.expected_sha }}')
+    expect(releaseWorkflow).toContain('ACTUAL_SHA: ${{ github.sha }}')
+    expect(releaseWorkflow).toContain(
+      'releaseBody: ${{ steps.release_request.outputs.release_body }}',
+    )
+    expect(releaseWorkflow).not.toContain('releaseBody: |')
     expect(releaseWorkflow).toContain(
       'tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f',
     )
+
+    const validationStepIndex = releaseWorkflow.indexOf('name: 验证发布请求')
+    const tauriActionIndex = releaseWorkflow.indexOf('tauri-apps/tauri-action@')
+    expect(validationStepIndex).toBeGreaterThan(-1)
+    expect(tauriActionIndex).toBeGreaterThan(validationStepIndex)
   })
 
-  it('builds the 0.4.0 connection-routing release from the latest public version', () => {
+  it('keeps all application versions aligned with the committed release notes', () => {
     const cargoPackageVersion = cargoToml.match(
       /\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
     )?.[1]
@@ -108,23 +126,19 @@ describe('Windows release configuration', () => {
       /\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
     )?.[1]
 
-    expect(packageJson.version).toBe('0.4.0')
     expect(packageLock.version).toBe(packageJson.version)
     expect(packageLock.packages[''].version).toBe(packageJson.version)
     expect(cargoPackageVersion).toBe(packageJson.version)
     expect(coreCargoPackageVersion).toBe(packageJson.version)
-    expect(releaseWorkflow).toContain('从 `v0.3.0` 更新到 `v0.4.0`')
-    expect(releaseWorkflow).toContain('保持顶层 `model_provider` 身份')
-    expect(releaseWorkflow).toContain('仅应用连接')
-    expect(releaseWorkflow).toContain('恢复自身连接')
-    expect(releaseWorkflow).toContain('首次覆盖')
-    expect(releaseWorkflow).toContain('provider-preferences.json` v4')
-    expect(releaseWorkflow).toContain('降级前')
-    expect(releaseWorkflow).toContain('Windows 可能显示“未知发布者”')
-    expect(releaseWorkflow).toContain(
+    expect(releaseNotes).toContain('## 更新内容')
+    expect(releaseNotes).toContain('## 更新方式')
+    expect(releaseNotes).toContain('## 注意事项')
+    expect(releaseNotes).toContain(`v${packageJson.version}`)
+    expect(releaseNotes).toContain('Windows 可能显示“未知发布者”')
+    expect(releaseNotes).toContain(
       '安装和升级不会删除 Codex 配置、Codex Relay 应用数据、日志或备份',
     )
-    expect(releaseWorkflow).not.toContain('恢复可操作基线')
+    expect(releaseNotes).not.toContain('请在发布前补充本版本的变更说明')
   })
 
   it('marks every generated development API key as explicitly non-real', () => {

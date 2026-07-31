@@ -581,7 +581,9 @@ impl CodexExecutionOutcome {
             }
             CodexProcessError::ProcessStart
             | CodexProcessError::ProcessResume
-            | CodexProcessError::OutputRead => {
+            | CodexProcessError::OutputRead
+            | CodexProcessError::InputTooLarge
+            | CodexProcessError::InputWrite => {
                 Self::failed("CODEX_PROCESS_FAILED", "Codex 进程运行失败。")
             }
         }
@@ -627,7 +629,9 @@ fn map_process_error(error: CodexProcessError) -> CodexRunnerError {
         }
         CodexProcessError::ProcessStart
         | CodexProcessError::ProcessResume
-        | CodexProcessError::OutputRead => CodexRunnerError::ProcessStart,
+        | CodexProcessError::OutputRead
+        | CodexProcessError::InputTooLarge
+        | CodexProcessError::InputWrite => CodexRunnerError::ProcessStart,
         CodexProcessError::OutputTooLarge => CodexRunnerError::OutputTooLarge,
         CodexProcessError::Timeout => CodexRunnerError::Timeout,
         CodexProcessError::Cancelled => CodexRunnerError::Cancelled,
