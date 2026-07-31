@@ -93,14 +93,14 @@ describe('Windows release configuration', () => {
     expect(releaseWorkflow).toContain('TAURI_SIGNING_PRIVATE_KEY_PASSWORD:')
     expect(releaseWorkflow.match(/TAURI_SIGNING_PRIVATE_KEY:/g)).toHaveLength(1)
     expect(releaseWorkflow).toContain('releaseBody: |')
-    expect(releaseWorkflow).toContain('已安装 `v0.2.1` 的用户可在设置页点击“检查更新”')
+    expect(releaseWorkflow).toContain('已安装 `v0.3.0` 的用户可在设置页点击“检查更新”')
     expect(releaseWorkflow).not.toContain('请在发布前补充本版本的变更说明')
     expect(releaseWorkflow).toContain(
       'tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f',
     )
   })
 
-  it('builds the 0.3.0 feature release from the latest public version', () => {
+  it('builds the 0.4.0 connection-routing release from the latest public version', () => {
     const cargoPackageVersion = cargoToml.match(
       /\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
     )?.[1]
@@ -108,15 +108,18 @@ describe('Windows release configuration', () => {
       /\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
     )?.[1]
 
-    expect(packageJson.version).toBe('0.3.0')
+    expect(packageJson.version).toBe('0.4.0')
     expect(packageLock.version).toBe(packageJson.version)
     expect(packageLock.packages[''].version).toBe(packageJson.version)
     expect(cargoPackageVersion).toBe(packageJson.version)
     expect(coreCargoPackageVersion).toBe(packageJson.version)
-    expect(releaseWorkflow).toContain('从 `v0.2.1` 更新到 `v0.3.0`')
-    expect(releaseWorkflow).toContain('拖动调整 Provider 顺序')
-    expect(releaseWorkflow).toContain('请求与响应详情')
-    expect(releaseWorkflow).toContain('Fast')
+    expect(releaseWorkflow).toContain('从 `v0.3.0` 更新到 `v0.4.0`')
+    expect(releaseWorkflow).toContain('保持顶层 `model_provider` 身份')
+    expect(releaseWorkflow).toContain('仅应用连接')
+    expect(releaseWorkflow).toContain('恢复自身连接')
+    expect(releaseWorkflow).toContain('首次覆盖')
+    expect(releaseWorkflow).toContain('provider-preferences.json` v4')
+    expect(releaseWorkflow).toContain('降级前')
     expect(releaseWorkflow).toContain('Windows 可能显示“未知发布者”')
     expect(releaseWorkflow).toContain(
       '安装和升级不会删除 Codex 配置、Codex Relay 应用数据、日志或备份',
@@ -141,6 +144,10 @@ describe('Windows release configuration', () => {
   it('keeps the default Vite development port aligned with the Tauri dev URL', () => {
     expect(viteConfig).toMatch(/port:\s*1420/)
     expect(tauri.build.devUrl).toBe('http://localhost:1420')
+  })
+
+  it('caps Vitest workers so Windows Sandbox PowerShell checks stay within their budgets', () => {
+    expect(viteConfig).toMatch(/test:\s*\{[\s\S]*?maxWorkers:\s*4/)
   })
 
   it('uses the Windows GUI subsystem for release builds', () => {
