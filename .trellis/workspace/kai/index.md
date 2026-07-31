@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **活动文件**：`journal-1.md`
-- **会话总数**：33
+- **会话总数**：34
 - **最近活动**：2026-07-31
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | 文件 | 行数 | 状态 |
 |------|-------|--------|
-| `journal-1.md` | ~1129 | 活动 |
+| `journal-1.md` | ~1164 | 活动 |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | 日期 | 标题 | 提交 | 分支 |
 |---|------|-------|---------|--------|
+| 34 | 2026-07-31 | 发布 v0.4.0 Windows 更新 | `2bc2a89639c553ed4365ff8f9d057c24a048e300`, `5c34bc6e4d840cb3775e0364aa0fce45554db78e`, `8f804a95bdce553bb302807422d634ea5c79ab37` | `master` |
 | 33 | 2026-07-31 | 完成保持身份的 Provider 连接同步 | `6d16c58` | `master` |
 | 32 | 2026-07-30 | 发布 Codex Relay v0.3.0 | `651ca7d`, `3585504`, `ce76f43`, `eac9a1c` | `master` |
 | 31 | 2026-07-30 | 为 README 添加软件界面截图 | `eb188fb` | `master` |
