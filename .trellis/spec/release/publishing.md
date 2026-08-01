@@ -196,6 +196,157 @@ if (inspection) repositoryPreference.remember(inspection.repositoryPath)
 const latest = inspection.external.latestReleaseTag ?? '尚无正式版本'
 ```
 
+### 0.3 发布控制台代理、仓库同步与自动恢复契约
+
+#### 1. 范围/触发条件
+
+修改发布控制台的代理偏好、Git/`gh` 子进程环境、连接测试、仓库同步状态、安全 Push、启动会话检测、
+恢复入口或相关错误映射时，必须遵循本节。该边界允许维护者在 GitHub 网络不稳定环境中显式使用
+HTTP/SOCKS5 代理，但不得把控制台扩展成通用 Git 客户端，也不得保存代理认证或 GitHub 凭据。
+
+#### 2. 签名
+
+所有 DTO 使用 camelCase。网络 command 固定为：
+
+```typescript
+type ReleaseProxyType = 'http' | 'socks5'
+
+interface ReleaseProxySettings {
+  enabled: boolean
+  proxyType: ReleaseProxyType
+  host: string
+  port: number | null
+}
+
+test_release_connection(proxy): CommandResult<{
+  git: ConnectionProbeResult
+  github: ConnectionProbeResult
+}>
+
+inspect_release_repository(repositoryPath, proxy): CommandResult<ReleasePreflightResult>
+prepare_release_plan(repositoryPath, targetVersion, notes, proxy): CommandResult<ReleasePlanSummary>
+start_release(planId, proxy, onEvent): CommandResult<ReleaseSession>
+resume_release(sessionId, proxy, onEvent): CommandResult<ReleaseSession>
+publish_release(sessionId, expectedDraftIdentity, proxy, onEvent): CommandResult<ReleaseSession>
+
+interface SafeRepositoryPushRequest {
+  repositoryPath: string
+  expectedHeadSha: string
+  expectedRemoteMainSha: string
+  proxy: ReleaseProxySettings
+}
+
+push_release_repository(request): CommandResult<ReleasePreflightResult>
+get_release_session(repositoryPath): CommandResult<ReleaseSession | null>
+```
+
+仓库同步事实固定为 `synced | ahead | behind | diverged`，并携带 `aheadCount`、`behindCount` 与
+`aheadCommits[{sha, subject}]`。只有后端可生成 `safePush` 预览；前端不得自行重建 Push 资格或提交集合。
+
+#### 3. 契约
+
+- 代理偏好键固定为 `codex-relay-release-console.proxy-preference.v1`，只保存版本号及
+  `enabled/proxyType/host/port`；损坏 JSON、未知版本、非法类型或存储异常安全回退。关闭开关仍保留
+  地址和端口。
+- 地址只接受主机名、IPv4 或 IPv6；拒绝协议、路径、查询、片段、URL userinfo、账号和密码。端口仅为
+  `1–65535`。Vue 做即时校验，Rust 使用 `url::Host`/IPv6 解析再次防御校验。
+- 每个网络动作在开始时捕获一次当前代理快照。Rust 先清除大小写不敏感的
+  `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY`：开启时只注入统一的 `HTTP_PROXY` 与
+  `HTTPS_PROXY`；关闭时保持缺失。Git 每次额外使用临时
+  `-c http.proxy=<URL或空> -c https.proxy=<URL或空>`，不得修改全局 Git 配置、Windows 系统代理或
+  用户环境变量。
+- Git 网络动作设置 `GIT_TERMINAL_PROMPT=0` 与 `GCM_INTERACTIVE=Never`。公开 DTO、错误、日志、通知、
+  localStorage 和测试输出不得包含代理 URL、Authorization、Bearer、Token 或子进程原始 stderr。
+- 连接测试只执行固定公开只读目标：
+  `git ls-remote --exit-code https://github.com/hunxuankai/codex-relay.git refs/heads/main` 与
+  `gh api repos/hunxuankai/codex-relay --silent`。两项独立返回成功、稳定 code、安全消息和耗时；一项失败
+  不覆盖另一项，不写仓库、不触发 workflow，也不是发布强制门禁。
+- 仓库预检 Fetch 后由 Rust 计算同步关系；脏工作区、领先、落后和分叉是可展示事实，不得全部折叠成
+  command failure。工具链摘要必须按 DTO 真实显示缺失项，不能硬编码“已就绪”。
+- `safePush` 仅在固定远端、工作区干净、本地严格领先且不落后、工具链就绪、无活动发布 Run、无冲突
+  Draft、无本地非终态发布 session 时存在。仓库输入变化后必须立即清除旧 inspection、plan 和 Push 预览。
+- 用户确认 Push 后，后端重新执行完整预检与 Fetch，复核工作区、两端 SHA 和领先关系，再只执行：
+
+  ```text
+  git push origin <expectedHeadSha>:refs/heads/main
+  ```
+
+  禁止 force、Tag、其他分支和任意 RefSpec。Push 后远端 `main` 精确等于 `expectedHeadSha` 才算 Push
+  成功；随后刷新预检。刷新时新出现的 Run/Draft 可以使 `releaseReady=false`，但不能把已经验证成功的
+  Push 伪报为 `GIT_REMOTE_VERIFICATION_FAILED`。
+- 启动时只对已记住路径调用 `get_release_session`；该命令只读取本地 Git 元数据、工作区事实、session 与
+  发布说明，不 Fetch、不调用 GitHub。无 session 不显示恢复入口，也不保留“加载活动会话”按钮。
+- 本地中断阶段只能“取消并验证回滚”；`committed` 继续 Push；远端阶段继续监控；等待公开进入确认；终态
+  只查看结果。代理无效只阻止继续 Push/监控/公开等网络动作，不得阻止取消回滚或查看本地结果。
+- 终态结果必须分别判断 Release 是否已公开、在线复核是否完成、cleanup 是否完成。仅有
+  `published != null` 不能推导在线复核或历史清理成功。
+
+#### 4. 验证与错误矩阵
+
+| 条件 | 必需结果 |
+|---|---|
+| 代理开启但地址/端口无效 | `RELEASE_PROXY_HOST_INVALID` / `RELEASE_PROXY_PORT_INVALID`，不启动子进程 |
+| Git 启动/超时/取消/进程树/普通失败 | 分别保留 `GIT_PROCESS_START_FAILED`、`GIT_PROCESS_TIMEOUT`、`GIT_PROCESS_CANCELLED`、`GIT_PROCESS_TREE_TERMINATION_FAILED`、`GIT_COMMAND_FAILED` |
+| Fetch 超时或非零退出 | `GIT_FETCH_TIMEOUT` / `GIT_FETCH_FAILED`，不得只返回泛化 `GIT_COMMAND_FAILED` |
+| GitHub CLI 启动/超时/取消/进程树/普通失败 | 对应 `GITHUB_PROCESS_*` 或 `GITHUB_COMMAND_FAILED` |
+| 工作区脏、HEAD 变化、远端变化 | `GIT_WORKTREE_DIRTY` / `GIT_HEAD_MOVED` / `GIT_REMOTE_MOVED`，不 Push |
+| 本地落后或分叉 | `GIT_REPOSITORY_BEHIND` / `GIT_REPOSITORY_DIVERGED`，不提供或执行 Push |
+| Push 非零且远端未移动 | `GIT_PUSH_FAILED` |
+| Push 后远端不等于确认 SHA | `GIT_REMOTE_VERIFICATION_FAILED`，不得报告成功 |
+| Push 已验证，但刷新后出现活动 Run/Draft | 返回刷新后的 `releaseReady=false` 事实，Push 本身仍成功 |
+| 启动检测无 session | 返回 `null`，不执行 Fetch/GitHub，不显示恢复面板 |
+
+#### 5. 良好/基线/错误用例
+
+- 良好：SOCKS5 `127.0.0.1:1080` 跨启动恢复；Git 与 `gh` 使用同一快照，连接测试分别显示耗时。
+- 良好：本地领先两个已审核提交，确认框显示远端、两端 SHA 和主题；后端重新 Fetch 后只推送确认 SHA。
+- 基线：关闭代理后仍保留填写值，但 Git 临时代理配置为空、`gh` 环境没有继承代理，实际直连。
+- 基线：`committed` 会话重启后先修改代理，再继续 Push；启动检测本身仍保持本地只读。
+- 错误：把代理 URL 或认证字段写入 localStorage、普通 DTO、stderr 错误或任务材料。
+- 错误：仓库输入已换成另一个 clone，界面仍保留旧 `safePush` 并允许确认。
+- 错误：代理无效时把“取消并验证回滚”显示成永久 loading，或仅因新出现 Draft 就把已成功 Push 报成失败。
+- 错误：`published` 存在就显示“在线复核和历史清理已完成”，忽略失败阶段和 cleanup 证据。
+
+#### 6. 必需测试
+
+- `useReleaseProxyPreference.test.ts`：v1 恢复、损坏/未知版本/存储异常回退、关闭保留字段、无认证字段。
+- `ProxySettingsPanel.test.ts` 与 `useReleaseNetwork.test.ts`：HTTP/SOCKS5、无效 IPv4/IPv6、设置变化失效、
+  晚响应丢弃、Git/GitHub 两项独立结果。
+- `release_network.rs` / `tests/release_network.rs`：Direct/Custom 环境覆盖、Git 临时 `-c`、固定只读探针、
+  工具缺失和稳定错误分类。
+- `tests/git_release.rs`：同步/领先/落后/分叉/脏状态、精确 SHA Push、Tag/分支隔离、确认后远端移动、
+  Push 后远端漂移和非 fast-forward 竞态。
+- `commands.rs` / `services/tauri.test.ts`：camelCase 请求、只包含固定 Push 字段、单次 application 调用。
+- `App.test.ts` / `ReleaseRecoveryPanel.test.ts`：启动只调用本地 session command、无会话隐藏、阶段动作、
+  当前代理透传、仓库路径变化清除旧 Push 预览、无效代理不阻止取消/查看。
+- `RepositorySetupPanel.test.ts` / `ReleaseResultPanel.test.ts`：权威同步/工具链事实、Latest、公开后失败与 cleanup
+  未确认时不产生成功声明。
+
+#### 7. 错误与正确做法
+
+错误：继承未知代理、由前端猜 Push 条件，并把分支名直接传给 Git。
+
+```typescript
+if (ahead) await invoke('push', { repositoryPath, branch: 'main' })
+```
+
+正确：后端提供不可扩展的预览；确认后重新验证固定事实并推送精确 SHA。
+
+```typescript
+await releaseConsoleTauri.pushRepository({
+  repositoryPath: inspection.repositoryPath,
+  expectedHeadSha: inspection.safePush.expectedHeadSha,
+  expectedRemoteMainSha: inspection.safePush.expectedRemoteMainSha,
+  proxy: currentProxy,
+})
+```
+
+```rust
+// 每次命令临时覆盖代理；不修改全局配置。
+git -c http.proxy=<url-or-empty> -c https.proxy=<url-or-empty> \
+    push origin <expected_sha>:refs/heads/main
+```
+
 ## 1. 发布边界
 
 - 默认发布源是 GitHub 默认分支 `main`，工作流为 `.github/workflows/release.yml`。

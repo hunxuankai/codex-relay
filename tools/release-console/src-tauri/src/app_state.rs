@@ -1,5 +1,6 @@
 use crate::models::{
-    DraftIdentity, ReleaseEvent, ReleasePlanSummary, ReleasePreflightResult, ReleaseSession,
+    DraftIdentity, ReleaseConnectionTestResult, ReleaseEvent, ReleasePlanSummary,
+    ReleasePreflightResult, ReleaseProxySettings, ReleaseSession, SafeRepositoryPushRequest,
 };
 use std::future::Future;
 use std::pin::Pin;
@@ -7,22 +8,32 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ApplicationRequest {
+    TestConnection {
+        proxy: ReleaseProxySettings,
+    },
     Inspect {
         repository_path: String,
+        proxy: ReleaseProxySettings,
+    },
+    PushRepository {
+        request: SafeRepositoryPushRequest,
     },
     PreparePlan {
         repository_path: String,
         target_version: String,
         notes: Option<String>,
+        proxy: ReleaseProxySettings,
     },
     Start {
         plan_id: String,
+        proxy: ReleaseProxySettings,
     },
     GetSession {
         repository_path: String,
     },
     Resume {
         session_id: String,
+        proxy: ReleaseProxySettings,
     },
     Cancel {
         session_id: String,
@@ -30,6 +41,7 @@ pub enum ApplicationRequest {
     Publish {
         session_id: String,
         expected_draft_identity: DraftIdentity,
+        proxy: ReleaseProxySettings,
     },
     ExportSummary {
         session_id: String,
@@ -39,6 +51,7 @@ pub enum ApplicationRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ApplicationResponse {
+    ConnectionTest(ReleaseConnectionTestResult),
     Inspection(ReleasePreflightResult),
     Plan(ReleasePlanSummary),
     Session(ReleaseSession),

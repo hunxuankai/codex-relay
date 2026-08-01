@@ -1,11 +1,16 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 import type {
+  ReleaseConnectionTestResult,
+  ReleaseProxySettings,
+} from '../types/network'
+import type {
   CommandResult,
   DraftIdentity,
   ReleaseEvent,
   ReleasePlanSummary,
   ReleasePreflightResult,
   ReleaseSession,
+  SafeRepositoryPushRequest,
 } from '../types/release'
 
 export class ReleaseConsoleError extends Error {
@@ -19,19 +24,34 @@ export class ReleaseConsoleError extends Error {
 }
 
 export interface ReleaseConsoleClient {
-  inspectRepository(repositoryPath: string): Promise<ReleasePreflightResult>
+  testConnection(proxy: ReleaseProxySettings): Promise<ReleaseConnectionTestResult>
+  inspectRepository(
+    repositoryPath: string,
+    proxy: ReleaseProxySettings,
+  ): Promise<ReleasePreflightResult>
+  pushRepository(request: SafeRepositoryPushRequest): Promise<ReleasePreflightResult>
   preparePlan(
     repositoryPath: string,
     targetVersion: string,
+    proxy: ReleaseProxySettings,
     notes?: string,
   ): Promise<ReleasePlanSummary>
-  startRelease(planId: string, onEvent: (event: ReleaseEvent) => void): Promise<ReleaseSession>
+  startRelease(
+    planId: string,
+    proxy: ReleaseProxySettings,
+    onEvent: (event: ReleaseEvent) => void,
+  ): Promise<ReleaseSession>
   getReleaseSession(repositoryPath: string): Promise<ReleaseSession | null>
-  resumeRelease(sessionId: string, onEvent: (event: ReleaseEvent) => void): Promise<ReleaseSession>
+  resumeRelease(
+    sessionId: string,
+    proxy: ReleaseProxySettings,
+    onEvent: (event: ReleaseEvent) => void,
+  ): Promise<ReleaseSession>
   cancelRelease(sessionId: string): Promise<ReleaseSession>
   publishRelease(
     sessionId: string,
     expectedDraftIdentity: DraftIdentity,
+    proxy: ReleaseProxySettings,
     onEvent: (event: ReleaseEvent) => void,
   ): Promise<ReleaseSession>
   exportSummary(sessionId: string, destinationPath: string): Promise<string>
@@ -55,21 +75,43 @@ function eventChannel(onEvent: (event: ReleaseEvent) => void): Channel<ReleaseEv
 }
 
 export const releaseConsoleTauri: ReleaseConsoleClient = {
-  inspectRepository(repositoryPath: string) {
-    return invokeCommand<ReleasePreflightResult>('inspect_release_repository', { repositoryPath })
+  testConnection(proxy: ReleaseProxySettings) {
+    return invokeCommand<ReleaseConnectionTestResult>('test_release_connection', { proxy })
   },
 
-  preparePlan(repositoryPath: string, targetVersion: string, notes?: string) {
+  inspectRepository(repositoryPath: string, proxy: ReleaseProxySettings) {
+    return invokeCommand<ReleasePreflightResult>('inspect_release_repository', {
+      repositoryPath,
+      proxy,
+    })
+  },
+
+  pushRepository(request: SafeRepositoryPushRequest) {
+    return invokeCommand<ReleasePreflightResult>('push_release_repository', { request })
+  },
+
+  preparePlan(
+    repositoryPath: string,
+    targetVersion: string,
+    proxy: ReleaseProxySettings,
+    notes?: string,
+  ) {
     return invokeCommand<ReleasePlanSummary>('prepare_release_plan', {
       repositoryPath,
       targetVersion,
+      proxy,
       notes: notes ?? null,
     })
   },
 
-  startRelease(planId: string, onEvent: (event: ReleaseEvent) => void) {
+  startRelease(
+    planId: string,
+    proxy: ReleaseProxySettings,
+    onEvent: (event: ReleaseEvent) => void,
+  ) {
     return invokeCommand<ReleaseSession>('start_release', {
       planId,
+      proxy,
       onEvent: eventChannel(onEvent),
     })
   },
@@ -78,9 +120,14 @@ export const releaseConsoleTauri: ReleaseConsoleClient = {
     return invokeCommand<ReleaseSession | null>('get_release_session', { repositoryPath })
   },
 
-  resumeRelease(sessionId: string, onEvent: (event: ReleaseEvent) => void) {
+  resumeRelease(
+    sessionId: string,
+    proxy: ReleaseProxySettings,
+    onEvent: (event: ReleaseEvent) => void,
+  ) {
     return invokeCommand<ReleaseSession>('resume_release', {
       sessionId,
+      proxy,
       onEvent: eventChannel(onEvent),
     })
   },
@@ -92,11 +139,13 @@ export const releaseConsoleTauri: ReleaseConsoleClient = {
   publishRelease(
     sessionId: string,
     expectedDraftIdentity: DraftIdentity,
+    proxy: ReleaseProxySettings,
     onEvent: (event: ReleaseEvent) => void,
   ) {
     return invokeCommand<ReleaseSession>('publish_release', {
       sessionId,
       expectedDraftIdentity,
+      proxy,
       onEvent: eventChannel(onEvent),
     })
   },

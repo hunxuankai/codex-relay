@@ -5,18 +5,33 @@ use std::time::Duration;
 
 const GIT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum GitProxyMode {
+    Direct,
+    Custom(String),
+}
+
 #[derive(Clone)]
 pub struct GitBackend {
     executable: PathBuf,
     environment: Vec<(OsString, OsString)>,
+    proxy_mode: GitProxyMode,
     cancel: tokio::sync::watch::Receiver<bool>,
     runner: SafeProcessRunner,
 }
 
 impl GitBackend {
     pub fn new(executable: PathBuf, environment: Vec<(OsString, OsString)>) -> Self {
+        Self::new_with_proxy(executable, environment, GitProxyMode::Direct)
+    }
+
+    pub fn new_with_proxy(
+        executable: PathBuf,
+        environment: Vec<(OsString, OsString)>,
+        proxy_mode: GitProxyMode,
+    ) -> Self {
         let (_cancel_sender, cancel) = tokio::sync::watch::channel(false);
-        Self::new_cancellable(executable, environment, cancel)
+        Self::new_cancellable_with_proxy(executable, environment, proxy_mode, cancel)
     }
 
     pub fn new_cancellable(
@@ -24,16 +39,52 @@ impl GitBackend {
         environment: Vec<(OsString, OsString)>,
         cancel: tokio::sync::watch::Receiver<bool>,
     ) -> Self {
+        Self::new_cancellable_with_proxy(executable, environment, GitProxyMode::Direct, cancel)
+    }
+
+    pub fn new_cancellable_with_proxy(
+        executable: PathBuf,
+        environment: Vec<(OsString, OsString)>,
+        proxy_mode: GitProxyMode,
+        cancel: tokio::sync::watch::Receiver<bool>,
+    ) -> Self {
         Self {
             executable,
             environment,
+            proxy_mode,
             cancel,
             runner: SafeProcessRunner::default(),
         }
     }
 
     pub fn without_cancellation(&self) -> Self {
-        Self::new(self.executable.clone(), self.environment.clone())
+        Self::new_with_proxy(
+            self.executable.clone(),
+            self.environment.clone(),
+            self.proxy_mode.clone(),
+        )
+    }
+
+    pub fn invocation_for(&self, workdir: &Path, args: &[&str]) -> ProcessInvocation {
+        let proxy_url = match &self.proxy_mode {
+            GitProxyMode::Direct => "",
+            GitProxyMode::Custom(url) => url,
+        };
+        let mut invocation_args = vec![
+            OsString::from("-c"),
+            OsString::from(format!("http.proxy={proxy_url}")),
+            OsString::from("-c"),
+            OsString::from(format!("https.proxy={proxy_url}")),
+        ];
+        invocation_args.extend(args.iter().map(OsString::from));
+        ProcessInvocation {
+            executable: self.executable.clone(),
+            args: invocation_args,
+            env: self.environment.clone(),
+            workdir: workdir.to_path_buf(),
+            stdin: None,
+            stdout_file: None,
+        }
     }
 
     pub async fn run(
@@ -44,14 +95,7 @@ impl GitBackend {
         let output = self
             .runner
             .run(
-                ProcessInvocation {
-                    executable: self.executable.clone(),
-                    args: args.iter().map(OsString::from).collect(),
-                    env: self.environment.clone(),
-                    workdir: workdir.to_path_buf(),
-                    stdin: None,
-                    stdout_file: None,
-                },
+                self.invocation_for(workdir, args),
                 GIT_COMMAND_TIMEOUT,
                 self.cancel.clone(),
                 None,
@@ -82,10 +126,46 @@ pub enum GitBackendError {
     InvalidUtf8,
 }
 
+impl GitBackendError {
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Process(ProcessError::Timeout) => "GIT_PROCESS_TIMEOUT",
+            Self::Process(ProcessError::Cancelled) => "GIT_PROCESS_CANCELLED",
+            Self::Process(ProcessError::ProcessTreeTermination) => {
+                "GIT_PROCESS_TREE_TERMINATION_FAILED"
+            }
+            Self::Process(ProcessError::OutputTooLarge) => "GIT_PROCESS_OUTPUT_TOO_LARGE",
+            Self::Process(_) => "GIT_PROCESS_START_FAILED",
+            Self::CommandFailed | Self::InvalidUtf8 => "GIT_COMMAND_FAILED",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::infrastructure::process::filter_release_environment;
+
+    #[test]
+    fn backend_errors_expose_distinct_stable_process_codes() {
+        assert_eq!(
+            GitBackendError::Process(ProcessError::ProcessStart).code(),
+            "GIT_PROCESS_START_FAILED"
+        );
+        assert_eq!(
+            GitBackendError::Process(ProcessError::Timeout).code(),
+            "GIT_PROCESS_TIMEOUT"
+        );
+        assert_eq!(
+            GitBackendError::Process(ProcessError::Cancelled).code(),
+            "GIT_PROCESS_CANCELLED"
+        );
+        assert_eq!(
+            GitBackendError::Process(ProcessError::ProcessTreeTermination).code(),
+            "GIT_PROCESS_TREE_TERMINATION_FAILED"
+        );
+        assert_eq!(GitBackendError::CommandFailed.code(), "GIT_COMMAND_FAILED");
+    }
 
     #[tokio::test]
     async fn cancellable_backend_terminates_the_active_process_tree() {

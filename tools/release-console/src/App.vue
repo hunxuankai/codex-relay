@@ -1,39 +1,44 @@
 <script setup lang="ts">
-import { computed, shallowRef } from 'vue'
-import { ElAlert, ElButton, ElConfigProvider, ElTag } from 'element-plus'
+import { computed, onMounted, shallowRef } from 'vue'
+import { ElAlert, ElConfigProvider, ElTag } from 'element-plus'
 import DraftAuditPanel from './components/release/DraftAuditPanel.vue'
 import PublishConfirmDialog from './components/release/PublishConfirmDialog.vue'
+import ProxySettingsPanel from './components/release/ProxySettingsPanel.vue'
 import ReleasePlanPanel from './components/release/ReleasePlanPanel.vue'
+import ReleaseRecoveryPanel from './components/release/ReleaseRecoveryPanel.vue'
 import ReleaseResultPanel from './components/release/ReleaseResultPanel.vue'
 import ReleaseStepDetails from './components/release/ReleaseStepDetails.vue'
 import ReleaseTimeline from './components/release/ReleaseTimeline.vue'
 import RepositorySetupPanel from './components/release/RepositorySetupPanel.vue'
+import RepositorySyncConfirmDialog from './components/release/RepositorySyncConfirmDialog.vue'
+import { useReleaseNetwork } from './composables/useReleaseNetwork'
+import { useReleaseProxyPreference } from './composables/useReleaseProxyPreference'
 import { useRepositoryPreference } from './composables/useRepositoryPreference'
 import { useReleaseSession } from './composables/useReleaseSession'
+import {
+  releaseProxyValidationReason,
+  type ReleaseProxySettings,
+} from './types/network'
 
 const release = useReleaseSession()
+const releaseNetwork = useReleaseNetwork()
+const releaseProxyPreference = useReleaseProxyPreference()
 const repositoryPreference = useRepositoryPreference()
 const repositoryPath = computed({
   get: () => repositoryPreference.repositoryPath.value,
-  set: repositoryPreference.update,
+  set: (value) => {
+    repositoryPreference.update(value)
+    release.invalidateRepositoryContext()
+  },
 })
 const targetVersion = shallowRef('')
 const notes = shallowRef('')
 const exportPath = shallowRef('')
 const publishDialogOpen = shallowRef(false)
+const repositoryPushDialogOpen = shallowRef(false)
+const showTerminalResult = shallowRef(false)
 
 const draftIdentity = computed(() => release.session.value?.draft ?? null)
-const canCancel = computed(() =>
-  [
-    'idle',
-    'inspected',
-    'planned',
-    'applyingCandidate',
-    'localChecks',
-    'localBuild',
-    'sourceAudit',
-  ].includes(release.session.value?.phase ?? ''),
-)
 const isFinished = computed(() =>
   ['completed', 'completedWithWarnings'].includes(release.session.value?.phase ?? ''),
 )
@@ -46,24 +51,51 @@ const hasActiveSession = computed(() => {
     'cancelled',
   ].includes(phase)
 })
+const proxyInvalid = computed(
+  () => releaseProxyValidationReason(releaseProxyPreference.settings.value) !== null,
+)
 
 async function inspectRepository() {
-  const inspection = await release.inspect(repositoryPath.value)
+  const inspection = await release.inspect(
+    repositoryPath.value,
+    releaseProxyPreference.settings.value,
+  )
   if (inspection) repositoryPreference.remember(inspection.repositoryPath)
+}
+
+function updateProxySettings(settings: ReleaseProxySettings) {
+  releaseProxyPreference.update(settings)
+  releaseNetwork.invalidate()
+}
+
+async function testConnection() {
+  await releaseNetwork.test(releaseProxyPreference.settings.value)
+}
+
+async function pushRepository() {
+  if (!release.inspection.value?.safePush) return
+  repositoryPushDialogOpen.value = false
+  await release.pushRepository(releaseProxyPreference.settings.value)
 }
 
 async function loadSession() {
   const loaded = await release.load(repositoryPath.value)
+  showTerminalResult.value = false
   if (loaded) {
     targetVersion.value = loaded.targetVersion
     notes.value = loaded.draft?.manifestNotes ?? notes.value
   }
 }
 
+onMounted(() => {
+  if (repositoryPath.value.trim().length > 0) void loadSession()
+})
+
 async function preparePlan() {
   const prepared = await release.preparePlan(
     repositoryPath.value,
     targetVersion.value,
+    releaseProxyPreference.settings.value,
     notes.value.trim().length > 0 ? notes.value : undefined,
   )
   if (prepared) notes.value = prepared.notes
@@ -71,12 +103,12 @@ async function preparePlan() {
 
 async function startRelease() {
   if (!release.plan.value || hasActiveSession.value) return
-  await release.start(release.plan.value.id)
+  await release.start(release.plan.value.id, releaseProxyPreference.settings.value)
 }
 
 async function resumeRelease() {
   if (!release.session.value) return
-  await release.resume(release.session.value.id)
+  await release.resume(release.session.value.id, releaseProxyPreference.settings.value)
 }
 
 async function cancelRelease() {
@@ -91,7 +123,7 @@ async function publishRelease() {
     releaseId: draftIdentity.value.releaseId,
     tagName: draftIdentity.value.tagName,
     targetCommitSha: draftIdentity.value.targetCommitSha,
-  })
+  }, releaseProxyPreference.settings.value)
 }
 
 async function exportSummary() {
@@ -113,28 +145,6 @@ async function exportSummary() {
           <ElTag v-if="release.session.value" effect="plain">
             {{ release.session.value.phase }}
           </ElTag>
-          <ElButton
-            :disabled="release.busy.value || repositoryPath.trim().length === 0"
-            @click="loadSession"
-          >
-            加载活动会话
-          </ElButton>
-          <ElButton
-            v-if="release.session.value && !isFinished"
-            :disabled="release.busy.value"
-            @click="resumeRelease"
-          >
-            继续当前阶段
-          </ElButton>
-          <ElButton
-            v-if="canCancel"
-            type="danger"
-            plain
-            :disabled="release.busy.value"
-            @click="cancelRelease"
-          >
-            取消并回滚
-          </ElButton>
         </div>
       </header>
 
@@ -155,19 +165,40 @@ async function exportSummary() {
         <ReleaseTimeline :session="release.session.value" :events="release.events.value" />
 
         <section class="workspace" aria-label="发布工作区">
+          <ReleaseRecoveryPanel
+            v-if="release.session.value"
+            :session="release.session.value"
+            :busy="release.busy.value"
+            :proxy-invalid="proxyInvalid"
+            @cancel="cancelRelease"
+            @resume="resumeRelease"
+            @review-publish="publishDialogOpen = true"
+            @view-result="showTerminalResult = true"
+          />
+
+          <ProxySettingsPanel
+            :settings="releaseProxyPreference.settings.value"
+            :result="releaseNetwork.result.value"
+            :busy="releaseNetwork.busy.value"
+            :error="releaseNetwork.error.value"
+            @update:settings="updateProxySettings"
+            @test="testConnection"
+          />
+
           <RepositorySetupPanel
             v-model:repository-path="repositoryPath"
             v-model:target-version="targetVersion"
             :inspection="release.inspection.value"
-            :busy="release.busy.value || hasActiveSession"
+            :busy="release.busy.value || hasActiveSession || proxyInvalid"
             @inspect="inspectRepository"
             @prepare-plan="preparePlan"
+            @request-push="repositoryPushDialogOpen = true"
           />
 
           <ReleasePlanPanel
             v-model:notes="notes"
             :plan="release.plan.value"
-            :busy="release.busy.value || hasActiveSession"
+            :busy="release.busy.value || hasActiveSession || proxyInvalid"
             @regenerate="preparePlan"
             @start="startRelease"
           />
@@ -180,12 +211,12 @@ async function exportSummary() {
           <DraftAuditPanel
             v-if="release.session.value?.draft && release.session.value.phase === 'awaitingPublishApproval'"
             :draft="release.session.value.draft"
-            :busy="release.busy.value"
+            :busy="release.busy.value || proxyInvalid"
             @publish="publishDialogOpen = true"
           />
 
           <ReleaseResultPanel
-            v-if="release.session.value && isFinished"
+            v-if="release.session.value && (isFinished || showTerminalResult)"
             v-model:export-path="exportPath"
             :session="release.session.value"
             :busy="release.busy.value"
@@ -202,8 +233,17 @@ async function exportSummary() {
           tagName: draftIdentity.tagName,
           targetCommitSha: draftIdentity.targetCommitSha,
         }"
-        :busy="release.busy.value"
+        :busy="release.busy.value || proxyInvalid"
         @confirm="publishRelease"
+      />
+
+      <RepositorySyncConfirmDialog
+        v-if="release.inspection.value?.safePush"
+        v-model="repositoryPushDialogOpen"
+        :remote-url="release.inspection.value.repository.remoteUrl"
+        :preview="release.inspection.value.safePush"
+        :busy="release.busy.value || proxyInvalid"
+        @confirm="pushRepository"
       />
     </main>
   </ElConfigProvider>

@@ -1,5 +1,62 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReleaseProxyType {
+    Http,
+    Socks5,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseProxySettings {
+    pub enabled: bool,
+    pub proxy_type: ReleaseProxyType,
+    pub host: String,
+    pub port: Option<u16>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionProbeResult {
+    pub success: bool,
+    pub code: Option<String>,
+    pub message: String,
+    pub duration_millis: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseConnectionTestResult {
+    pub git: ConnectionProbeResult,
+    pub github: ConnectionProbeResult,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RepositorySyncStatus {
+    Synced,
+    Ahead,
+    Behind,
+    Diverged,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryCommitSummary {
+    pub sha: String,
+    pub subject: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositorySyncInspection {
+    pub status: RepositorySyncStatus,
+    pub ahead_count: u32,
+    pub behind_count: u32,
+    pub ahead_commits: Vec<RepositoryCommitSummary>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryInspection {
@@ -9,6 +66,7 @@ pub struct RepositoryInspection {
     pub remote_main_sha: String,
     pub remote_url: String,
     pub clean: bool,
+    pub sync: RepositorySyncInspection,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -32,10 +90,31 @@ pub struct ExternalPreflightSnapshot {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SafeRepositoryPushPreview {
+    pub expected_head_sha: String,
+    pub expected_remote_main_sha: String,
+    pub commit_count: u32,
+    pub commits: Vec<RepositoryCommitSummary>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SafeRepositoryPushRequest {
+    pub repository_path: String,
+    pub expected_head_sha: String,
+    pub expected_remote_main_sha: String,
+    pub proxy: ReleaseProxySettings,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReleasePreflightResult {
     pub repository_path: String,
     pub repository: RepositoryInspection,
     pub external: ExternalPreflightSnapshot,
+    pub release_ready: bool,
+    pub blocking_reasons: Vec<String>,
+    pub safe_push: Option<SafeRepositoryPushPreview>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

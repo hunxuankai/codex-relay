@@ -11,7 +11,9 @@ pub fn run() {
     tauri::Builder::default()
         .manage(app_state::AppState::system())
         .invoke_handler(tauri::generate_handler![
+            commands::test_release_connection,
             commands::inspect_release_repository,
+            commands::push_release_repository,
             commands::prepare_release_plan,
             commands::start_release,
             commands::get_release_session,

@@ -16,6 +16,58 @@ const exportPath = defineModel<string>('exportPath', { required: true })
 const cleanupFailed = computed(
   () => props.session.cleanup?.succeeded === false || props.session.cleanupWarning !== null,
 )
+const title = computed(() => {
+  if (props.session.phase === 'failed') {
+    return props.session.published ? 'Release 已公开，但发布收尾失败' : '发布失败'
+  }
+  if (props.session.phase === 'cancelled') return '发布已取消'
+  if (props.session.published) return 'Release 已公开'
+  return '发布会话结果'
+})
+const status = computed(() => {
+  if (props.session.phase === 'failed') return { label: '失败', type: 'danger' as const }
+  if (props.session.phase === 'cancelled') return { label: '已取消', type: 'info' as const }
+  if (props.session.phase === 'completedWithWarnings' || cleanupFailed.value) {
+    return { label: '完成但有警告', type: 'warning' as const }
+  }
+  return { label: '已完成', type: 'success' as const }
+})
+const onlineVerificationStatus = computed(() => {
+  if (!props.session.published) {
+    return {
+      text: '— Release 与公开资产在线复核：未执行。',
+      className: 'status-neutral',
+    }
+  }
+  if (!['completed', 'completedWithWarnings'].includes(props.session.phase)) {
+    return {
+      text: '⚠ Release 已公开，但在线复核未完成。',
+      className: 'status-warning',
+    }
+  }
+  return {
+    text: '✓ Release 与公开资产在线复核：已完成。',
+    className: 'status-success',
+  }
+})
+const cleanupStatus = computed(() => {
+  if (!props.session.published) {
+    return { text: '— 历史 Release 清理：未执行。', className: 'status-neutral' }
+  }
+  if (props.session.cleanup?.succeeded === true) {
+    return { text: '✓ 历史 Release 清理已完成。', className: 'status-success' }
+  }
+  if (cleanupFailed.value) {
+    return {
+      text: '⚠ 历史清理失败或未能确认，请查看 cleanup Run。',
+      className: 'status-warning',
+    }
+  }
+  return {
+    text: '— 历史 Release 清理：未执行或未确认。',
+    className: 'status-neutral',
+  }
+})
 </script>
 
 <template>
@@ -24,10 +76,10 @@ const cleanupFailed = computed(
       <div class="card-heading">
         <div>
           <p class="section-kicker">发布结果</p>
-          <h2>{{ session.published ? 'Release 已公开' : '发布会话结果' }}</h2>
+          <h2>{{ title }}</h2>
         </div>
-        <ElTag :type="cleanupFailed ? 'warning' : 'success'" effect="dark">
-          {{ cleanupFailed ? '完成但有警告' : '已完成' }}
+        <ElTag :type="status.type" effect="dark">
+          {{ status.label }}
         </ElTag>
       </div>
     </template>
@@ -41,10 +93,8 @@ const cleanupFailed = computed(
       </dl>
 
       <div class="result-statuses">
-        <p class="status-success">✓ Release 与公开资产在线复核：{{ session.published ? '已完成' : '未执行' }}</p>
-        <p :class="cleanupFailed ? 'status-warning' : 'status-success'">
-          {{ cleanupFailed ? '⚠ 历史清理失败或未能确认，请查看 cleanup Run。' : '✓ 历史 Release 清理已完成。' }}
-        </p>
+        <p :class="onlineVerificationStatus.className">{{ onlineVerificationStatus.text }}</p>
+        <p :class="cleanupStatus.className">{{ cleanupStatus.text }}</p>
         <p class="status-neutral">— Sandbox / 安装 / UAC / 应用内升级：未执行。</p>
       </div>
 

@@ -1,8 +1,8 @@
 use codex_relay_release_console_lib::infrastructure::git::GitBackend;
 use codex_relay_release_console_lib::infrastructure::process::filter_release_environment;
 use codex_relay_release_console_lib::services::git_release::{
-    ExternalPreflightSnapshot, GitReleaseError, GitReleaseService, ReleasePreflightError,
-    ReleasePreflightProbe, ReleasePreflightService, RepositoryInspectionService,
+    ExternalPreflightSnapshot, GitReleaseError, GitReleaseService, ReleasePreflightProbe,
+    ReleasePreflightService, RepositoryInspectionService, RepositorySyncStatus,
     ToolchainInspection,
 };
 use codex_relay_release_console_lib::services::release_candidate::ReleaseCandidateTransaction;
@@ -173,6 +173,10 @@ fn inspection_accepts_clean_synced_repository_even_when_local_branch_is_master()
     assert_eq!(inspection.default_branch, "main");
     assert_eq!(inspection.head_sha, inspection.remote_main_sha);
     assert!(inspection.clean);
+    assert_eq!(inspection.sync.status, RepositorySyncStatus::Synced);
+    assert_eq!(inspection.sync.ahead_count, 0);
+    assert_eq!(inspection.sync.behind_count, 0);
+    assert!(inspection.sync.ahead_commits.is_empty());
     assert_eq!(
         PathBuf::from(inspection.remote_url).canonicalize().unwrap(),
         remote.canonicalize().unwrap()
@@ -224,7 +228,7 @@ fn inspection_rejects_remote_identity_mismatch() {
 }
 
 #[test]
-fn inspection_rejects_untracked_or_modified_worktree_content() {
+fn inspection_reports_dirty_worktree_as_repository_fact() {
     let workspace = TempGitWorkspace::new();
     let git = git_executable();
     let (repository, remote) = create_synced_repository(&workspace, &git);
@@ -232,13 +236,15 @@ fn inspection_rejects_untracked_or_modified_worktree_content() {
     let backend = GitBackend::new(git, filter_release_environment(std::env::vars_os()));
     let service = RepositoryInspectionService::new("main", remote);
 
-    let error = tauri::async_runtime::block_on(service.inspect(&backend, &repository)).unwrap_err();
+    let inspection =
+        tauri::async_runtime::block_on(service.inspect(&backend, &repository)).unwrap();
 
-    assert!(matches!(error, GitReleaseError::WorktreeDirty));
+    assert!(!inspection.clean);
+    assert_eq!(inspection.sync.status, RepositorySyncStatus::Synced);
 }
 
 #[test]
-fn inspection_rejects_clean_local_commit_that_is_not_remote_main() {
+fn inspection_reports_clean_local_commits_as_ahead_with_ordered_summaries() {
     let workspace = TempGitWorkspace::new();
     let git = git_executable();
     let (repository, remote) = create_synced_repository(&workspace, &git);
@@ -250,13 +256,98 @@ fn inspection_rejects_clean_local_commit_that_is_not_remote_main() {
     );
     fs::write(repository.join("README.md"), "local candidate\n").unwrap();
     run_git(&git, &repository, &["add", "README.md"]);
-    run_git(&git, &repository, &["commit", "-m", "feat: local only"]);
+    run_git(
+        &git,
+        &repository,
+        &["commit", "-m", "feat: first local commit"],
+    );
+    let first_sha = run_git(&git, &repository, &["rev-parse", "HEAD"]);
+    fs::write(repository.join("README.md"), "second local candidate\n").unwrap();
+    run_git(&git, &repository, &["add", "README.md"]);
+    run_git(
+        &git,
+        &repository,
+        &["commit", "-m", "fix: second local commit"],
+    );
+    let second_sha = run_git(&git, &repository, &["rev-parse", "HEAD"]);
     let backend = GitBackend::new(git, filter_release_environment(std::env::vars_os()));
     let service = RepositoryInspectionService::new("main", remote);
 
-    let error = tauri::async_runtime::block_on(service.inspect(&backend, &repository)).unwrap_err();
+    let inspection =
+        tauri::async_runtime::block_on(service.inspect(&backend, &repository)).unwrap();
 
-    assert!(matches!(error, GitReleaseError::HeadRemoteMismatch));
+    assert_eq!(inspection.sync.status, RepositorySyncStatus::Ahead);
+    assert_eq!(inspection.sync.ahead_count, 2);
+    assert_eq!(inspection.sync.behind_count, 0);
+    assert_eq!(
+        inspection.sync.ahead_commits,
+        vec![
+            codex_relay_release_console_lib::models::RepositoryCommitSummary {
+                sha: second_sha,
+                subject: "fix: second local commit".into(),
+            },
+            codex_relay_release_console_lib::models::RepositoryCommitSummary {
+                sha: first_sha,
+                subject: "feat: first local commit".into(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn inspection_reports_remote_only_commits_as_behind() {
+    let workspace = TempGitWorkspace::new();
+    let git = git_executable();
+    let (repository, remote) = create_synced_repository(&workspace, &git);
+    let seed = workspace.root.join("seed");
+    fs::write(seed.join("README.md"), "remote update\n").unwrap();
+    run_git(&git, &seed, &["add", "README.md"]);
+    run_git(&git, &seed, &["commit", "-m", "fix: remote only"]);
+    run_git(&git, &seed, &["push", "origin", "main"]);
+    let backend = GitBackend::new(git, filter_release_environment(std::env::vars_os()));
+    let service = RepositoryInspectionService::new("main", remote);
+
+    let inspection =
+        tauri::async_runtime::block_on(service.inspect(&backend, &repository)).unwrap();
+
+    assert_eq!(inspection.sync.status, RepositorySyncStatus::Behind);
+    assert_eq!(inspection.sync.ahead_count, 0);
+    assert_eq!(inspection.sync.behind_count, 1);
+    assert!(inspection.sync.ahead_commits.is_empty());
+}
+
+#[test]
+fn inspection_reports_independent_local_and_remote_commits_as_diverged() {
+    let workspace = TempGitWorkspace::new();
+    let git = git_executable();
+    let (repository, remote) = create_synced_repository(&workspace, &git);
+    fs::write(repository.join("README.md"), "local update\n").unwrap();
+    run_git(&git, &repository, &["add", "README.md"]);
+    run_git(&git, &repository, &["commit", "-m", "feat: local branch"]);
+    let local_sha = run_git(&git, &repository, &["rev-parse", "HEAD"]);
+    let seed = workspace.root.join("seed");
+    fs::write(seed.join("README.md"), "remote update\n").unwrap();
+    run_git(&git, &seed, &["add", "README.md"]);
+    run_git(&git, &seed, &["commit", "-m", "fix: remote branch"]);
+    run_git(&git, &seed, &["push", "origin", "main"]);
+    let backend = GitBackend::new(git, filter_release_environment(std::env::vars_os()));
+    let service = RepositoryInspectionService::new("main", remote);
+
+    let inspection =
+        tauri::async_runtime::block_on(service.inspect(&backend, &repository)).unwrap();
+
+    assert_eq!(inspection.sync.status, RepositorySyncStatus::Diverged);
+    assert_eq!(inspection.sync.ahead_count, 1);
+    assert_eq!(inspection.sync.behind_count, 1);
+    assert_eq!(
+        inspection.sync.ahead_commits,
+        vec![
+            codex_relay_release_console_lib::models::RepositoryCommitSummary {
+                sha: local_sha,
+                subject: "feat: local branch".into(),
+            }
+        ]
+    );
 }
 
 #[test]
@@ -334,6 +425,243 @@ fn exact_release_files_are_committed_and_pushed_to_remote_main() {
         .collect::<Vec<_>>();
     expected.sort();
     assert_eq!(changed, expected);
+}
+
+#[test]
+fn reviewed_ahead_commits_are_pushed_by_exact_sha_only_to_remote_main() {
+    let workspace = TempGitWorkspace::new();
+    let git = git_executable();
+    let (repository, remote) = create_synced_repository(&workspace, &git);
+    let expected_remote_sha = run_git(&git, &remote, &["rev-parse", "refs/heads/main"]);
+    fs::write(repository.join("README.md"), "reviewed local change\n").unwrap();
+    run_git(&git, &repository, &["add", "README.md"]);
+    run_git(
+        &git,
+        &repository,
+        &["commit", "-m", "feat: reviewed local change"],
+    );
+    let expected_head_sha = run_git(&git, &repository, &["rev-parse", "HEAD"]);
+    run_git(&git, &repository, &["tag", "local-only"]);
+    let backend = GitBackend::new(git.clone(), filter_release_environment(std::env::vars_os()));
+
+    let outcome =
+        tauri::async_runtime::block_on(GitReleaseService::new("main").push_existing_commits(
+            &backend,
+            &repository,
+            &expected_head_sha,
+            &expected_remote_sha,
+        ))
+        .unwrap();
+
+    assert_eq!(outcome.candidate_sha, expected_head_sha);
+    assert_eq!(outcome.remote_main_sha, expected_head_sha);
+    assert_eq!(
+        run_git(&git, &remote, &["rev-parse", "refs/heads/main"]),
+        expected_head_sha
+    );
+    assert!(
+        !run_git(
+            &git,
+            &remote,
+            &["for-each-ref", "--format=%(refname)", "refs/tags"]
+        )
+        .contains("refs/tags/local-only")
+    );
+}
+
+#[test]
+fn safe_push_rechecks_dirty_head_and_remote_expectations_before_writing() {
+    let workspace = TempGitWorkspace::new();
+    let git = git_executable();
+    let (repository, remote) = create_synced_repository(&workspace, &git);
+    let expected_remote_sha = run_git(&git, &remote, &["rev-parse", "refs/heads/main"]);
+    fs::write(repository.join("README.md"), "reviewed local change\n").unwrap();
+    run_git(&git, &repository, &["add", "README.md"]);
+    run_git(
+        &git,
+        &repository,
+        &["commit", "-m", "feat: reviewed local change"],
+    );
+    let expected_head_sha = run_git(&git, &repository, &["rev-parse", "HEAD"]);
+    fs::write(repository.join("unexpected.txt"), "dirty\n").unwrap();
+    let backend = GitBackend::new(git.clone(), filter_release_environment(std::env::vars_os()));
+    let service = GitReleaseService::new("main");
+
+    let dirty = tauri::async_runtime::block_on(service.push_existing_commits(
+        &backend,
+        &repository,
+        &expected_head_sha,
+        &expected_remote_sha,
+    ))
+    .unwrap_err();
+    assert!(matches!(dirty, GitReleaseError::WorktreeDirty));
+    fs::remove_file(repository.join("unexpected.txt")).unwrap();
+
+    let moved_head = tauri::async_runtime::block_on(service.push_existing_commits(
+        &backend,
+        &repository,
+        &"f".repeat(40),
+        &expected_remote_sha,
+    ))
+    .unwrap_err();
+    assert!(matches!(moved_head, GitReleaseError::HeadMoved));
+
+    let moved_remote = tauri::async_runtime::block_on(service.push_existing_commits(
+        &backend,
+        &repository,
+        &expected_head_sha,
+        &"e".repeat(40),
+    ))
+    .unwrap_err();
+    assert!(matches!(moved_remote, GitReleaseError::RemoteMoved));
+    assert_eq!(
+        run_git(&git, &remote, &["rev-parse", "refs/heads/main"]),
+        expected_remote_sha
+    );
+}
+
+#[test]
+fn safe_push_distinguishes_behind_and_diverged_repositories() {
+    let behind_workspace = TempGitWorkspace::new();
+    let git = git_executable();
+    let (behind_repository, behind_remote) = create_synced_repository(&behind_workspace, &git);
+    let behind_seed = behind_workspace.root.join("seed");
+    fs::write(behind_seed.join("README.md"), "remote only\n").unwrap();
+    run_git(&git, &behind_seed, &["add", "README.md"]);
+    run_git(&git, &behind_seed, &["commit", "-m", "fix: remote only"]);
+    run_git(&git, &behind_seed, &["push", "origin", "main"]);
+    let behind_head = run_git(&git, &behind_repository, &["rev-parse", "HEAD"]);
+    let behind_remote_sha = run_git(&git, &behind_remote, &["rev-parse", "refs/heads/main"]);
+    let behind_backend =
+        GitBackend::new(git.clone(), filter_release_environment(std::env::vars_os()));
+
+    let behind =
+        tauri::async_runtime::block_on(GitReleaseService::new("main").push_existing_commits(
+            &behind_backend,
+            &behind_repository,
+            &behind_head,
+            &behind_remote_sha,
+        ))
+        .unwrap_err();
+    assert!(matches!(behind, GitReleaseError::RepositoryBehind));
+
+    let diverged_workspace = TempGitWorkspace::new();
+    let (diverged_repository, diverged_remote) =
+        create_synced_repository(&diverged_workspace, &git);
+    fs::write(diverged_repository.join("README.md"), "local only\n").unwrap();
+    run_git(&git, &diverged_repository, &["add", "README.md"]);
+    run_git(
+        &git,
+        &diverged_repository,
+        &["commit", "-m", "feat: local only"],
+    );
+    let diverged_seed = diverged_workspace.root.join("seed");
+    fs::write(diverged_seed.join("README.md"), "remote only\n").unwrap();
+    run_git(&git, &diverged_seed, &["add", "README.md"]);
+    run_git(&git, &diverged_seed, &["commit", "-m", "fix: remote only"]);
+    run_git(&git, &diverged_seed, &["push", "origin", "main"]);
+    let diverged_head = run_git(&git, &diverged_repository, &["rev-parse", "HEAD"]);
+    let diverged_remote_sha = run_git(&git, &diverged_remote, &["rev-parse", "refs/heads/main"]);
+    let diverged_backend = GitBackend::new(git, filter_release_environment(std::env::vars_os()));
+
+    let diverged =
+        tauri::async_runtime::block_on(GitReleaseService::new("main").push_existing_commits(
+            &diverged_backend,
+            &diverged_repository,
+            &diverged_head,
+            &diverged_remote_sha,
+        ))
+        .unwrap_err();
+    assert!(matches!(diverged, GitReleaseError::RepositoryDiverged));
+}
+
+#[test]
+fn safe_push_reports_remote_movement_during_the_confirmed_push() {
+    let workspace = TempGitWorkspace::new();
+    let git = git_executable();
+    let (repository, remote) = create_synced_repository(&workspace, &git);
+    let expected_remote_sha = run_git(&git, &remote, &["rev-parse", "refs/heads/main"]);
+    fs::write(repository.join("README.md"), "local reviewed change\n").unwrap();
+    run_git(&git, &repository, &["add", "README.md"]);
+    run_git(
+        &git,
+        &repository,
+        &["commit", "-m", "feat: local reviewed change"],
+    );
+    let expected_head_sha = run_git(&git, &repository, &["rev-parse", "HEAD"]);
+    let seed = workspace.root.join("seed");
+    fs::write(seed.join("README.md"), "remote race\n").unwrap();
+    run_git(&git, &seed, &["add", "README.md"]);
+    run_git(&git, &seed, &["commit", "-m", "fix: remote race"]);
+    let race_sha = run_git(&git, &seed, &["rev-parse", "HEAD"]);
+    run_git(&git, &seed, &["push", "origin", "HEAD:refs/heads/race"]);
+    let remote_for_shell = remote.to_string_lossy().replace('\\', "/");
+    fs::write(
+        repository.join(".git/hooks/pre-push"),
+        format!(
+            "#!/bin/sh\ngit --git-dir=\"{remote_for_shell}\" update-ref refs/heads/main {race_sha}\n"
+        ),
+    )
+    .unwrap();
+    let backend = GitBackend::new(git.clone(), filter_release_environment(std::env::vars_os()));
+
+    let error =
+        tauri::async_runtime::block_on(GitReleaseService::new("main").push_existing_commits(
+            &backend,
+            &repository,
+            &expected_head_sha,
+            &expected_remote_sha,
+        ))
+        .unwrap_err();
+
+    assert!(matches!(error, GitReleaseError::RemoteMoved));
+    assert_eq!(
+        run_git(&git, &remote, &["rev-parse", "refs/heads/main"]),
+        race_sha
+    );
+}
+
+#[test]
+fn safe_push_fails_when_remote_main_does_not_stay_on_the_confirmed_sha() {
+    let workspace = TempGitWorkspace::new();
+    let git = git_executable();
+    let (repository, remote) = create_synced_repository(&workspace, &git);
+    let expected_remote_sha = run_git(&git, &remote, &["rev-parse", "refs/heads/main"]);
+    fs::write(repository.join("README.md"), "local reviewed change\n").unwrap();
+    run_git(&git, &repository, &["add", "README.md"]);
+    run_git(
+        &git,
+        &repository,
+        &["commit", "-m", "feat: local reviewed change"],
+    );
+    let expected_head_sha = run_git(&git, &repository, &["rev-parse", "HEAD"]);
+    let seed = workspace.root.join("seed");
+    fs::write(seed.join("README.md"), "verification race\n").unwrap();
+    run_git(&git, &seed, &["add", "README.md"]);
+    run_git(&git, &seed, &["commit", "-m", "fix: verification race"]);
+    let race_sha = run_git(&git, &seed, &["rev-parse", "HEAD"]);
+    run_git(&git, &seed, &["push", "origin", "HEAD:refs/heads/race"]);
+    fs::write(
+        remote.join("hooks/post-receive"),
+        format!("#!/bin/sh\ngit update-ref refs/heads/main {race_sha}\n"),
+    )
+    .unwrap();
+    let backend = GitBackend::new(git.clone(), filter_release_environment(std::env::vars_os()));
+
+    let error =
+        tauri::async_runtime::block_on(GitReleaseService::new("main").push_existing_commits(
+            &backend,
+            &repository,
+            &expected_head_sha,
+            &expected_remote_sha,
+        ))
+        .unwrap_err();
+
+    assert!(matches!(error, GitReleaseError::RemoteVerificationFailed));
+    assert_eq!(
+        run_git(&git, &remote, &["rev-parse", "refs/heads/main"]),
+        race_sha
+    );
 }
 
 #[test]
@@ -496,11 +824,22 @@ fn git_release_errors_expose_stable_codes() {
         GitReleaseError::HeadRemoteMismatch.code(),
         "GIT_HEAD_REMOTE_MISMATCH"
     );
+    assert_eq!(GitReleaseError::HeadMoved.code(), "GIT_HEAD_MOVED");
+    assert_eq!(
+        GitReleaseError::RepositoryBehind.code(),
+        "GIT_REPOSITORY_BEHIND"
+    );
+    assert_eq!(
+        GitReleaseError::RepositoryDiverged.code(),
+        "GIT_REPOSITORY_DIVERGED"
+    );
     assert_eq!(
         GitReleaseError::PlannedFilesMismatch.code(),
         "GIT_PLANNED_FILES_MISMATCH"
     );
     assert_eq!(GitReleaseError::RemoteMoved.code(), "GIT_REMOTE_MOVED");
+    assert_eq!(GitReleaseError::FetchTimeout.code(), "GIT_FETCH_TIMEOUT");
+    assert_eq!(GitReleaseError::FetchFailed.code(), "GIT_FETCH_FAILED");
     assert_eq!(GitReleaseError::PushFailed.code(), "GIT_PUSH_FAILED");
 }
 
@@ -530,6 +869,9 @@ fn preflight_combines_real_git_inspection_with_mocked_tool_and_github_state() {
         tauri::async_runtime::block_on(service.inspect(&backend, &repository, &probe)).unwrap();
 
     assert_eq!(result.repository.local_branch, "master");
+    assert!(result.release_ready);
+    assert!(result.blocking_reasons.is_empty());
+    assert!(result.safe_push.is_none());
     assert_eq!(
         PathBuf::from(&result.repository_path)
             .canonicalize()
@@ -540,7 +882,53 @@ fn preflight_combines_real_git_inspection_with_mocked_tool_and_github_state() {
 }
 
 #[test]
-fn preflight_blocks_missing_tools_active_runs_and_conflicting_drafts() {
+fn preflight_exposes_safe_push_only_for_clean_ahead_repository_without_conflicts() {
+    let workspace = TempGitWorkspace::new();
+    let git = git_executable();
+    let (repository, remote) = create_synced_repository(&workspace, &git);
+    fs::write(repository.join("README.md"), "ready to push\n").unwrap();
+    run_git(&git, &repository, &["add", "README.md"]);
+    run_git(
+        &git,
+        &repository,
+        &["commit", "-m", "feat: reviewed local commit"],
+    );
+    let head_sha = run_git(&git, &repository, &["rev-parse", "HEAD"]);
+    let remote_main_sha = run_git(&git, &remote, &["rev-parse", "refs/heads/main"]);
+    let backend = GitBackend::new(git, filter_release_environment(std::env::vars_os()));
+    let service = ReleasePreflightService::new(RepositoryInspectionService::new("main", remote));
+    let probe = FixedPreflightProbe {
+        snapshot: ExternalPreflightSnapshot {
+            tools: ToolchainInspection {
+                git: Some("git version test".into()),
+                node: Some("v22.test".into()),
+                npm: Some("11.test".into()),
+                cargo: Some("cargo test".into()),
+                gh: Some("gh version test".into()),
+            },
+            active_release_runs: 0,
+            conflicting_drafts: 0,
+            latest_release_tag: Some("v0.4.0".into()),
+        },
+    };
+
+    let result =
+        tauri::async_runtime::block_on(service.inspect(&backend, &repository, &probe)).unwrap();
+
+    assert!(!result.release_ready);
+    assert_eq!(result.blocking_reasons.len(), 1);
+    let preview = result
+        .safe_push
+        .expect("clean ahead repository should be pushable");
+    assert_eq!(preview.expected_head_sha, head_sha);
+    assert_eq!(preview.expected_remote_main_sha, remote_main_sha);
+    assert_eq!(preview.commit_count, 1);
+    assert_eq!(preview.commits.len(), 1);
+    assert_eq!(preview.commits[0].subject, "feat: reviewed local commit");
+}
+
+#[test]
+fn preflight_projects_missing_tools_active_runs_and_conflicting_drafts_as_facts() {
     let workspace = TempGitWorkspace::new();
     let git = git_executable();
     let (repository, remote) = create_synced_repository(&workspace, &git);
@@ -564,7 +952,7 @@ fn preflight_blocks_missing_tools_active_runs_and_conflicting_drafts() {
                 conflicting_drafts: 0,
                 latest_release_tag: None,
             },
-            "tool",
+            "工具",
         ),
         (
             ExternalPreflightSnapshot {
@@ -573,7 +961,7 @@ fn preflight_blocks_missing_tools_active_runs_and_conflicting_drafts() {
                 conflicting_drafts: 0,
                 latest_release_tag: None,
             },
-            "run",
+            "活动发布工作流",
         ),
         (
             ExternalPreflightSnapshot {
@@ -582,22 +970,23 @@ fn preflight_blocks_missing_tools_active_runs_and_conflicting_drafts() {
                 conflicting_drafts: 1,
                 latest_release_tag: None,
             },
-            "draft",
+            "Draft Release",
         ),
     ];
 
     for (snapshot, expected) in cases {
         let probe = FixedPreflightProbe { snapshot };
-        let error = tauri::async_runtime::block_on(service.inspect(&backend, &repository, &probe))
-            .unwrap_err();
+        let result =
+            tauri::async_runtime::block_on(service.inspect(&backend, &repository, &probe)).unwrap();
+        assert!(!result.release_ready);
+        assert!(result.safe_push.is_none());
         assert!(
-            matches!(
-                (&error, expected),
-                (ReleasePreflightError::ToolMissing, "tool")
-                    | (ReleasePreflightError::ActiveReleaseRun, "run")
-                    | (ReleasePreflightError::ConflictingDraft, "draft")
-            ),
-            "unexpected preflight error: {error:?}"
+            result
+                .blocking_reasons
+                .iter()
+                .any(|reason| reason.contains(expected)),
+            "missing blocker containing {expected:?}: {:?}",
+            result.blocking_reasons
         );
     }
 }

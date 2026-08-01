@@ -1,3 +1,5 @@
+import type { ReleaseProxySettings } from './network'
+
 export type ReleasePhase =
   | 'idle'
   | 'inspected'
@@ -39,6 +41,20 @@ export interface ToolchainInspection {
   gh: string | null
 }
 
+export type RepositorySyncStatus = 'synced' | 'ahead' | 'behind' | 'diverged'
+
+export interface RepositoryCommitSummary {
+  sha: string
+  subject: string
+}
+
+export interface RepositorySyncInspection {
+  status: RepositorySyncStatus
+  aheadCount: number
+  behindCount: number
+  aheadCommits: readonly RepositoryCommitSummary[]
+}
+
 export interface RepositoryInspection {
   localBranch: string
   defaultBranch: string
@@ -46,6 +62,21 @@ export interface RepositoryInspection {
   remoteMainSha: string
   remoteUrl: string
   clean: boolean
+  sync: RepositorySyncInspection
+}
+
+export interface SafeRepositoryPushPreview {
+  expectedHeadSha: string
+  expectedRemoteMainSha: string
+  commitCount: number
+  commits: readonly RepositoryCommitSummary[]
+}
+
+export interface SafeRepositoryPushRequest {
+  repositoryPath: string
+  expectedHeadSha: string
+  expectedRemoteMainSha: string
+  proxy: ReleaseProxySettings
 }
 
 export interface ReleasePreflightResult {
@@ -57,6 +88,9 @@ export interface ReleasePreflightResult {
     conflictingDrafts: number
     latestReleaseTag: string | null
   }
+  releaseReady: boolean
+  blockingReasons: readonly string[]
+  safePush: SafeRepositoryPushPreview | null
 }
 
 export interface ReleasePlanFileSummary {

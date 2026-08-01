@@ -39,6 +39,12 @@ describe('release console typed Tauri service', () => {
           remoteMainSha: 'a'.repeat(40),
           remoteUrl: 'https://github.com/hunxuankai/codex-relay.git',
           clean: true,
+          sync: {
+            status: 'synced',
+            aheadCount: 0,
+            behindCount: 0,
+            aheadCommits: [],
+          },
         },
         external: {
           tools: { git: '2.50', node: '24', npm: '11', cargo: '1.90', gh: '2.76' },
@@ -46,20 +52,108 @@ describe('release console typed Tauri service', () => {
           conflictingDrafts: 0,
           latestReleaseTag: 'v0.4.0',
         },
+        releaseReady: true,
+        blockingReasons: [],
+        safePush: null,
       },
     })
+    const proxy = { enabled: false, proxyType: 'http' as const, host: '', port: null }
 
-    const result = await releaseConsoleTauri.inspectRepository('D:\\safe-temp\\repository')
+    const result = await releaseConsoleTauri.inspectRepository(
+      'D:\\safe-temp\\repository',
+      proxy,
+    )
 
     expect(result.repository.defaultBranch).toBe('main')
     expect(invokeMock).toHaveBeenCalledWith('inspect_release_repository', {
       repositoryPath: 'D:\\safe-temp\\repository',
+      proxy,
     })
+  })
+
+  it('passes one proxy snapshot to planning, start, resume and publish commands', async () => {
+    const { releaseConsoleTauri } = await import('./tauri')
+    const proxy = {
+      enabled: true,
+      proxyType: 'socks5' as const,
+      host: '127.0.0.1',
+      port: 1080,
+    }
+    const session = {
+      id: 'session-1',
+      repositoryPath: 'D:\\safe-temp\\repository',
+      targetVersion: '0.5.0',
+      phase: 'workflowRunning',
+      candidateSha: 'a'.repeat(40),
+      remoteMainSha: 'a'.repeat(40),
+      workflow: null,
+      draft: null,
+      published: null,
+      cleanup: null,
+      cleanupWarning: null,
+    }
+    invokeMock
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          id: 'plan-1',
+          repositoryPath: session.repositoryPath,
+          previousVersion: '0.4.0',
+          targetVersion: '0.5.0',
+          notes: '最终说明',
+          files: [],
+        },
+      })
+      .mockResolvedValueOnce({ success: true, data: session })
+      .mockResolvedValueOnce({ success: true, data: session })
+      .mockResolvedValueOnce({ success: true, data: session })
+
+    await releaseConsoleTauri.preparePlan(session.repositoryPath, '0.5.0', proxy, '最终说明')
+    await releaseConsoleTauri.startRelease('plan-1', proxy, () => undefined)
+    await releaseConsoleTauri.resumeRelease('session-1', proxy, () => undefined)
+    await releaseConsoleTauri.publishRelease(
+      'session-1',
+      { releaseId: 42, tagName: 'v0.5.0', targetCommitSha: 'a'.repeat(40) },
+      proxy,
+      () => undefined,
+    )
+
+    expect(invokeMock.mock.calls[0]).toEqual([
+      'prepare_release_plan',
+      {
+        repositoryPath: session.repositoryPath,
+        targetVersion: '0.5.0',
+        proxy,
+        notes: '最终说明',
+      },
+    ])
+    expect(invokeMock.mock.calls[1]).toEqual([
+      'start_release',
+      { planId: 'plan-1', proxy, onEvent: expect.any(MockChannel) },
+    ])
+    expect(invokeMock.mock.calls[2]).toEqual([
+      'resume_release',
+      { sessionId: 'session-1', proxy, onEvent: expect.any(MockChannel) },
+    ])
+    expect(invokeMock.mock.calls[3]).toEqual([
+      'publish_release',
+      {
+        sessionId: 'session-1',
+        expectedDraftIdentity: {
+          releaseId: 42,
+          tagName: 'v0.5.0',
+          targetCommitSha: 'a'.repeat(40),
+        },
+        proxy,
+        onEvent: expect.any(MockChannel),
+      },
+    ])
   })
 
   it('forwards typed channel events and preserves stable backend errors', async () => {
     const { releaseConsoleTauri } = await import('./tauri')
     const events: unknown[] = []
+    const proxy = { enabled: false, proxyType: 'http' as const, host: '', port: null }
     invokeMock.mockImplementationOnce(async (_command: string, args: Record<string, unknown>) => {
       const channel = args.onEvent as MockChannel<unknown>
       channel.emit({ kind: 'stepStarted', stepId: 'remoteRun', startedAt: '2026-07-31T10:00:00Z' })
@@ -81,7 +175,7 @@ describe('release console typed Tauri service', () => {
       }
     })
 
-    await releaseConsoleTauri.startRelease('plan-1', (event) => events.push(event))
+    await releaseConsoleTauri.startRelease('plan-1', proxy, (event) => events.push(event))
 
     expect(events).toEqual([
       { kind: 'stepStarted', stepId: 'remoteRun', startedAt: '2026-07-31T10:00:00Z' },
@@ -89,6 +183,7 @@ describe('release console typed Tauri service', () => {
     expect(channels).toHaveLength(1)
     expect(invokeMock).toHaveBeenCalledWith('start_release', {
       planId: 'plan-1',
+      proxy,
       onEvent: expect.any(MockChannel),
     })
 
@@ -96,9 +191,88 @@ describe('release console typed Tauri service', () => {
       success: false,
       error: { code: 'GITHUB_RUN_FAILED', message: 'GitHub Actions Run 执行失败。' },
     })
-    await expect(releaseConsoleTauri.resumeRelease('session-1', () => undefined)).rejects.toMatchObject({
+    await expect(
+      releaseConsoleTauri.resumeRelease('session-1', proxy, () => undefined),
+    ).rejects.toMatchObject({
       code: 'GITHUB_RUN_FAILED',
       message: 'GitHub Actions Run 执行失败。',
     })
+  })
+
+  it('passes the current proxy snapshot to the read-only connection test', async () => {
+    const { releaseConsoleTauri } = await import('./tauri')
+    invokeMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        git: {
+          success: true,
+          code: null,
+          message: 'Git 远端连接正常。',
+          durationMillis: 12,
+        },
+        github: {
+          success: false,
+          code: 'GITHUB_PROCESS_TIMEOUT',
+          message: 'GitHub API 连接超时。',
+          durationMillis: 30_000,
+        },
+      },
+    })
+    const proxy = {
+      enabled: true,
+      proxyType: 'socks5' as const,
+      host: '127.0.0.1',
+      port: 1080,
+    }
+
+    const result = await releaseConsoleTauri.testConnection(proxy)
+
+    expect(result.git.success).toBe(true)
+    expect(result.github.code).toBe('GITHUB_PROCESS_TIMEOUT')
+    expect(invokeMock).toHaveBeenCalledWith('test_release_connection', { proxy })
+  })
+
+  it('passes the confirmed repository SHAs and proxy to the safe push command', async () => {
+    const { releaseConsoleTauri } = await import('./tauri')
+    invokeMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        repositoryPath: 'D:\\safe-temp\\repository',
+        repository: {
+          localBranch: 'master',
+          defaultBranch: 'main',
+          headSha: 'b'.repeat(40),
+          remoteMainSha: 'b'.repeat(40),
+          remoteUrl: 'https://github.com/hunxuankai/codex-relay.git',
+          clean: true,
+          sync: { status: 'synced', aheadCount: 0, behindCount: 0, aheadCommits: [] },
+        },
+        external: {
+          tools: { git: '2.50', node: '24', npm: '11', cargo: '1.90', gh: '2.76' },
+          activeReleaseRuns: 0,
+          conflictingDrafts: 0,
+          latestReleaseTag: 'v0.4.0',
+        },
+        releaseReady: true,
+        blockingReasons: [],
+        safePush: null,
+      },
+    })
+    const request = {
+      repositoryPath: 'D:\\safe-temp\\repository',
+      expectedHeadSha: 'b'.repeat(40),
+      expectedRemoteMainSha: 'a'.repeat(40),
+      proxy: {
+        enabled: true,
+        proxyType: 'socks5' as const,
+        host: '127.0.0.1',
+        port: 1080,
+      },
+    }
+
+    const result = await releaseConsoleTauri.pushRepository(request)
+
+    expect(result.releaseReady).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith('push_release_repository', { request })
   })
 })

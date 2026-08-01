@@ -704,6 +704,24 @@ fn system_gh_backend_builds_fixed_dispatch_and_direct_asset_download_invocations
     assert!(dispatch.stdout_file.is_none());
     assert_eq!(dispatch.env.len(), 1);
 
+    let connection = backend
+        .invocation_for(&GhRequest {
+            operation: GhOperation::ConnectionTest,
+            repository: "hunxuankai/codex-relay".into(),
+            workflow: None,
+            git_ref: None,
+            tag_name: None,
+            head_sha: None,
+            created_after: None,
+            resource_id: None,
+            stdin: None,
+        })
+        .unwrap();
+    assert_eq!(
+        connection.args,
+        ["api", "repos/hunxuankai/codex-relay", "--silent",]
+    );
+
     let destination = PathBuf::from(r"D:\safe-temp\artifacts\installer.exe");
     let download = backend.asset_download_invocation(77, &destination);
     assert_eq!(
@@ -925,6 +943,32 @@ fn system_gh_backend_builds_fixed_dispatch_and_direct_asset_download_invocations
             "databaseId,status,conclusion,createdAt,url",
         ]
     );
+}
+
+#[test]
+fn system_gh_backend_preserves_process_start_failures_for_safe_public_mapping() {
+    let (_cancel_sender, cancel) = tokio::sync::watch::channel(false);
+    let backend = SystemGhBackend::new(
+        PathBuf::from(r"D:\missing\gh.exe"),
+        Vec::new(),
+        std::env::temp_dir(),
+        cancel,
+    );
+
+    let error = tauri::async_runtime::block_on(backend.execute(GhRequest {
+        operation: GhOperation::ConnectionTest,
+        repository: "hunxuankai/codex-relay".into(),
+        workflow: None,
+        git_ref: None,
+        tag_name: None,
+        head_sha: None,
+        created_after: None,
+        resource_id: None,
+        stdin: None,
+    }))
+    .unwrap_err();
+
+    assert_eq!(error, "GH_PROCESS_START_FAILED");
 }
 
 #[test]

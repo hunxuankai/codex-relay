@@ -3,6 +3,7 @@ import {
   releaseConsoleTauri,
   type ReleaseConsoleClient,
 } from '../services/tauri'
+import type { ReleaseProxySettings } from '../types/network'
 import type {
   CommandError,
   DraftIdentity,
@@ -13,7 +14,7 @@ import type {
 } from '../types/release'
 
 interface UseReleaseSessionOptions {
-  client?: ReleaseConsoleClient
+  client?: Omit<ReleaseConsoleClient, 'testConnection'>
 }
 function safeError(error: unknown): CommandError {
   if (typeof error === 'object' && error !== null) {
@@ -70,10 +71,10 @@ export function useReleaseSession(options: UseReleaseSessionOptions = {}) {
     }
   }
 
-  async function inspect(repositoryPath: string) {
+  async function inspect(repositoryPath: string, proxy: ReleaseProxySettings) {
     const sequence = beginOperation()
     try {
-      const value = await client.inspectRepository(repositoryPath)
+      const value = await client.inspectRepository(repositoryPath, proxy)
       if (sequence === operationSequence) inspection.value = value
       return value
     } catch (cause) {
@@ -84,10 +85,15 @@ export function useReleaseSession(options: UseReleaseSessionOptions = {}) {
     }
   }
 
-  async function preparePlan(repositoryPath: string, targetVersion: string, notes?: string) {
+  async function preparePlan(
+    repositoryPath: string,
+    targetVersion: string,
+    proxy: ReleaseProxySettings,
+    notes?: string,
+  ) {
     const sequence = beginOperation()
     try {
-      const value = await client.preparePlan(repositoryPath, targetVersion, notes)
+      const value = await client.preparePlan(repositoryPath, targetVersion, proxy, notes)
       if (sequence === operationSequence) plan.value = value
       return value
     } catch (cause) {
@@ -98,12 +104,43 @@ export function useReleaseSession(options: UseReleaseSessionOptions = {}) {
     }
   }
 
-  async function start(planId: string) {
+  async function pushRepository(proxy: ReleaseProxySettings) {
+    const currentInspection = inspection.value
+    const preview = currentInspection?.safePush
+    if (!currentInspection || !preview) {
+      error.value = {
+        code: 'GIT_SAFE_PUSH_FORBIDDEN',
+        message: '当前仓库状态不允许安全推送。',
+      }
+      return null
+    }
+    const sequence = beginOperation()
+    try {
+      const value = await client.pushRepository({
+        repositoryPath: currentInspection.repositoryPath,
+        expectedHeadSha: preview.expectedHeadSha,
+        expectedRemoteMainSha: preview.expectedRemoteMainSha,
+        proxy,
+      })
+      if (sequence === operationSequence) {
+        inspection.value = value
+        plan.value = null
+      }
+      return value
+    } catch (cause) {
+      recordError(sequence, cause)
+      return null
+    } finally {
+      finishOperation(sequence)
+    }
+  }
+
+  async function start(planId: string, proxy: ReleaseProxySettings) {
     const sequence = beginOperation()
     const onEvent = openEventStream()
     events.value = []
     try {
-      const value = await client.startRelease(planId, onEvent)
+      const value = await client.startRelease(planId, proxy, onEvent)
       if (sequence === operationSequence) session.value = value
       return value
     } catch (cause) {
@@ -128,11 +165,11 @@ export function useReleaseSession(options: UseReleaseSessionOptions = {}) {
     }
   }
 
-  async function resume(sessionId: string) {
+  async function resume(sessionId: string, proxy: ReleaseProxySettings) {
     const sequence = beginOperation()
     const onEvent = openEventStream()
     try {
-      const value = await client.resumeRelease(sessionId, onEvent)
+      const value = await client.resumeRelease(sessionId, proxy, onEvent)
       if (sequence === operationSequence) session.value = value
       return value
     } catch (cause) {
@@ -158,11 +195,20 @@ export function useReleaseSession(options: UseReleaseSessionOptions = {}) {
     }
   }
 
-  async function publish(sessionId: string, expectedDraftIdentity: DraftIdentity) {
+  async function publish(
+    sessionId: string,
+    expectedDraftIdentity: DraftIdentity,
+    proxy: ReleaseProxySettings,
+  ) {
     const sequence = beginOperation()
     const onEvent = openEventStream()
     try {
-      const value = await client.publishRelease(sessionId, expectedDraftIdentity, onEvent)
+      const value = await client.publishRelease(
+        sessionId,
+        expectedDraftIdentity,
+        proxy,
+        onEvent,
+      )
       if (sequence === operationSequence) session.value = value
       return value
     } catch (cause) {
@@ -185,6 +231,11 @@ export function useReleaseSession(options: UseReleaseSessionOptions = {}) {
     }
   }
 
+  function invalidateRepositoryContext() {
+    inspection.value = null
+    plan.value = null
+  }
+
   return {
     inspection: readonly(inspection),
     plan: readonly(plan),
@@ -193,6 +244,7 @@ export function useReleaseSession(options: UseReleaseSessionOptions = {}) {
     busy: readonly(busy),
     error: readonly(error),
     inspect,
+    pushRepository,
     preparePlan,
     start,
     load,
@@ -200,5 +252,6 @@ export function useReleaseSession(options: UseReleaseSessionOptions = {}) {
     cancel,
     publish,
     exportSummary,
+    invalidateRepositoryContext,
   }
 }

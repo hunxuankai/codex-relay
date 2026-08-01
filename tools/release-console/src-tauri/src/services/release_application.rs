@@ -5,15 +5,19 @@ use crate::app_state::{
 use crate::infrastructure::gh::{GhBackend, GhOperation, GhRequest, SystemGhBackend};
 use crate::infrastructure::git::GitBackend;
 use crate::infrastructure::local_verification::ProcessLocalVerificationBackend;
-use crate::infrastructure::process::{
-    ProcessInvocation, SafeProcessRunner, filter_release_environment,
-};
+use crate::infrastructure::process::{ProcessInvocation, SafeProcessRunner};
 use crate::models::{
-    ExternalPreflightSnapshot, ReleaseEvent, ReleasePhase, ReleasePlanFileSummary,
-    ReleasePlanSummary, ReleasePreflightResult, ReleaseSession, ToolchainInspection,
+    ExternalPreflightSnapshot, ReleaseConnectionTestResult, ReleaseEvent, ReleasePhase,
+    ReleasePlanFileSummary, ReleasePlanSummary, ReleasePreflightResult, ReleaseProxySettings,
+    ReleaseSession, SafeRepositoryPushRequest, ToolchainInspection,
 };
-use crate::services::git_release::{GitReleaseError, RepositoryInspectionService};
+use crate::services::git_release::{
+    GitReleaseError, GitReleaseService, RepositoryInspectionService, project_release_preflight,
+};
 use crate::services::release_candidate::{ReleaseCandidatePlan, ReleaseCandidateTransaction};
+use crate::services::release_network::{
+    ReleaseConnectionService, ReleaseNetworkProfile, SystemReleaseConnectionProbeBackend,
+};
 use crate::services::release_notes::{CommitSummary, ReleaseNotesService};
 use crate::services::release_orchestrator::{
     GitReleasePushBackend, GithubRemoteBackend, ReleaseOrchestrator,
@@ -114,28 +118,51 @@ impl SystemReleaseApplication {
         events: Option<Arc<dyn ReleaseEventSink>>,
     ) -> Result<ApplicationResponse, ReleaseApplicationError> {
         match request {
-            ApplicationRequest::Inspect { repository_path } => self
-                .inspect_repository(PathBuf::from(repository_path), PreflightPurpose::NewRelease)
+            ApplicationRequest::TestConnection { proxy } => self
+                .test_connection(proxy)
                 .await
-                .map(|(inspection, _, _)| ApplicationResponse::Inspection(inspection)),
+                .map(ApplicationResponse::ConnectionTest),
+            ApplicationRequest::Inspect {
+                repository_path,
+                proxy,
+            } => {
+                let profile = network_profile(&proxy)?;
+                self.inspect_repository_with_profile(
+                    PathBuf::from(repository_path),
+                    PreflightPurpose::NewRelease,
+                    &profile,
+                )
+                .await
+                .map(|(inspection, _, _)| ApplicationResponse::Inspection(inspection))
+            }
+            ApplicationRequest::PushRepository { request } => self
+                .push_repository(request)
+                .await
+                .map(ApplicationResponse::Inspection),
             ApplicationRequest::PreparePlan {
                 repository_path,
                 target_version,
                 notes,
+                proxy,
             } => self
-                .prepare_plan(PathBuf::from(repository_path), &target_version, notes)
+                .prepare_plan(
+                    PathBuf::from(repository_path),
+                    &target_version,
+                    notes,
+                    proxy,
+                )
                 .await
                 .map(ApplicationResponse::Plan),
-            ApplicationRequest::Start { plan_id } => self
-                .start_release(&plan_id, events)
+            ApplicationRequest::Start { plan_id, proxy } => self
+                .start_release(&plan_id, proxy, events)
                 .await
                 .map(ApplicationResponse::Session),
             ApplicationRequest::GetSession { repository_path } => self
                 .get_session(PathBuf::from(repository_path))
                 .await
                 .map(ApplicationResponse::OptionalSession),
-            ApplicationRequest::Resume { session_id } => self
-                .resume_release(&session_id, events)
+            ApplicationRequest::Resume { session_id, proxy } => self
+                .resume_release(&session_id, proxy, events)
                 .await
                 .map(ApplicationResponse::Session),
             ApplicationRequest::Cancel { session_id } => self
@@ -145,8 +172,9 @@ impl SystemReleaseApplication {
             ApplicationRequest::Publish {
                 session_id,
                 expected_draft_identity,
+                proxy,
             } => self
-                .publish_release(&session_id, expected_draft_identity, events)
+                .publish_release(&session_id, expected_draft_identity, proxy, events)
                 .await
                 .map(ApplicationResponse::Session),
             ApplicationRequest::ExportSummary {
@@ -159,10 +187,47 @@ impl SystemReleaseApplication {
         }
     }
 
+    async fn test_connection(
+        &self,
+        proxy: ReleaseProxySettings,
+    ) -> Result<ReleaseConnectionTestResult, ReleaseApplicationError> {
+        let profile = network_profile(&proxy)?;
+        let directory = tempfile::tempdir().map_err(|_| {
+            app_error(
+                "RELEASE_CONNECTION_TEST_FAILED",
+                "无法创建连接测试临时目录。",
+            )
+        })?;
+        let backend = SystemReleaseConnectionProbeBackend::new(
+            resolve_executable(&["git.exe", "git"]).ok(),
+            resolve_executable(&["gh.exe", "gh"]).ok(),
+            &profile,
+            directory.path().to_path_buf(),
+        );
+        Ok(ReleaseConnectionService::new().test(&backend).await)
+    }
+
     async fn inspect_repository(
         &self,
         repository_path: PathBuf,
         purpose: PreflightPurpose,
+    ) -> Result<(ReleasePreflightResult, ResolvedTools, PathBuf), ReleaseApplicationError> {
+        let direct = ReleaseProxySettings {
+            enabled: false,
+            proxy_type: crate::models::ReleaseProxyType::Http,
+            host: String::new(),
+            port: None,
+        };
+        let profile = network_profile(&direct)?;
+        self.inspect_repository_with_profile(repository_path, purpose, &profile)
+            .await
+    }
+
+    async fn inspect_repository_with_profile(
+        &self,
+        repository_path: PathBuf,
+        purpose: PreflightPurpose,
+        profile: &ReleaseNetworkProfile,
     ) -> Result<(ReleasePreflightResult, ResolvedTools, PathBuf), ReleaseApplicationError> {
         let repository_path = repository_path
             .canonicalize()
@@ -171,8 +236,12 @@ impl SystemReleaseApplication {
             return Err(app_error("GIT_REPOSITORY_INVALID", "无法读取 Git 仓库。"));
         }
         let tools = resolve_tools()?;
-        let environment = filter_release_environment(std::env::vars_os());
-        let git = GitBackend::new(tools.git.clone(), environment.clone());
+        let environment = profile.environment().to_vec();
+        let git = GitBackend::new_with_proxy(
+            tools.git.clone(),
+            environment.clone(),
+            profile.git_proxy_mode().clone(),
+        );
         let inspection_service = RepositoryInspectionService::for_codex_relay();
         let repository = match purpose {
             PreflightPurpose::NewRelease => {
@@ -198,10 +267,10 @@ impl SystemReleaseApplication {
 
         if matches!(purpose, PreflightPurpose::Recovery) {
             return Ok((
-                ReleasePreflightResult {
-                    repository_path: repository_path.to_string_lossy().into_owned(),
+                project_release_preflight(
+                    repository_path.to_string_lossy().into_owned(),
                     repository,
-                    external: ExternalPreflightSnapshot {
+                    ExternalPreflightSnapshot {
                         tools: ToolchainInspection {
                             git: None,
                             node: None,
@@ -213,7 +282,7 @@ impl SystemReleaseApplication {
                         conflicting_drafts: 0,
                         latest_release_tag: None,
                     },
-                },
+                ),
                 tools,
                 git_dir,
             ));
@@ -257,7 +326,7 @@ impl SystemReleaseApplication {
                 stdin: None,
             })
             .await
-            .map_err(|_| app_error("GITHUB_PREFLIGHT_FAILED", "无法读取 GitHub 发布状态。"))?;
+            .map_err(github_preflight_error)?;
         let runs: Vec<Value> = serde_json::from_slice(&runs.stdout)
             .map_err(|_| app_error("GITHUB_RESPONSE_INVALID", "GitHub CLI 返回无效 JSON。"))?;
         let active_release_runs = runs
@@ -278,7 +347,7 @@ impl SystemReleaseApplication {
                 stdin: None,
             })
             .await
-            .map_err(|_| app_error("GITHUB_PREFLIGHT_FAILED", "无法读取 GitHub Draft 状态。"))?;
+            .map_err(github_preflight_error)?;
         let releases: Vec<Value> = serde_json::from_slice(&releases.stdout)
             .map_err(|_| app_error("GITHUB_RESPONSE_INVALID", "GitHub CLI 返回无效 JSON。"))?;
         let latest_release_tag = latest_published_release_tag(&releases);
@@ -287,22 +356,80 @@ impl SystemReleaseApplication {
             .filter(|release| release.get("draft").and_then(Value::as_bool) == Some(true))
             .count();
 
-        validate_remote_conflicts(purpose, active_release_runs, conflicting_drafts)?;
-
-        Ok((
-            ReleasePreflightResult {
-                repository_path: repository_path.to_string_lossy().into_owned(),
-                repository,
-                external: ExternalPreflightSnapshot {
-                    tools: versions,
-                    active_release_runs,
-                    conflicting_drafts,
-                    latest_release_tag,
-                },
+        let mut result = project_release_preflight(
+            repository_path.to_string_lossy().into_owned(),
+            repository,
+            ExternalPreflightSnapshot {
+                tools: versions,
+                active_release_runs,
+                conflicting_drafts,
+                latest_release_tag,
             },
-            tools,
-            git_dir,
-        ))
+        );
+        if ReleaseStateStore::new(git_dir.clone())
+            .load()
+            .map_err(|_| app_error("RELEASE_STATE_INVALID", "发布会话状态无效。"))?
+            .is_some_and(|session| !release_phase_is_terminal(session.phase))
+        {
+            result.release_ready = false;
+            result.safe_push = None;
+            result
+                .blocking_reasons
+                .push("该仓库已有未完成的发布会话，请先恢复或取消。".to_string());
+        }
+        Ok((result, tools, git_dir))
+    }
+
+    async fn push_repository(
+        &self,
+        request: SafeRepositoryPushRequest,
+    ) -> Result<ReleasePreflightResult, ReleaseApplicationError> {
+        let profile = network_profile(&request.proxy)?;
+        let repository_path = PathBuf::from(&request.repository_path);
+        let (inspection, tools, _) = self
+            .inspect_repository_with_profile(
+                repository_path.clone(),
+                PreflightPurpose::NewRelease,
+                &profile,
+            )
+            .await?;
+        let repository_path = PathBuf::from(&inspection.repository_path);
+        let preview = inspection
+            .safe_push
+            .as_ref()
+            .ok_or_else(|| safe_push_blocked(&inspection))?;
+        if preview.expected_head_sha != request.expected_head_sha {
+            return Err(app_error("GIT_HEAD_MOVED", "本地 HEAD 在确认后发生变化。"));
+        }
+        if preview.expected_remote_main_sha != request.expected_remote_main_sha {
+            return Err(app_error(
+                "GIT_REMOTE_MOVED",
+                "远端 main 在确认后发生变化。",
+            ));
+        }
+        let git = GitBackend::new_with_proxy(
+            tools.git,
+            profile.environment().to_vec(),
+            profile.git_proxy_mode().clone(),
+        );
+        GitReleaseService::new("main")
+            .push_existing_commits(
+                &git,
+                &repository_path,
+                &request.expected_head_sha,
+                &request.expected_remote_main_sha,
+            )
+            .await
+            .map_err(git_error)?;
+        let (refreshed, _, _) = self
+            .inspect_repository_with_profile(
+                repository_path,
+                PreflightPurpose::NewRelease,
+                &profile,
+            )
+            .await?;
+        verify_refreshed_push(&refreshed, &request.expected_head_sha)?;
+        Ok(refreshed)
     }
 
     async fn prepare_plan(
@@ -310,10 +437,26 @@ impl SystemReleaseApplication {
         repository_path: PathBuf,
         target_version: &str,
         notes: Option<String>,
+        proxy: ReleaseProxySettings,
     ) -> Result<ReleasePlanSummary, ReleaseApplicationError> {
+        let profile = network_profile(&proxy)?;
         let (inspection, tools, git_dir) = self
-            .inspect_repository(repository_path.clone(), PreflightPurpose::NewRelease)
+            .inspect_repository_with_profile(
+                repository_path.clone(),
+                PreflightPurpose::NewRelease,
+                &profile,
+            )
             .await?;
+        if !inspection.release_ready {
+            return Err(app_error(
+                "RELEASE_PREFLIGHT_BLOCKED",
+                inspection
+                    .blocking_reasons
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "仓库尚未满足发布条件。".to_string()),
+            ));
+        }
         let repository_path = repository_path
             .canonicalize()
             .map_err(|_| app_error("GIT_REPOSITORY_INVALID", "无法读取 Git 仓库。"))?;
@@ -321,8 +464,11 @@ impl SystemReleaseApplication {
         let notes = match notes {
             Some(notes) => notes,
             None => {
-                let environment = filter_release_environment(std::env::vars_os());
-                let git = GitBackend::new(tools.git.clone(), environment);
+                let git = GitBackend::new_with_proxy(
+                    tools.git.clone(),
+                    profile.environment().to_vec(),
+                    profile.git_proxy_mode().clone(),
+                );
                 let commits = release_commits(&git, &repository_path, &previous_version).await?;
                 ReleaseNotesService::generate(&previous_version, target_version, &commits)
                     .map_err(|error| app_error(error.code(), error.to_string()))?
@@ -368,8 +514,10 @@ impl SystemReleaseApplication {
     async fn start_release(
         &self,
         plan_id: &str,
+        proxy: ReleaseProxySettings,
         events: Option<Arc<dyn ReleaseEventSink>>,
     ) -> Result<ReleaseSession, ReleaseApplicationError> {
+        let profile = network_profile(&proxy)?;
         let stored = self
             .inner
             .plans
@@ -424,7 +572,7 @@ impl SystemReleaseApplication {
         let initial = session.clone();
         tauri::async_runtime::spawn(async move {
             application
-                .run_initial_pipeline(initial, stored, cancel, events)
+                .run_initial_pipeline(initial, stored, profile, cancel, events)
                 .await;
         });
         Ok(session)
@@ -434,15 +582,17 @@ impl SystemReleaseApplication {
         &self,
         mut session: ReleaseSession,
         stored: StoredPlan,
+        profile: ReleaseNetworkProfile,
         cancel: tokio::sync::watch::Receiver<bool>,
         events: Option<Arc<dyn ReleaseEventSink>>,
     ) {
         let watch_store = ReleaseStateStore::new(stored.git_dir.clone());
         run_with_session_updates(watch_store, events.clone(), async {
-            let environment = filter_release_environment(std::env::vars_os());
-            let git = GitBackend::new_cancellable(
+            let environment = profile.environment().to_vec();
+            let git = GitBackend::new_cancellable_with_proxy(
                 stored.tools.git.clone(),
                 environment.clone(),
+                profile.git_proxy_mode().clone(),
                 cancel.clone(),
             );
             let verification = ProcessLocalVerificationBackend::new(
@@ -543,8 +693,10 @@ impl SystemReleaseApplication {
     async fn resume_release(
         &self,
         session_id: &str,
+        proxy: ReleaseProxySettings,
         events: Option<Arc<dyn ReleaseEventSink>>,
     ) -> Result<ReleaseSession, ReleaseApplicationError> {
+        let profile = network_profile(&proxy)?;
         let context = self.context(session_id)?;
         let store = ReleaseStateStore::new(context.git_dir.clone());
         let session = store
@@ -566,7 +718,7 @@ impl SystemReleaseApplication {
         let initial = session.clone();
         tauri::async_runtime::spawn(async move {
             application
-                .run_resume_pipeline(initial, context, cancel, events)
+                .run_resume_pipeline(initial, context, profile, cancel, events)
                 .await;
         });
         Ok(session)
@@ -576,17 +728,19 @@ impl SystemReleaseApplication {
         &self,
         mut session: ReleaseSession,
         context: SessionContext,
+        profile: ReleaseNetworkProfile,
         cancel: tokio::sync::watch::Receiver<bool>,
         events: Option<Arc<dyn ReleaseEventSink>>,
     ) {
         let watch_store = ReleaseStateStore::new(context.git_dir.clone());
         run_with_session_updates(watch_store, events.clone(), async {
-            let environment = filter_release_environment(std::env::vars_os());
+            let environment = profile.environment().to_vec();
             let store = ReleaseStateStore::new(context.git_dir.clone());
             if resume_action(session.phase) == ResumeAction::PushCommitted {
-                let git = GitBackend::new_cancellable(
+                let git = GitBackend::new_cancellable_with_proxy(
                     context.tools.git.clone(),
                     environment.clone(),
+                    profile.git_proxy_mode().clone(),
                     cancel.clone(),
                 );
                 let push = GitReleasePushBackend::for_committed(git);
@@ -670,8 +824,10 @@ impl SystemReleaseApplication {
         &self,
         session_id: &str,
         expected_identity: crate::models::DraftIdentity,
+        proxy: ReleaseProxySettings,
         events: Option<Arc<dyn ReleaseEventSink>>,
     ) -> Result<ReleaseSession, ReleaseApplicationError> {
+        let profile = network_profile(&proxy)?;
         let context = self.context(session_id)?;
         let store = ReleaseStateStore::new(context.git_dir.clone());
         let session = store
@@ -691,7 +847,7 @@ impl SystemReleaseApplication {
         tauri::async_runtime::spawn(async move {
             let watch_store = ReleaseStateStore::new(context.git_dir.clone());
             run_with_session_updates(watch_store, events.clone(), async {
-                let environment = filter_release_environment(std::env::vars_os());
+                let environment = profile.environment().to_vec();
                 let gh = SystemGhBackend::new(
                     context.tools.gh.clone(),
                     environment,
@@ -1028,6 +1184,79 @@ fn git_error(error: GitReleaseError) -> ReleaseApplicationError {
     app_error(error.code(), error.to_string())
 }
 
+fn network_profile(
+    proxy: &ReleaseProxySettings,
+) -> Result<ReleaseNetworkProfile, ReleaseApplicationError> {
+    ReleaseNetworkProfile::new(proxy, std::env::vars_os())
+        .map_err(|error| app_error(error.code(), error.to_string()))
+}
+
+fn release_phase_is_terminal(phase: ReleasePhase) -> bool {
+    matches!(
+        phase,
+        ReleasePhase::Completed
+            | ReleasePhase::CompletedWithWarnings
+            | ReleasePhase::Failed
+            | ReleasePhase::Cancelled
+    )
+}
+
+fn github_preflight_error(error: String) -> ReleaseApplicationError {
+    match error.as_str() {
+        "GH_PROCESS_START_FAILED" => {
+            app_error("GITHUB_PROCESS_START_FAILED", "GitHub CLI 进程启动失败。")
+        }
+        "GH_PROCESS_TIMEOUT" => app_error("GITHUB_PROCESS_TIMEOUT", "GitHub API 请求超时。"),
+        "GH_PROCESS_CANCELLED" => app_error("GITHUB_PROCESS_CANCELLED", "GitHub API 请求已取消。"),
+        "GH_PROCESS_TREE_TERMINATION_FAILED" => app_error(
+            "GITHUB_PROCESS_TREE_TERMINATION_FAILED",
+            "GitHub CLI 进程树未能安全结束。",
+        ),
+        _ => app_error("GITHUB_COMMAND_FAILED", "GitHub API 请求失败。"),
+    }
+}
+
+fn safe_push_blocked(inspection: &ReleasePreflightResult) -> ReleaseApplicationError {
+    if !inspection.repository.clean {
+        return app_error("GIT_WORKTREE_DIRTY", "Git 工作区存在未提交改动。");
+    }
+    match inspection.repository.sync.status {
+        crate::models::RepositorySyncStatus::Behind => {
+            return app_error("GIT_REPOSITORY_BEHIND", "本地分支落后远端 main。");
+        }
+        crate::models::RepositorySyncStatus::Diverged => {
+            return app_error("GIT_REPOSITORY_DIVERGED", "本地分支与远端 main 已分叉。");
+        }
+        _ => {}
+    }
+    if inspection.external.active_release_runs > 0 {
+        return app_error(
+            "GITHUB_ACTIVE_RELEASE_RUN",
+            "已有活动发布工作流，请等待其结束后再继续。",
+        );
+    }
+    if inspection.external.conflicting_drafts > 0 {
+        return app_error(
+            "GITHUB_CONFLICTING_DRAFT",
+            "已有 Draft Release，请先在 GitHub 明确处理。",
+        );
+    }
+    app_error("GIT_SAFE_PUSH_FORBIDDEN", "当前仓库状态不允许安全推送。")
+}
+
+fn verify_refreshed_push(
+    refreshed: &ReleasePreflightResult,
+    expected_head_sha: &str,
+) -> Result<(), ReleaseApplicationError> {
+    if refreshed.repository.remote_main_sha == expected_head_sha {
+        return Ok(());
+    }
+    Err(app_error(
+        "GIT_REMOTE_VERIFICATION_FAILED",
+        "推送后远端 main 未通过精确验证。",
+    ))
+}
+
 fn app_error(code: impl Into<String>, message: impl Into<String>) -> ReleaseApplicationError {
     ReleaseApplicationError::new(code, message)
 }
@@ -1144,29 +1373,6 @@ fn resume_action(phase: ReleasePhase) -> ResumeAction {
     }
 }
 
-fn validate_remote_conflicts(
-    purpose: PreflightPurpose,
-    active_release_runs: usize,
-    conflicting_drafts: usize,
-) -> Result<(), ReleaseApplicationError> {
-    if matches!(purpose, PreflightPurpose::Recovery) {
-        return Ok(());
-    }
-    if active_release_runs > 0 {
-        return Err(app_error(
-            "GITHUB_ACTIVE_RELEASE_RUN",
-            "已有活动发布工作流，请等待其结束后再继续。",
-        ));
-    }
-    if conflicting_drafts > 0 {
-        return Err(app_error(
-            "GITHUB_CONFLICTING_DRAFT",
-            "已有 Draft Release，请先在 GitHub 明确处理。",
-        ));
-    }
-    Ok(())
-}
-
 fn latest_published_release_tag(releases: &[Value]) -> Option<String> {
     releases
         .iter()
@@ -1198,23 +1404,6 @@ mod tests {
     }
 
     #[test]
-    fn recovery_allows_the_active_run_and_draft_that_new_release_preflight_blocks() {
-        assert!(validate_remote_conflicts(PreflightPurpose::Recovery, 1, 1).is_ok());
-        assert_eq!(
-            validate_remote_conflicts(PreflightPurpose::NewRelease, 1, 0)
-                .unwrap_err()
-                .code,
-            "GITHUB_ACTIVE_RELEASE_RUN"
-        );
-        assert_eq!(
-            validate_remote_conflicts(PreflightPurpose::NewRelease, 0, 1)
-                .unwrap_err()
-                .code,
-            "GITHUB_CONFLICTING_DRAFT"
-        );
-    }
-
-    #[test]
     fn latest_published_release_tag_skips_drafts_and_prereleases() {
         let releases = vec![
             serde_json::json!({
@@ -1240,6 +1429,69 @@ mod tests {
         );
         assert_eq!(latest_published_release_tag(&releases[..2]), None);
         assert_eq!(latest_published_release_tag(&[]), None);
+    }
+
+    #[test]
+    fn github_preflight_errors_preserve_process_failure_categories() {
+        assert_eq!(
+            github_preflight_error("GH_PROCESS_START_FAILED".into()).code,
+            "GITHUB_PROCESS_START_FAILED"
+        );
+        assert_eq!(
+            github_preflight_error("GH_PROCESS_TIMEOUT".into()).code,
+            "GITHUB_PROCESS_TIMEOUT"
+        );
+        assert_eq!(
+            github_preflight_error("GH_PROCESS_CANCELLED".into()).code,
+            "GITHUB_PROCESS_CANCELLED"
+        );
+        assert_eq!(
+            github_preflight_error("GH_PROCESS_TREE_TERMINATION_FAILED".into()).code,
+            "GITHUB_PROCESS_TREE_TERMINATION_FAILED"
+        );
+        assert_eq!(
+            github_preflight_error("GH_COMMAND_FAILED".into()).code,
+            "GITHUB_COMMAND_FAILED"
+        );
+    }
+
+    #[test]
+    fn post_push_verification_uses_the_exact_remote_sha_not_release_readiness() {
+        let expected_sha = "b".repeat(40);
+        let refreshed = ReleasePreflightResult {
+            repository_path: "D:\\safe-temp\\repository".into(),
+            repository: crate::models::RepositoryInspection {
+                local_branch: "master".into(),
+                default_branch: "main".into(),
+                head_sha: expected_sha.clone(),
+                remote_main_sha: expected_sha.clone(),
+                remote_url: "https://github.com/hunxuankai/codex-relay.git".into(),
+                clean: true,
+                sync: crate::models::RepositorySyncInspection {
+                    status: crate::models::RepositorySyncStatus::Synced,
+                    ahead_count: 0,
+                    behind_count: 0,
+                    ahead_commits: Vec::new(),
+                },
+            },
+            external: ExternalPreflightSnapshot {
+                tools: ToolchainInspection {
+                    git: Some("2.50".into()),
+                    node: Some("24".into()),
+                    npm: Some("11".into()),
+                    cargo: Some("1.90".into()),
+                    gh: Some("2.76".into()),
+                },
+                active_release_runs: 1,
+                conflicting_drafts: 0,
+                latest_release_tag: Some("v0.4.0".into()),
+            },
+            release_ready: false,
+            blocking_reasons: vec!["已有活动发布工作流，请等待其结束后再继续。".into()],
+            safe_push: None,
+        };
+
+        assert!(verify_refreshed_push(&refreshed, &expected_sha).is_ok());
     }
 
     #[test]

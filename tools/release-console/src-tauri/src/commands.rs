@@ -2,8 +2,8 @@ use crate::app_state::{
     AppState, ApplicationRequest, ApplicationResponse, ReleaseApplicationError, ReleaseEventSink,
 };
 use crate::models::{
-    CommandResult, DraftIdentity, ReleaseEvent, ReleasePlanSummary, ReleasePreflightResult,
-    ReleaseSession,
+    CommandResult, DraftIdentity, ReleaseConnectionTestResult, ReleaseEvent, ReleasePlanSummary,
+    ReleasePreflightResult, ReleaseProxySettings, ReleaseSession, SafeRepositoryPushRequest,
 };
 use std::sync::Arc;
 use tauri::ipc::Channel;
@@ -26,12 +26,47 @@ fn unexpected<T>() -> CommandResult<T> {
     CommandResult::failure("RELEASE_RESPONSE_INVALID", "发布控制台后端返回了无效响应。")
 }
 
+pub async fn test_release_connection_inner(
+    state: &AppState,
+    proxy: ReleaseProxySettings,
+) -> CommandResult<ReleaseConnectionTestResult> {
+    match state
+        .execute(ApplicationRequest::TestConnection { proxy }, None)
+        .await
+    {
+        Ok(ApplicationResponse::ConnectionTest(value)) => CommandResult::success(value),
+        Ok(_) => unexpected(),
+        Err(error) => failure(error),
+    }
+}
+
 pub async fn inspect_release_repository_inner(
     state: &AppState,
     repository_path: String,
+    proxy: ReleaseProxySettings,
 ) -> CommandResult<ReleasePreflightResult> {
     match state
-        .execute(ApplicationRequest::Inspect { repository_path }, None)
+        .execute(
+            ApplicationRequest::Inspect {
+                repository_path,
+                proxy,
+            },
+            None,
+        )
+        .await
+    {
+        Ok(ApplicationResponse::Inspection(value)) => CommandResult::success(value),
+        Ok(_) => unexpected(),
+        Err(error) => failure(error),
+    }
+}
+
+pub async fn push_release_repository_inner(
+    state: &AppState,
+    request: SafeRepositoryPushRequest,
+) -> CommandResult<ReleasePreflightResult> {
+    match state
+        .execute(ApplicationRequest::PushRepository { request }, None)
         .await
     {
         Ok(ApplicationResponse::Inspection(value)) => CommandResult::success(value),
@@ -45,6 +80,7 @@ pub async fn prepare_release_plan_inner(
     repository_path: String,
     target_version: String,
     notes: Option<String>,
+    proxy: ReleaseProxySettings,
 ) -> CommandResult<ReleasePlanSummary> {
     match state
         .execute(
@@ -52,6 +88,7 @@ pub async fn prepare_release_plan_inner(
                 repository_path,
                 target_version,
                 notes,
+                proxy,
             },
             None,
         )
@@ -66,9 +103,15 @@ pub async fn prepare_release_plan_inner(
 pub async fn start_release_inner(
     state: &AppState,
     plan_id: String,
+    proxy: ReleaseProxySettings,
     events: Arc<dyn ReleaseEventSink>,
 ) -> CommandResult<ReleaseSession> {
-    session_command(state, ApplicationRequest::Start { plan_id }, Some(events)).await
+    session_command(
+        state,
+        ApplicationRequest::Start { plan_id, proxy },
+        Some(events),
+    )
+    .await
 }
 
 pub async fn get_release_session_inner(
@@ -88,11 +131,12 @@ pub async fn get_release_session_inner(
 pub async fn resume_release_inner(
     state: &AppState,
     session_id: String,
+    proxy: ReleaseProxySettings,
     events: Arc<dyn ReleaseEventSink>,
 ) -> CommandResult<ReleaseSession> {
     session_command(
         state,
-        ApplicationRequest::Resume { session_id },
+        ApplicationRequest::Resume { session_id, proxy },
         Some(events),
     )
     .await
@@ -109,6 +153,7 @@ pub async fn publish_release_inner(
     state: &AppState,
     session_id: String,
     expected_draft_identity: DraftIdentity,
+    proxy: ReleaseProxySettings,
     events: Arc<dyn ReleaseEventSink>,
 ) -> CommandResult<ReleaseSession> {
     session_command(
@@ -116,6 +161,7 @@ pub async fn publish_release_inner(
         ApplicationRequest::Publish {
             session_id,
             expected_draft_identity,
+            proxy,
         },
         Some(events),
     )
@@ -156,11 +202,28 @@ async fn session_command(
 }
 
 #[tauri::command]
+pub async fn test_release_connection(
+    state: tauri::State<'_, AppState>,
+    proxy: ReleaseProxySettings,
+) -> Result<CommandResult<ReleaseConnectionTestResult>, ()> {
+    Ok(test_release_connection_inner(&state, proxy).await)
+}
+
+#[tauri::command]
 pub async fn inspect_release_repository(
     state: tauri::State<'_, AppState>,
     repository_path: String,
+    proxy: ReleaseProxySettings,
 ) -> Result<CommandResult<ReleasePreflightResult>, ()> {
-    Ok(inspect_release_repository_inner(&state, repository_path).await)
+    Ok(inspect_release_repository_inner(&state, repository_path, proxy).await)
+}
+
+#[tauri::command]
+pub async fn push_release_repository(
+    state: tauri::State<'_, AppState>,
+    request: SafeRepositoryPushRequest,
+) -> Result<CommandResult<ReleasePreflightResult>, ()> {
+    Ok(push_release_repository_inner(&state, request).await)
 }
 
 #[tauri::command]
@@ -169,17 +232,25 @@ pub async fn prepare_release_plan(
     repository_path: String,
     target_version: String,
     notes: Option<String>,
+    proxy: ReleaseProxySettings,
 ) -> Result<CommandResult<ReleasePlanSummary>, ()> {
-    Ok(prepare_release_plan_inner(&state, repository_path, target_version, notes).await)
+    Ok(prepare_release_plan_inner(&state, repository_path, target_version, notes, proxy).await)
 }
 
 #[tauri::command]
 pub async fn start_release(
     state: tauri::State<'_, AppState>,
     plan_id: String,
+    proxy: ReleaseProxySettings,
     on_event: Channel<ReleaseEvent>,
 ) -> Result<CommandResult<ReleaseSession>, ()> {
-    Ok(start_release_inner(&state, plan_id, Arc::new(TauriReleaseEventSink(on_event))).await)
+    Ok(start_release_inner(
+        &state,
+        plan_id,
+        proxy,
+        Arc::new(TauriReleaseEventSink(on_event)),
+    )
+    .await)
 }
 
 #[tauri::command]
@@ -194,11 +265,13 @@ pub async fn get_release_session(
 pub async fn resume_release(
     state: tauri::State<'_, AppState>,
     session_id: String,
+    proxy: ReleaseProxySettings,
     on_event: Channel<ReleaseEvent>,
 ) -> Result<CommandResult<ReleaseSession>, ()> {
     Ok(resume_release_inner(
         &state,
         session_id,
+        proxy,
         Arc::new(TauriReleaseEventSink(on_event)),
     )
     .await)
@@ -217,12 +290,14 @@ pub async fn publish_release(
     state: tauri::State<'_, AppState>,
     session_id: String,
     expected_draft_identity: DraftIdentity,
+    proxy: ReleaseProxySettings,
     on_event: Channel<ReleaseEvent>,
 ) -> Result<CommandResult<ReleaseSession>, ()> {
     Ok(publish_release_inner(
         &state,
         session_id,
         expected_draft_identity,
+        proxy,
         Arc::new(TauriReleaseEventSink(on_event)),
     )
     .await)

@@ -1,4 +1,6 @@
-use super::process::{ProcessInvocation, SafeProcessRunner, filter_release_environment};
+use super::process::{
+    ProcessError, ProcessInvocation, SafeProcessRunner, filter_release_environment,
+};
 use std::ffi::OsString;
 use std::fmt;
 use std::future::Future;
@@ -11,6 +13,7 @@ const TARGET_REPOSITORY: &str = "hunxuankai/codex-relay";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GhOperation {
+    ConnectionTest,
     DispatchReleaseWorkflow,
     PreflightReleaseRuns,
     ListReleaseRuns,
@@ -108,6 +111,10 @@ impl SystemGhBackend {
             return Err("unsupported repository".into());
         }
         let args = match request.operation {
+            GhOperation::ConnectionTest => ["api", "repos/hunxuankai/codex-relay", "--silent"]
+                .into_iter()
+                .map(OsString::from)
+                .collect(),
             GhOperation::DispatchReleaseWorkflow => {
                 let workflow = request
                     .workflow
@@ -343,9 +350,9 @@ impl GhBackend for SystemGhBackend {
                 .runner
                 .run(invocation, GH_COMMAND_TIMEOUT, self.cancel.clone(), None)
                 .await
-                .map_err(|_| "gh process failed".to_string())?;
+                .map_err(gh_process_failure)?;
             if output.exit_code != Some(0) {
-                return Err("gh command failed".into());
+                return Err("GH_COMMAND_FAILED".into());
             }
             Ok(GhResponse {
                 stdout: output.stdout,
@@ -368,11 +375,28 @@ impl GhBackend for SystemGhBackend {
                     None,
                 )
                 .await
-                .map_err(|_| "gh asset download failed".to_string())?;
+                .map_err(gh_process_failure)?;
             if output.exit_code != Some(0) || !destination.is_file() {
-                return Err("gh asset download failed".into());
+                return Err("GH_ASSET_DOWNLOAD_FAILED".into());
             }
             Ok(())
         })
     }
+}
+
+fn gh_process_failure(error: ProcessError) -> String {
+    match error {
+        ProcessError::Timeout => "GH_PROCESS_TIMEOUT",
+        ProcessError::Cancelled => "GH_PROCESS_CANCELLED",
+        ProcessError::ProcessTreeTermination => "GH_PROCESS_TREE_TERMINATION_FAILED",
+        ProcessError::OutputTooLarge => "GH_OUTPUT_TOO_LARGE",
+        ProcessError::JobUnavailable
+        | ProcessError::JobAssignment
+        | ProcessError::ProcessStart
+        | ProcessError::ProcessResume
+        | ProcessError::OutputRead
+        | ProcessError::InputTooLarge
+        | ProcessError::InputWrite => "GH_PROCESS_START_FAILED",
+    }
+    .into()
 }

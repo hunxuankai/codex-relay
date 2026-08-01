@@ -30,3 +30,4 @@ tempfile = "3.27.0"
 thiserror = "2.0.19"
 tokio = { version = "1.53.0", features = ["sync"] }
 toml_edit = "0.25.13"
+url = "2.5.8"

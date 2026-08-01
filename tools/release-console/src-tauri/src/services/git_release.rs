@@ -1,6 +1,9 @@
 use crate::infrastructure::git::{GitBackend, GitBackendError};
+use crate::infrastructure::process::ProcessError;
 pub use crate::models::{
-    ExternalPreflightSnapshot, ReleasePreflightResult, RepositoryInspection, ToolchainInspection,
+    ExternalPreflightSnapshot, ReleasePreflightResult, RepositoryCommitSummary,
+    RepositoryInspection, RepositorySyncInspection, RepositorySyncStatus,
+    SafeRepositoryPushPreview, ToolchainInspection,
 };
 use crate::services::release_candidate::ReleaseCandidatePlan;
 use serde::{Deserialize, Serialize};
@@ -17,12 +20,6 @@ pub enum ReleasePreflightError {
     Git(#[from] GitReleaseError),
     #[error("无法读取工具链或 GitHub 发布状态")]
     ProbeFailed,
-    #[error("发布所需工具不可用")]
-    ToolMissing,
-    #[error("已有活动发布工作流")]
-    ActiveReleaseRun,
-    #[error("已有冲突的 Draft Release")]
-    ConflictingDraft,
 }
 
 pub struct ReleasePreflightService {
@@ -49,33 +46,83 @@ impl ReleasePreflightService {
         let external = probe
             .inspect()
             .map_err(|_| ReleasePreflightError::ProbeFailed)?;
-        if [
-            &external.tools.git,
-            &external.tools.node,
-            &external.tools.npm,
-            &external.tools.cargo,
-            &external.tools.gh,
-        ]
-        .into_iter()
-        .any(|version| version.as_deref().is_none_or(str::is_empty))
-        {
-            return Err(ReleasePreflightError::ToolMissing);
-        }
-        if external.active_release_runs > 0 {
-            return Err(ReleasePreflightError::ActiveReleaseRun);
-        }
-        if external.conflicting_drafts > 0 {
-            return Err(ReleasePreflightError::ConflictingDraft);
-        }
-        Ok(ReleasePreflightResult {
-            repository_path: repository_path
+        Ok(project_release_preflight(
+            repository_path
                 .canonicalize()
                 .map_err(|_| GitReleaseError::RepositoryInvalid)?
                 .to_string_lossy()
                 .into_owned(),
             repository,
             external,
-        })
+        ))
+    }
+}
+
+pub fn project_release_preflight(
+    repository_path: String,
+    repository: RepositoryInspection,
+    external: ExternalPreflightSnapshot,
+) -> ReleasePreflightResult {
+    let tools_ready = [
+        &external.tools.git,
+        &external.tools.node,
+        &external.tools.npm,
+        &external.tools.cargo,
+        &external.tools.gh,
+    ]
+    .into_iter()
+    .all(|version| version.as_deref().is_some_and(|value| !value.is_empty()));
+    let mut blocking_reasons = Vec::new();
+    if !tools_ready {
+        blocking_reasons.push("发布所需工具尚未全部就绪。".to_string());
+    }
+    if !repository.clean {
+        blocking_reasons.push("Git 工作区存在未提交改动。".to_string());
+    }
+    match repository.sync.status {
+        RepositorySyncStatus::Synced => {}
+        RepositorySyncStatus::Ahead => blocking_reasons.push(format!(
+            "本地领先远端 main {} 个提交；请先推送当前提交。",
+            repository.sync.ahead_count
+        )),
+        RepositorySyncStatus::Behind => blocking_reasons.push(format!(
+            "本地落后远端 main {} 个提交；请先安全同步。",
+            repository.sync.behind_count
+        )),
+        RepositorySyncStatus::Diverged => blocking_reasons.push(format!(
+            "本地与远端 main 已分叉（领先 {}、落后 {}）；请先人工处理。",
+            repository.sync.ahead_count, repository.sync.behind_count
+        )),
+    }
+    if external.active_release_runs > 0 {
+        blocking_reasons.push("已有活动发布工作流，请等待其结束后再继续。".to_string());
+    }
+    if external.conflicting_drafts > 0 {
+        blocking_reasons.push("已有 Draft Release，请先在 GitHub 明确处理。".to_string());
+    }
+    let no_remote_conflicts = external.active_release_runs == 0 && external.conflicting_drafts == 0;
+    let release_ready = tools_ready
+        && repository.clean
+        && repository.sync.status == RepositorySyncStatus::Synced
+        && no_remote_conflicts;
+    let safe_push = (tools_ready
+        && repository.clean
+        && repository.sync.status == RepositorySyncStatus::Ahead
+        && repository.sync.behind_count == 0
+        && no_remote_conflicts)
+        .then(|| SafeRepositoryPushPreview {
+            expected_head_sha: repository.head_sha.clone(),
+            expected_remote_main_sha: repository.remote_main_sha.clone(),
+            commit_count: repository.sync.ahead_count,
+            commits: repository.sync.ahead_commits.clone(),
+        });
+    ReleasePreflightResult {
+        repository_path,
+        repository,
+        external,
+        release_ready,
+        blocking_reasons,
+        safe_push,
     }
 }
 
@@ -89,10 +136,20 @@ pub enum GitReleaseError {
     WorktreeDirty,
     #[error("本地候选提交与远端 main 不一致")]
     HeadRemoteMismatch,
+    #[error("本地 HEAD 在确认后发生变化")]
+    HeadMoved,
+    #[error("本地分支落后远端 main")]
+    RepositoryBehind,
+    #[error("本地分支与远端 main 已分叉")]
+    RepositoryDiverged,
     #[error("工作区改动集合与发布计划不一致")]
     PlannedFilesMismatch,
     #[error("远端 main 在提交或推送前发生变化")]
     RemoteMoved,
+    #[error("Git Fetch 超时")]
+    FetchTimeout,
+    #[error("Git Fetch 失败")]
+    FetchFailed,
     #[error("无法创建发布候选提交")]
     CommitFailed,
     #[error("无法清理发布候选暂存区")]
@@ -112,13 +169,18 @@ impl GitReleaseError {
             Self::RemoteMismatch => "GIT_REMOTE_MISMATCH",
             Self::WorktreeDirty => "GIT_WORKTREE_DIRTY",
             Self::HeadRemoteMismatch => "GIT_HEAD_REMOTE_MISMATCH",
+            Self::HeadMoved => "GIT_HEAD_MOVED",
+            Self::RepositoryBehind => "GIT_REPOSITORY_BEHIND",
+            Self::RepositoryDiverged => "GIT_REPOSITORY_DIVERGED",
             Self::PlannedFilesMismatch => "GIT_PLANNED_FILES_MISMATCH",
             Self::RemoteMoved => "GIT_REMOTE_MOVED",
+            Self::FetchTimeout => "GIT_FETCH_TIMEOUT",
+            Self::FetchFailed => "GIT_FETCH_FAILED",
             Self::CommitFailed => "GIT_COMMIT_FAILED",
             Self::IndexCleanupFailed => "GIT_INDEX_CLEANUP_FAILED",
             Self::PushFailed => "GIT_PUSH_FAILED",
             Self::RemoteVerificationFailed => "GIT_REMOTE_VERIFICATION_FAILED",
-            Self::Backend(_) => "GIT_COMMAND_FAILED",
+            Self::Backend(error) => error.code(),
         }
     }
 }
@@ -331,6 +393,85 @@ impl GitReleaseService {
             remote_main_sha,
         })
     }
+
+    pub async fn push_existing_commits(
+        &self,
+        backend: &GitBackend,
+        repository_path: &Path,
+        expected_head_sha: &str,
+        expected_remote_sha: &str,
+    ) -> Result<GitPushOutcome, GitReleaseError> {
+        backend
+            .run(
+                repository_path,
+                &["fetch", "--prune", "origin", &self.default_branch],
+            )
+            .await
+            .map_err(fetch_error)?;
+        let status = backend
+            .run(
+                repository_path,
+                &["status", "--porcelain=v1", "--untracked-files=all"],
+            )
+            .await?
+            .stdout;
+        if !status.trim().is_empty() {
+            return Err(GitReleaseError::WorktreeDirty);
+        }
+        let current_head = backend
+            .run(repository_path, &["rev-parse", "HEAD"])
+            .await?
+            .stdout
+            .trim()
+            .to_string();
+        if current_head != expected_head_sha {
+            return Err(GitReleaseError::HeadMoved);
+        }
+        let remote_ref = format!("refs/remotes/origin/{}", self.default_branch);
+        let remote_main_sha = backend
+            .run(repository_path, &["rev-parse", &remote_ref])
+            .await?
+            .stdout
+            .trim()
+            .to_string();
+        if remote_main_sha != expected_remote_sha {
+            return Err(GitReleaseError::RemoteMoved);
+        }
+        let sync = repository_sync(backend, repository_path, &remote_ref).await?;
+        match sync.status {
+            RepositorySyncStatus::Ahead if sync.ahead_count > 0 && sync.behind_count == 0 => {}
+            RepositorySyncStatus::Behind => return Err(GitReleaseError::RepositoryBehind),
+            RepositorySyncStatus::Diverged => return Err(GitReleaseError::RepositoryDiverged),
+            RepositorySyncStatus::Synced | RepositorySyncStatus::Ahead => {
+                return Err(GitReleaseError::HeadRemoteMismatch);
+            }
+        }
+        if remote_head(backend, repository_path, &self.default_branch).await? != expected_remote_sha
+        {
+            return Err(GitReleaseError::RemoteMoved);
+        }
+        let push_ref = format!("{expected_head_sha}:refs/heads/{}", self.default_branch);
+        if backend
+            .run(repository_path, &["push", "origin", &push_ref])
+            .await
+            .is_err()
+        {
+            if remote_head(backend, repository_path, &self.default_branch).await?
+                != expected_remote_sha
+            {
+                return Err(GitReleaseError::RemoteMoved);
+            }
+            return Err(GitReleaseError::PushFailed);
+        }
+        let remote_main_sha = remote_head(backend, repository_path, &self.default_branch).await?;
+        if remote_main_sha != expected_head_sha {
+            return Err(GitReleaseError::RemoteVerificationFailed);
+        }
+        Ok(GitPushOutcome {
+            candidate_sha: expected_head_sha.to_string(),
+            remote_main_sha,
+        })
+    }
 }
 
 pub struct RepositoryInspectionService {
@@ -394,7 +535,8 @@ impl RepositoryInspectionService {
                 repository_path,
                 &["fetch", "--prune", "origin", &self.default_branch],
             )
-            .await?;
+            .await
+            .map_err(fetch_error)?;
         let remote_url = backend
             .run(repository_path, &["remote", "get-url", "origin"])
             .await?
@@ -411,9 +553,6 @@ impl RepositoryInspectionService {
             )
             .await?
             .stdout;
-        if !status.trim().is_empty() {
-            return Err(GitReleaseError::WorktreeDirty);
-        }
         let local_branch = backend
             .run(repository_path, &["branch", "--show-current"])
             .await?
@@ -433,9 +572,7 @@ impl RepositoryInspectionService {
             .stdout
             .trim()
             .to_string();
-        if head_sha != remote_main_sha {
-            return Err(GitReleaseError::HeadRemoteMismatch);
-        }
+        let sync = repository_sync(backend, repository_path, &remote_ref).await?;
         Ok(RepositoryInspection {
             local_branch,
             default_branch: self.default_branch.clone(),
@@ -443,6 +580,7 @@ impl RepositoryInspectionService {
             remote_main_sha,
             remote_url,
             clean: status.trim().is_empty(),
+            sync,
         })
     }
 
@@ -501,6 +639,7 @@ impl RepositoryInspectionService {
             .stdout
             .trim()
             .to_string();
+        let sync = repository_sync(backend, repository_path, &remote_ref).await?;
         Ok(RepositoryInspection {
             local_branch,
             default_branch: self.default_branch.clone(),
@@ -508,8 +647,67 @@ impl RepositoryInspectionService {
             remote_main_sha,
             remote_url,
             clean: status.trim().is_empty(),
+            sync,
         })
     }
+}
+
+async fn repository_sync(
+    backend: &GitBackend,
+    repository_path: &Path,
+    remote_ref: &str,
+) -> Result<RepositorySyncInspection, GitReleaseError> {
+    let range = format!("{remote_ref}...HEAD");
+    let counts = backend
+        .run(
+            repository_path,
+            &["rev-list", "--left-right", "--count", &range],
+        )
+        .await?
+        .stdout;
+    let mut fields = counts.split_whitespace();
+    let behind_count = fields
+        .next()
+        .and_then(|value| value.parse::<u32>().ok())
+        .ok_or(GitReleaseError::RepositoryInvalid)?;
+    let ahead_count = fields
+        .next()
+        .and_then(|value| value.parse::<u32>().ok())
+        .ok_or(GitReleaseError::RepositoryInvalid)?;
+    if fields.next().is_some() {
+        return Err(GitReleaseError::RepositoryInvalid);
+    }
+    let status = match (ahead_count, behind_count) {
+        (0, 0) => RepositorySyncStatus::Synced,
+        (_, 0) => RepositorySyncStatus::Ahead,
+        (0, _) => RepositorySyncStatus::Behind,
+        (_, _) => RepositorySyncStatus::Diverged,
+    };
+    let ahead_commits = if ahead_count == 0 {
+        Vec::new()
+    } else {
+        let range = format!("{remote_ref}..HEAD");
+        backend
+            .run(repository_path, &["log", "--format=%H%x00%s", &range])
+            .await?
+            .stdout
+            .lines()
+            .map(|line| {
+                line.split_once('\0')
+                    .map(|(sha, subject)| RepositoryCommitSummary {
+                        sha: sha.to_string(),
+                        subject: subject.to_string(),
+                    })
+                    .ok_or(GitReleaseError::RepositoryInvalid)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    Ok(RepositorySyncInspection {
+        status,
+        ahead_count,
+        behind_count,
+        ahead_commits,
+    })
 }
 
 fn normalize_github_remote(remote_url: &str) -> Option<String> {
@@ -535,6 +733,16 @@ fn git_name_set(output: &str) -> BTreeSet<String> {
         .filter(|line| !line.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+fn fetch_error(error: GitBackendError) -> GitReleaseError {
+    match error {
+        GitBackendError::Process(ProcessError::Timeout) => GitReleaseError::FetchTimeout,
+        GitBackendError::CommandFailed | GitBackendError::InvalidUtf8 => {
+            GitReleaseError::FetchFailed
+        }
+        other => GitReleaseError::Backend(other),
+    }
 }
 
 async fn remote_head(

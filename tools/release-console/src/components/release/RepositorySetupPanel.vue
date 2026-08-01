@@ -11,6 +11,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   inspect: []
   preparePlan: []
+  requestPush: []
 }>()
 
 const repositoryPath = defineModel<string>('repositoryPath', { required: true })
@@ -18,17 +19,55 @@ const targetVersion = defineModel<string>('targetVersion', { required: true })
 
 const inspectDisabled = computed(() => props.busy || repositoryPath.value.trim().length === 0)
 const planDisabled = computed(
-  () => props.busy || props.inspection === null || targetVersion.value.trim().length === 0,
+  () =>
+    props.busy ||
+    props.inspection === null ||
+    !props.inspection.releaseReady ||
+    targetVersion.value.trim().length === 0,
 )
 const disabledReason = computed(() => {
   if (repositoryPath.value.trim().length === 0) return '先填写仓库路径。'
   if (props.inspection === null) return '先完成仓库预检。'
+  if (!props.inspection.releaseReady) {
+    return props.inspection.blockingReasons[0] ?? '先处理仓库同步状态。'
+  }
   if (targetVersion.value.trim().length === 0) return '填写严格更高的 SemVer。'
   return ''
 })
 const repositoryName = computed(() => {
   const remote = props.inspection?.repository.remoteUrl ?? ''
   return remote.replace(/^.*github\.com[/:]/, '').replace(/\.git$/, '')
+})
+const syncLabel = computed(() => {
+  const sync = props.inspection?.repository.sync
+  if (!sync) return ''
+  switch (sync.status) {
+    case 'synced':
+      return '已与远端 main 同步'
+    case 'ahead':
+      return `本地领先 ${sync.aheadCount} 个提交`
+    case 'behind':
+      return `本地落后 ${sync.behindCount} 个提交`
+    case 'diverged':
+      return `本地与远端已分叉（领先 ${sync.aheadCount}、落后 ${sync.behindCount}）`
+  }
+})
+const toolchainLabel = computed(() => {
+  const tools = props.inspection?.external.tools
+  if (!tools) return ''
+  const missing = [
+    ['git', 'Git'],
+    ['node', 'Node'],
+    ['npm', 'npm'],
+    ['cargo', 'Cargo'],
+    ['gh', 'gh'],
+  ] as const
+  const missingLabels = missing
+    .filter(([key]) => !tools[key]?.trim())
+    .map(([, label]) => label)
+  return missingLabels.length > 0
+    ? `缺少：${missingLabels.join('、')}`
+    : 'Git / Node / npm / Cargo / gh 已就绪'
 })
 </script>
 
@@ -40,7 +79,13 @@ const repositoryName = computed(() => {
           <p class="section-kicker">步骤 1</p>
           <h2>仓库与版本</h2>
         </div>
-        <ElTag v-if="inspection" type="success" effect="light">预检通过</ElTag>
+        <ElTag
+          v-if="inspection"
+          :type="inspection.releaseReady ? 'success' : 'warning'"
+          effect="light"
+        >
+          {{ inspection.releaseReady ? '可以发布' : '需要处理' }}
+        </ElTag>
       </div>
     </template>
 
@@ -107,14 +152,46 @@ const repositoryName = computed(() => {
           <dd class="mono">{{ inspection.repository.headSha.slice(0, 12) }}</dd>
         </div>
         <div>
+          <dt>同步状态</dt>
+          <dd>{{ syncLabel }}</dd>
+        </div>
+        <div>
           <dt>线上 Latest</dt>
           <dd>{{ inspection.external.latestReleaseTag ?? '尚无正式版本' }}</dd>
         </div>
         <div>
           <dt>工具链</dt>
-          <dd>Git / Node / npm / Cargo / gh 已就绪</dd>
+          <dd>{{ toolchainLabel }}</dd>
         </div>
       </dl>
+
+      <ul v-if="inspection && inspection.blockingReasons.length > 0" class="blocking-reasons">
+        <li v-for="reason in inspection.blockingReasons" :key="reason">{{ reason }}</li>
+      </ul>
+
+      <ol
+        v-if="inspection && inspection.repository.sync.aheadCommits.length > 0"
+        class="ahead-commits"
+        aria-label="本地领先提交"
+      >
+        <li v-for="commit in inspection.repository.sync.aheadCommits" :key="commit.sha">
+          <code>{{ commit.sha.slice(0, 12) }}</code>
+          <span>{{ commit.subject }}</span>
+        </li>
+      </ol>
+
+      <div v-if="inspection?.safePush" class="sync-actions">
+        <ElButton
+          data-testid="request-push-button"
+          type="primary"
+          plain
+          native-type="button"
+          :disabled="busy"
+          @click="emit('requestPush')"
+        >
+          推送当前 {{ inspection.safePush.commitCount }} 个提交
+        </ElButton>
+      </div>
     </div>
   </ElCard>
 </template>
@@ -219,6 +296,36 @@ const repositoryName = computed(() => {
 
 .mono {
   font-family: var(--font-mono);
+}
+
+.blocking-reasons,
+.ahead-commits {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.75rem 0.75rem 0.75rem 1.9rem;
+  border-radius: 0.75rem;
+  font-size: 0.8rem;
+}
+
+.blocking-reasons {
+  color: var(--danger-color);
+  background: var(--surface-muted);
+}
+
+.ahead-commits li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.65rem;
+}
+
+.ahead-commits code {
+  font-family: var(--font-mono);
+}
+
+.sync-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 @media (max-width: 760px) {
