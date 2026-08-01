@@ -114,7 +114,7 @@ $secretPatterns = @(
 )
 foreach ($pattern in $secretPatterns) {
     if ([regex]::IsMatch($releaseBody, $pattern)) {
-        throw '发布说明包含疑似秘密，已停止发布。'
+        throw 'RELEASE_NOTES_SECRET_DETECTED: 发布说明包含疑似秘密，已停止发布。'
     }
 }
 

@@ -107,6 +107,31 @@ return ev.thread === filter.thread;
 
 渲染代码可以格式化字段，但不得重新定义载荷契约。
 
+### 错误 5：把本地化子进程文本当作机器契约
+
+Windows 子进程的控制台代码页、过滤环境和宿主不同，可能让可读中文在 Node/Rust 捕获后变成乱码。
+如果测试、service 或 UI 依赖中文 stderr 的精确内容，单独执行正常的命令可能在真实编排环境中误失败。
+
+**反例**：测试只断言中文文本，跨层错误又只保留通用 code。
+
+```typescript
+expect(diagnostic).toContain('发布说明包含疑似秘密')
+```
+
+**正例**：脚本提供 ASCII 稳定码；service 使用结构化字段保留命令 ID、可选退出码等最小安全证据，
+中文只作为人工消息；完整过滤环境至少有一个集成回归。
+
+```typescript
+expect(diagnostic).toContain('RELEASE_NOTES_SECRET_DETECTED')
+```
+
+**检查项**：
+
+- [ ] 是否有消费者把本地化 stdout/stderr 当作唯一成功或失败契约？
+- [ ] 错误经过 service → orchestrator → event/API 时，具体步骤、退出状态和取消/回滚语义是否仍存在？
+- [ ] 集成测试是否使用生产环境过滤、真实命令 shim 和同一工作目录，而不只测试直接执行或 mock backend？
+- [ ] 安全消息是否只陈述实际保留的证据，没有把“无退出码”猜成启动失败或超时？
+
 ---
 
 ## 跨层功能检查清单
@@ -126,6 +151,7 @@ return ev.thread === filter.thread;
 - [ ] 已检查消费者导入共享解码器/投影，而不是在本地转换载荷字段
 - [ ] 已检查派生状态指回源事件标识符（`seq`、`id`、`version`），而不是
       发明第二个 cursor
+- [ ] 子进程机器契约使用稳定 code/结构化字段，本地化文本只用于展示，并有生产过滤环境回归
 
 ---
 

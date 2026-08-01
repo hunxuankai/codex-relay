@@ -347,6 +347,112 @@ git -c http.proxy=<url-or-empty> -c https.proxy=<url-or-empty> \
     push origin <expected_sha>:refs/heads/main
 ```
 
+### 0.4 本地发布门禁编码与错误证据契约
+
+#### 1. 范围/触发条件
+
+修改 `scripts/validate-release-request.ps1`、发布结构测试、本地门禁命令、候选回滚后的错误传播或
+`ReleaseEvent::StepFailed` 时，必须遵循本节。Windows 过滤环境可能改变 PowerShell 中文输出的编码；
+机器判断不得依赖本地化文本能否按 UTF-8 解码。
+
+#### 2. 签名
+
+疑似秘密检测的脚本错误契约固定为：
+
+```text
+RELEASE_NOTES_SECRET_DETECTED: 发布说明包含疑似秘密，已停止发布。
+```
+
+Rust 错误证据固定为：
+
+```rust
+LocalVerificationError::CommandFailed {
+    command_id: String,
+    exit_code: Option<i32>,
+}
+
+ReleaseOrchestratorError::LocalVerificationFailed {
+    command_id: String,
+    exit_code: Option<i32>,
+}
+```
+
+前端事件 schema 不变：
+
+```typescript
+{ kind: 'stepFailed'; stepId: string; code: string; message: string }
+```
+
+#### 3. 契约
+
+- 自动化测试只把 ASCII 稳定码作为脚本错误契约；中文后缀只用于人工阅读，不得作为唯一断言。
+- 疑似秘密发布说明必须以非零状态停止，且在拒绝后不得创建或追加 GitHub workflow output。
+- `LocalVerificationBackend` 返回非零 `LocalCommandEvidence` 时保存 `Some(exit_code)`；进程后端失败且没有
+  可用退出码时保存 `None`；取消继续独立映射为 `Cancelled`。
+- `ReleaseOrchestrator` 必须先完成候选事务回滚，再把命令 ID 与可选退出码传给 application。回滚失败
+  优先返回 `RELEASE_ROLLBACK_INCOMPLETE`，不得发送“候选已回滚”的消息。
+- 本地门禁普通失败事件使用具体命令 ID 作为 `stepId`，错误码固定为
+  `RELEASE_LOCAL_VERIFICATION_FAILED`。有退出码时显示“退出码 N”；没有退出码时显示“命令未能完成，
+  且没有可用退出码”；两种情况都明确候选文件已回滚、尚未提交或推送。
+- stdout、stderr、环境变量、代理 URL、Authorization、Token 和真实密钥不得进入事件、通知、持久化
+  session、任务材料或测试失败输出。过滤环境回归只断言安全元数据和退出状态。
+
+#### 4. 验证与错误矩阵
+
+| 条件 | 必需结果 |
+|---|---|
+| 发布说明命中疑似秘密规则 | 非零退出；包含 `RELEASE_NOTES_SECRET_DETECTED`；workflow output 不存在 |
+| `release-structure-tests` 返回退出码 1 | `stepId=release-structure-tests`，code 保持 `RELEASE_LOCAL_VERIFICATION_FAILED`，消息包含退出码 1 和已回滚边界 |
+| 进程后端失败且没有退出码 | 同一具体 `stepId/code`，消息明确无可用退出码，不虚构启动、超时或其它底层类别 |
+| 用户取消本地门禁 | session=`cancelled`，继续使用 `RELEASE_CANCELLED`，不改写为普通命令失败 |
+| 候选回滚未完整验证 | `RELEASE_ROLLBACK_INCOMPLETE`，不得声称候选已回滚 |
+| 过滤环境执行固定发布结构测试 | 真实 npm shim 退出 0；不得因中文乱码使测试误失败 |
+
+#### 5. 良好/基线/错误用例
+
+- 良好：PowerShell 中文错误在某个 Windows 环境中显示为乱码，但 ASCII 稳定码仍被 Vitest 识别，
+  秘密说明被拒绝且结构测试通过。
+- 良好：`release-structure-tests` 退出 1，界面显示
+  `[release-structure-tests] RELEASE_LOCAL_VERIFICATION_FAILED`、退出码和“尚未提交或推送”。
+- 基线：普通远端或 Push 编排错误仍使用 `releasePipeline` 与现有通用安全消息。
+- 错误：断言 `diagnostic.includes('发布说明包含疑似秘密')`，把 Windows 输出代码页变成发布门禁。
+- 错误：只向 application 传 `error.code()`，丢失命令 ID/退出码；或把原始 stderr 发到 WebView。
+- 错误：后端只知道“失败且无退出码”时写成“启动失败”或“超时”，虚构未保留的底层证据。
+
+#### 6. 必需测试
+
+- `src/release-request.test.ts`：断言非零退出、`RELEASE_NOTES_SECRET_DETECTED` 和 workflow output 不存在。
+- `tests/local_verification.rs`：断言非零退出保留 `Some(code)`、backend 失败保留 `None`、后续命令停止；
+  通过真实 `ProcessLocalVerificationBackend` 与过滤环境执行生产定义的第一条发布结构测试。
+- `tests/release_orchestrator.rs`：断言本地失败先回滚六文件和事务标记，再保留具体命令 ID/退出码，且不 Push。
+- `release_application.rs` 单元测试：断言有/无退出码两种 `StepFailed` 的具体 `stepId`、稳定 code、安全消息，
+  并保留其他编排错误的通用行为。
+
+#### 7. 错误与正确做法
+
+错误：机器测试依赖本地化子进程文本，并在跨层调用中只保留通用错误码。
+
+```typescript
+expect(diagnostic).toContain('发布说明包含疑似秘密')
+```
+
+```rust
+finish_with_error(error.code());
+```
+
+正确：脚本提供 ASCII 稳定码，错误对象保留最小安全证据，再由 application 生成用户事件。
+
+```typescript
+expect(diagnostic).toContain('RELEASE_NOTES_SECRET_DETECTED')
+```
+
+```rust
+ReleaseOrchestratorError::LocalVerificationFailed {
+    command_id,
+    exit_code,
+}
+```
+
 ## 1. 发布边界
 
 - 默认发布源是 GitHub 默认分支 `main`，工作流为 `.github/workflows/release.yml`。

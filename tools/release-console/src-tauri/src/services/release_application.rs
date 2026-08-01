@@ -20,7 +20,7 @@ use crate::services::release_network::{
 };
 use crate::services::release_notes::{CommitSummary, ReleaseNotesService};
 use crate::services::release_orchestrator::{
-    GitReleasePushBackend, GithubRemoteBackend, ReleaseOrchestrator,
+    GitReleasePushBackend, GithubRemoteBackend, ReleaseOrchestrator, ReleaseOrchestratorError,
 };
 use crate::services::release_state::{ReleaseStateError, ReleaseStateStore, RepositorySessionLock};
 use chrono::Utc;
@@ -615,7 +615,7 @@ impl SystemReleaseApplication {
                 )
                 .await;
             if let Err(error) = result {
-                self.finish_with_error(&session.id, &store, events.as_deref(), error.code());
+                self.finish_with_orchestrator_error(&session.id, &store, events.as_deref(), &error);
                 return;
             }
             emit(
@@ -652,7 +652,12 @@ impl SystemReleaseApplication {
                     );
                 }
                 Err(error) => {
-                    self.finish_with_error(&session.id, &store, events.as_deref(), error.code());
+                    self.finish_with_orchestrator_error(
+                        &session.id,
+                        &store,
+                        events.as_deref(),
+                        &error,
+                    );
                     return;
                 }
             }
@@ -754,7 +759,12 @@ impl SystemReleaseApplication {
                     )
                     .await
                 {
-                    self.finish_with_error(&session.id, &store, events.as_deref(), error.code());
+                    self.finish_with_orchestrator_error(
+                        &session.id,
+                        &store,
+                        events.as_deref(),
+                        &error,
+                    );
                     return;
                 }
             }
@@ -811,9 +821,12 @@ impl SystemReleaseApplication {
                         session: Box::new(session.clone()),
                     },
                 ),
-                Err(error) => {
-                    self.finish_with_error(&session.id, &store, events.as_deref(), error.code())
-                }
+                Err(error) => self.finish_with_orchestrator_error(
+                    &session.id,
+                    &store,
+                    events.as_deref(),
+                    &error,
+                ),
             }
             self.inner.cancellations.lock().unwrap().remove(&session.id);
         })
@@ -882,11 +895,11 @@ impl SystemReleaseApplication {
                             },
                         );
                     }
-                    Err(error) => application.finish_with_error(
+                    Err(error) => application.finish_with_orchestrator_error(
                         &current.id,
                         &store,
                         events.as_deref(),
-                        error.code(),
+                        &error,
                     ),
                 }
                 application
@@ -1034,6 +1047,43 @@ impl SystemReleaseApplication {
         events: Option<&dyn ReleaseEventSink>,
         code: &str,
     ) {
+        self.finish_with_error_details(
+            session_id,
+            store,
+            events,
+            "releasePipeline",
+            code,
+            "发布流程失败，请查看对应阶段证据。",
+        );
+    }
+
+    fn finish_with_orchestrator_error(
+        &self,
+        session_id: &str,
+        store: &ReleaseStateStore,
+        events: Option<&dyn ReleaseEventSink>,
+        error: &ReleaseOrchestratorError,
+    ) {
+        let message = error.failure_message();
+        self.finish_with_error_details(
+            session_id,
+            store,
+            events,
+            error.failure_step_id(),
+            error.code(),
+            &message,
+        );
+    }
+
+    fn finish_with_error_details(
+        &self,
+        session_id: &str,
+        store: &ReleaseStateStore,
+        events: Option<&dyn ReleaseEventSink>,
+        step_id: &str,
+        code: &str,
+        message: &str,
+    ) {
         if let Ok(Some(mut current)) = store.load()
             && !matches!(
                 current.phase,
@@ -1051,9 +1101,9 @@ impl SystemReleaseApplication {
         emit(
             events,
             ReleaseEvent::StepFailed {
-                step_id: "releasePipeline".into(),
+                step_id: step_id.into(),
                 code: code.into(),
-                message: "发布流程失败，请查看对应阶段证据。".into(),
+                message: message.into(),
             },
         );
         self.inner.cancellations.lock().unwrap().remove(session_id);
@@ -1618,6 +1668,81 @@ mod tests {
             matches!(
                 event,
                 ReleaseEvent::StepFailed { code, .. } if code == "RELEASE_PUSH_FAILED"
+            )
+        }));
+    }
+
+    #[test]
+    fn local_verification_nonzero_exit_emits_specific_safe_failure_evidence() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReleaseStateStore::new(directory.path().to_path_buf());
+        let session = ReleaseSession::new(
+            "session-local-verification-exit",
+            r"D:\safe-temp\repository",
+            "0.5.0",
+        );
+        store.save(&session).unwrap();
+        let sink = TestEventSink::default();
+        let error = crate::services::release_orchestrator::ReleaseOrchestratorError::LocalVerificationFailed {
+            command_id: "release-structure-tests".into(),
+            exit_code: Some(1),
+        };
+
+        SystemReleaseApplication::new().finish_with_orchestrator_error(
+            &session.id,
+            &store,
+            Some(&sink),
+            &error,
+        );
+
+        assert_eq!(store.load().unwrap().unwrap().phase, ReleasePhase::Failed);
+        assert!(sink.events.lock().unwrap().iter().any(|event| {
+            matches!(
+                event,
+                ReleaseEvent::StepFailed {
+                    step_id,
+                    code,
+                    message,
+                } if step_id == "release-structure-tests"
+                    && code == "RELEASE_LOCAL_VERIFICATION_FAILED"
+                    && message == "本地发布门禁退出码 1；候选文件已回滚，尚未提交或推送。"
+            )
+        }));
+    }
+
+    #[test]
+    fn local_verification_backend_failure_does_not_invent_an_exit_code() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReleaseStateStore::new(directory.path().to_path_buf());
+        let session = ReleaseSession::new(
+            "session-local-verification-start",
+            r"D:\safe-temp\repository",
+            "0.5.0",
+        );
+        store.save(&session).unwrap();
+        let sink = TestEventSink::default();
+        let error = crate::services::release_orchestrator::ReleaseOrchestratorError::LocalVerificationFailed {
+            command_id: "release-structure-tests".into(),
+            exit_code: None,
+        };
+
+        SystemReleaseApplication::new().finish_with_orchestrator_error(
+            &session.id,
+            &store,
+            Some(&sink),
+            &error,
+        );
+
+        assert!(sink.events.lock().unwrap().iter().any(|event| {
+            matches!(
+                event,
+                ReleaseEvent::StepFailed {
+                    step_id,
+                    code,
+                    message,
+                } if step_id == "release-structure-tests"
+                    && code == "RELEASE_LOCAL_VERIFICATION_FAILED"
+                    && message == "本地发布门禁命令未能完成，且没有可用退出码；候选文件已回滚，尚未提交或推送。"
             )
         }));
     }

@@ -126,7 +126,10 @@ pub trait LocalVerificationBackend: Send + Sync {
 #[derive(Debug, thiserror::Error)]
 pub enum LocalVerificationError {
     #[error("本地发布门禁失败：{command_id}")]
-    CommandFailed { command_id: String },
+    CommandFailed {
+        command_id: String,
+        exit_code: Option<i32>,
+    },
     #[error("本地发布门禁已取消")]
     Cancelled,
 }
@@ -205,12 +208,14 @@ impl LocalVerificationService {
                 Err(LocalVerificationBackendError::Failed) => {
                     return Err(LocalVerificationError::CommandFailed {
                         command_id: command.id.clone(),
+                        exit_code: None,
                     });
                 }
             };
             if item.exit_code != 0 {
                 return Err(LocalVerificationError::CommandFailed {
                     command_id: command.id.clone(),
+                    exit_code: Some(item.exit_code),
                 });
             }
             evidence.push(item);

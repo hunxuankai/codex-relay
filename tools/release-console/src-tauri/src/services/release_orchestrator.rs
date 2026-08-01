@@ -274,8 +274,11 @@ pub enum ReleaseOrchestratorError {
     StateFailed,
     #[error("无法应用发布候选")]
     CandidateApplyFailed,
-    #[error("本地发布门禁失败")]
-    LocalVerificationFailed,
+    #[error("本地发布门禁失败：{command_id}")]
+    LocalVerificationFailed {
+        command_id: String,
+        exit_code: Option<i32>,
+    },
     #[error("本地发布门禁失败，且候选未能完整回滚")]
     RollbackFailed,
     #[error("发布候选提交或推送失败")]
@@ -300,7 +303,7 @@ impl ReleaseOrchestratorError {
             Self::SessionLockFailed => "RELEASE_SESSION_LOCK_FAILED",
             Self::StateFailed => "RELEASE_STATE_FAILED",
             Self::CandidateApplyFailed => "RELEASE_CANDIDATE_APPLY_FAILED",
-            Self::LocalVerificationFailed => "RELEASE_LOCAL_VERIFICATION_FAILED",
+            Self::LocalVerificationFailed { .. } => "RELEASE_LOCAL_VERIFICATION_FAILED",
             Self::RollbackFailed => "RELEASE_ROLLBACK_INCOMPLETE",
             Self::PushFailed => "RELEASE_PUSH_FAILED",
             Self::FinalizeFailed => "RELEASE_FINALIZE_FAILED",
@@ -309,6 +312,27 @@ impl ReleaseOrchestratorError {
             Self::RemoteFailed => "RELEASE_REMOTE_FAILED",
             Self::RemoteStateInvalid => "RELEASE_REMOTE_STATE_INVALID",
             Self::PublishIdentityMismatch => "RELEASE_PUBLISH_IDENTITY_MISMATCH",
+        }
+    }
+
+    pub(crate) fn failure_step_id(&self) -> &str {
+        match self {
+            Self::LocalVerificationFailed { command_id, .. } => command_id,
+            _ => "releasePipeline",
+        }
+    }
+
+    pub(crate) fn failure_message(&self) -> String {
+        match self {
+            Self::LocalVerificationFailed {
+                exit_code: Some(exit_code),
+                ..
+            } => format!("本地发布门禁退出码 {exit_code}；候选文件已回滚，尚未提交或推送。"),
+            Self::LocalVerificationFailed {
+                exit_code: None, ..
+            } => "本地发布门禁命令未能完成，且没有可用退出码；候选文件已回滚，尚未提交或推送。"
+                .into(),
+            _ => "发布流程失败，请查看对应阶段证据。".into(),
         }
     }
 }
@@ -367,16 +391,26 @@ impl ReleaseOrchestrator {
                 let _ = state_store.advance(session, ReleasePhase::Failed);
                 return Err(ReleaseOrchestratorError::RollbackFailed);
             }
-            if matches!(error, LocalVerificationError::Cancelled) {
-                state_store
-                    .advance(session, ReleasePhase::Cancelled)
-                    .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
-                return Err(ReleaseOrchestratorError::Cancelled);
+            match error {
+                LocalVerificationError::Cancelled => {
+                    state_store
+                        .advance(session, ReleasePhase::Cancelled)
+                        .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
+                    return Err(ReleaseOrchestratorError::Cancelled);
+                }
+                LocalVerificationError::CommandFailed {
+                    command_id,
+                    exit_code,
+                } => {
+                    state_store
+                        .advance(session, ReleasePhase::Failed)
+                        .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
+                    return Err(ReleaseOrchestratorError::LocalVerificationFailed {
+                        command_id,
+                        exit_code,
+                    });
+                }
             }
-            state_store
-                .advance(session, ReleasePhase::Failed)
-                .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
-            return Err(ReleaseOrchestratorError::LocalVerificationFailed);
         }
 
         for phase in [ReleasePhase::LocalBuild, ReleasePhase::SourceAudit] {

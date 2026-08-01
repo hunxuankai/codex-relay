@@ -86,7 +86,7 @@ impl LocalVerificationBackend for FailingVerificationBackend {
     fn run<'a>(
         &'a self,
         _repository_path: &'a Path,
-        _command: &'a LocalVerificationCommand,
+        command: &'a LocalVerificationCommand,
     ) -> Pin<
         Box<
             dyn Future<Output = Result<LocalCommandEvidence, LocalVerificationBackendError>>
@@ -94,7 +94,13 @@ impl LocalVerificationBackend for FailingVerificationBackend {
                 + 'a,
         >,
     > {
-        Box::pin(async { Err(LocalVerificationBackendError::Failed) })
+        Box::pin(async move {
+            Ok(LocalCommandEvidence {
+                id: command.id.clone(),
+                exit_code: 1,
+                duration_millis: 10,
+            })
+        })
     }
 }
 
@@ -406,7 +412,10 @@ fn local_failure_before_commit_rolls_back_candidate_and_persists_failed_phase() 
 
     assert!(matches!(
         error,
-        ReleaseOrchestratorError::LocalVerificationFailed
+        ReleaseOrchestratorError::LocalVerificationFailed {
+            command_id,
+            exit_code: Some(1),
+        } if command_id == "release-structure-tests"
     ));
     assert!(!push.called.load(Ordering::SeqCst));
     assert_eq!(session.phase, ReleasePhase::Failed);

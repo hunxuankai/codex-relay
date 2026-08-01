@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -97,6 +97,7 @@ Windows 可能显示“未知发布者”。安装和升级不会删除 Codex �
     const diagnostic = `${result.stdout}\n${result.stderr}`
 
     expect(result.status).not.toBe(0)
-    expect(diagnostic).toContain('发布说明包含疑似秘密')
+    expect(diagnostic).toContain('RELEASE_NOTES_SECRET_DETECTED')
+    expect(existsSync(output)).toBe(false)
   })
 })

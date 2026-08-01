@@ -132,13 +132,52 @@ fn nonzero_command_stops_later_checks_and_preserves_failed_step_identity() {
 
     assert!(matches!(
         error,
-        LocalVerificationError::CommandFailed { command_id }
-            if command_id == "release-console-rust-tests"
+        LocalVerificationError::CommandFailed {
+            command_id,
+            exit_code,
+        } if command_id == "release-console-rust-tests" && exit_code == Some(1)
     ));
     assert_eq!(
         backend.commands.into_inner().unwrap(),
         ["release-structure-tests", "release-console-rust-tests"]
     );
+}
+
+struct BackendFailureBackend;
+
+impl LocalVerificationBackend for BackendFailureBackend {
+    fn run<'a>(
+        &'a self,
+        _repository_path: &'a Path,
+        _command: &'a LocalVerificationCommand,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<LocalCommandEvidence, LocalVerificationBackendError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async { Err(LocalVerificationBackendError::Failed) })
+    }
+}
+
+#[test]
+fn backend_failure_preserves_command_identity_without_inventing_an_exit_code() {
+    let service = LocalVerificationService::new();
+
+    let error = tauri::async_runtime::block_on(service.run(
+        &BackendFailureBackend,
+        Path::new(r"D:\safe-temp\repository"),
+    ))
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        LocalVerificationError::CommandFailed {
+            command_id,
+            exit_code: None,
+        } if command_id == "release-structure-tests"
+    ));
 }
 
 #[test]
@@ -227,4 +266,67 @@ fn process_backend_builds_direct_invocation_with_filtered_environment_and_no_she
     assert!(!debug.contains("test-private-key-not-real"));
     assert!(!debug.contains("test-token-not-real"));
     assert!(!debug.contains("unsafe-codex-home"));
+}
+
+struct FirstCommandProcessBackend {
+    process: ProcessLocalVerificationBackend,
+    calls: AtomicU64,
+}
+
+impl LocalVerificationBackend for FirstCommandProcessBackend {
+    fn run<'a>(
+        &'a self,
+        repository_path: &'a Path,
+        command: &'a LocalVerificationCommand,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<LocalCommandEvidence, LocalVerificationBackendError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        if self.calls.fetch_add(1, Ordering::Relaxed) == 0 {
+            self.process.run(repository_path, command)
+        } else {
+            Box::pin(async move {
+                Ok(LocalCommandEvidence {
+                    id: command.id.clone(),
+                    exit_code: 0,
+                    duration_millis: 0,
+                })
+            })
+        }
+    }
+}
+
+#[test]
+fn filtered_process_backend_runs_release_structure_tests_without_encoding_sensitive_failure() {
+    let path = std::env::var_os("PATH").expect("PATH must be available for release checks");
+    let find_on_path = |file_name: &str| {
+        std::env::split_paths(&path)
+            .map(|directory| directory.join(file_name))
+            .find(|candidate| candidate.is_file())
+            .unwrap_or_else(|| panic!("{file_name} must be available for release checks"))
+    };
+    let (_cancel_sender, cancel) = tokio::sync::watch::channel(false);
+    let backend = FirstCommandProcessBackend {
+        process: ProcessLocalVerificationBackend::new(
+            find_on_path("npm.cmd"),
+            find_on_path("cargo.exe"),
+            filter_release_environment(std::env::vars_os()),
+            cancel,
+        ),
+        calls: AtomicU64::new(0),
+    };
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap();
+
+    let evidence =
+        tauri::async_runtime::block_on(LocalVerificationService::new().run(&backend, &repository))
+            .unwrap();
+
+    assert_eq!(evidence[0].id, "release-structure-tests");
+    assert_eq!(evidence[0].exit_code, 0);
 }
