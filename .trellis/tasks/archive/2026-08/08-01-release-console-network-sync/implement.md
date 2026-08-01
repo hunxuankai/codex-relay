@@ -174,7 +174,7 @@
   ```
 
 - [x] 枚举 `dist/release-console/CodexRelayReleaseConsole.exe` 的完整路径、大小、最后写入时间和 SHA-256；确认源/交付 EXE 哈希一致。
-- [ ] 运行 `git diff --check`、`git status --short --ignored`、相关差异与秘密/真实路径审计；精确暂存本任务文件并提交简体中文 Conventional Commit。
+- [x] 运行 `git diff --check`、`git status --short --ignored`、相关差异与秘密/真实路径审计；精确暂存本任务文件并提交简体中文 Conventional Commit。
 
 ### 本轮验证证据
 
@@ -187,6 +187,7 @@
 - 源与交付 EXE：`12,658,688` 字节，最后写入时间 `2026-08-01T22:04:44.7396218+08:00`，SHA-256 均为
   `66C85FC2454C2B87CA63719431D1C012994FDE59CB741B08F40C7E5932CE2658`。
 - `git diff --check`：退出 0；高置信度秘密前缀、真实用户目录和真实工作区路径扫描无命中。
+- 工作提交：`1e14f04 feat(release): 完善发布控制台网络与仓库同步`。
 
 ## Mock 边界
 
