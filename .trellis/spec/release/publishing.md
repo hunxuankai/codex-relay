@@ -138,7 +138,11 @@ codex-relay-release-console.repository-preference.v1
 #### 3. 契约
 
 - `repositoryPath` 必须由 Rust 在 Git 预检前 `canonicalize`，成功响应返回规范化绝对路径。
-- 只有预检成功后，Vue 才能用响应中的 `repositoryPath` 更新输入并保存偏好；未校验的击键不得落盘。
+- Rust 的 Windows canonical 路径可能带 `\\?\` 扩展长度前缀；Vue 仓库偏好在加载和成功保存边界
+  必须把 `\\?\D:\...` 转为 `D:\...`，把 `\\?\UNC\server\share\...` 转为
+  `\\server\share\...`。普通路径保持不变，`\\?\Volume{...}` 等未知设备路径不得盲目截断。
+- 只有预检成功后，Vue 才能用响应中的 `repositoryPath` 更新输入并保存偏好；未校验的击键只更新
+  当前内存，不得落盘。路径显示转换不能修改 Rust canonical `PathBuf`、会话文件或 Git workdir。
 - 偏好读取、JSON 解析、schema 版本或写入失败时回退为空值或当前会话内存值，不得阻断手动输入。
 - 偏好只保存仓库路径，不保存 GitHub Token、Authorization Header、API Key、发布说明或 session 证据。
 - GitHub Release 列表在 Rust 边界只解析一次：Draft 数量用于冲突门禁；首个
@@ -154,6 +158,8 @@ codex-relay-release-console.repository-preference.v1
 |---|---|
 | 首次启动或偏好不存在 | 仓库输入为空，可手动填写 |
 | v1 偏好有效 | 启动时恢复仓库路径，但仍需重新执行只读预检 |
+| v1 偏好或成功预检返回 `\\?\D:\...` | 输入框和 localStorage 使用普通盘符路径 |
+| 路径为扩展 UNC 或未知设备路径 | 前者转为标准 UNC；后者保持原样 |
 | 偏好损坏、版本未知或 storage 抛错 | 安全回退，不显示发布失败 |
 | 预检成功且输入为非规范路径 | 输入和偏好改为后端返回的规范化路径 |
 | 预检失败 | 保留当前输入，不覆盖上次成功偏好 |
@@ -164,15 +170,21 @@ codex-relay-release-console.repository-preference.v1
 #### 5. 良好/基线/错误用例
 
 - 良好：维护者首次填写仓库并预检成功；下次打开路径已恢复，点击检查后显示 `v0.4.0`。
+- 良好：Rust 返回 `\\?\D:\repo`，Git 与 session 继续使用后端 canonical 路径，输入框和偏好保存
+  `D:\repo`。
 - 基线：WebView 数据被清除后重新手动选择仓库，不影响 worktree 内已有 session 的真实性。
+- 基线：`\\?\UNC\server\share\repo` 显示为 `\\server\share\repo`，
+  `\\?\Volume{GUID}\repo` 保持原值。
 - 良好：Release 列表前两项分别为 Draft 和 prerelease，第三项为正式 Release；摘要显示第三项 tag。
 - 错误：输入框每次变化都写 localStorage，把拼写中间态或未验证目录保存为下次默认值。
 - 错误：Vue 自行解析 GitHub JSON，或在查询失败时沿用旧 tag 并把预检标为通过。
 
 #### 6. 必需测试
 
-- `useRepositoryPreference.test.ts`：断言 v1 恢复、损坏/未知版本/空路径回退、显式保存和 storage 异常容错。
-- `App.test.ts`：断言启动恢复、成功预检保存规范化路径、失败预检不覆盖旧偏好，以及范围横幅不再显示。
+- `useRepositoryPreference.test.ts`：断言 v1 恢复、扩展盘符加载/保存、扩展 UNC、未知设备路径、
+  损坏/未知版本/空路径回退、显式保存和 storage 异常容错。
+- `App.test.ts`：断言启动恢复把扩展盘符显示为普通路径、成功预检保存用户友好路径、失败预检不覆盖
+  旧偏好，以及范围横幅不再显示。
 - `release_application.rs` 单元测试：断言 Latest 投影跳过 Draft/prerelease，无正式版本返回 `None`。
 - command/Git preflight 测试：断言 `repositoryPath` 规范化、`latestReleaseTag` 透传且 camelCase DTO 类型同步。
 - `RepositorySetupPanel.test.ts`：断言真实 tag 与“尚无正式版本”空态。
@@ -194,6 +206,14 @@ const inspection = await release.inspect(repositoryPath.value)
 if (inspection) repositoryPreference.remember(inspection.repositoryPath)
 
 const latest = inspection.external.latestReleaseTag ?? '尚无正式版本'
+```
+
+路径显示转换只放在偏好边界，并只识别明确格式：
+
+```typescript
+if (/^\\\\\?\\UNC\\/i.test(path)) return `\\\\${path.slice(8)}`
+const drive = path.match(/^\\\\\?\\([A-Za-z]:\\.*)$/)
+return drive?.[1] ?? path
 ```
 
 ### 0.3 发布控制台代理、仓库同步与自动恢复契约

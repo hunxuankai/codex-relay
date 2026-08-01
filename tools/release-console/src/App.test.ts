@@ -83,7 +83,10 @@ describe('release console shell', () => {
   it('keeps App as a composition surface for the visual release workflow', () => {
     window.localStorage.setItem(
       REPOSITORY_PREFERENCE_KEY,
-      JSON.stringify({ version: 1, repositoryPath: 'D:\\safe-temp\\repository' }),
+      JSON.stringify({
+        version: 1,
+        repositoryPath: '\\\\?\\D:\\safe-temp\\repository',
+      }),
     )
     const wrapper = mount(App)
 
@@ -117,7 +120,7 @@ describe('release console shell', () => {
   it('remembers the canonical repository path only after a successful inspection', async () => {
     invokeMock.mockResolvedValueOnce({
       success: true,
-      data: inspection('D:\\canonical\\repository'),
+      data: inspection('\\\\?\\D:\\canonical\\repository'),
     })
     const wrapper = mount(App)
     const input = wrapper.get<HTMLInputElement>('input[aria-label="仓库路径"]')

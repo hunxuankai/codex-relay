@@ -14,6 +14,17 @@ interface StoredRepositoryPreference {
   repositoryPath: string
 }
 
+function normalizeRepositoryPathForDisplay(value: string): string {
+  const trimmed = value.trim()
+
+  if (/^\\\\\?\\UNC\\/i.test(trimmed)) {
+    return `\\\\${trimmed.slice(8)}`
+  }
+
+  const extendedDrivePath = trimmed.match(/^\\\\\?\\([A-Za-z]:\\.*)$/)
+  return extendedDrivePath?.[1] ?? trimmed
+}
+
 function browserStorage(): RepositoryPreferenceStorage | null {
   if (typeof window === 'undefined') return null
   try {
@@ -30,7 +41,7 @@ function loadRepositoryPath(storage: RepositoryPreferenceStorage | null): string
     if (raw === null) return ''
     const value = JSON.parse(raw) as Partial<StoredRepositoryPreference> | null
     if (value?.version !== 1 || typeof value.repositoryPath !== 'string') return ''
-    return value.repositoryPath.trim()
+    return normalizeRepositoryPathForDisplay(value.repositoryPath)
   } catch {
     return ''
   }
@@ -45,7 +56,7 @@ export function useRepositoryPreference(options: UseRepositoryPreferenceOptions 
   }
 
   function remember(value: string) {
-    const normalized = value.trim()
+    const normalized = normalizeRepositoryPathForDisplay(value)
     if (normalized.length === 0) return
     repositoryPath.value = normalized
     try {

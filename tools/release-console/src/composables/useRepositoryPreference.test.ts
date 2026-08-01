@@ -16,7 +16,7 @@ describe('useRepositoryPreference', () => {
   it('restores a versioned path and only persists through the explicit remember action', () => {
     const storage = storageWith(JSON.stringify({
       version: 1,
-      repositoryPath: 'D:\\safe-temp\\repository',
+      repositoryPath: '\\\\?\\D:\\safe-temp\\repository',
     }))
     const preference = useRepositoryPreference({ storage })
 
@@ -26,7 +26,7 @@ describe('useRepositoryPreference', () => {
     expect(preference.repositoryPath.value).toBe('D:\\unverified')
     expect(storage.setItem).not.toHaveBeenCalled()
 
-    preference.remember('  D:\\canonical\\repository  ')
+    preference.remember('  \\\\?\\D:\\canonical\\repository  ')
     expect(preference.repositoryPath.value).toBe('D:\\canonical\\repository')
     expect(storage.setItem).toHaveBeenCalledWith(
       REPOSITORY_PREFERENCE_KEY,
@@ -60,5 +60,20 @@ describe('useRepositoryPreference', () => {
     expect(preference.repositoryPath.value).toBe('')
     expect(() => preference.remember('D:\\safe-temp\\repository')).not.toThrow()
     expect(preference.repositoryPath.value).toBe('D:\\safe-temp\\repository')
+  })
+
+  it('normalizes extended UNC paths without truncating unsupported device paths', () => {
+    const storage = storageWith(null)
+    const preference = useRepositoryPreference({ storage })
+
+    preference.remember('\\\\?\\UNC\\server\\share\\repository')
+    expect(preference.repositoryPath.value).toBe('\\\\server\\share\\repository')
+    expect(storage.setItem).toHaveBeenLastCalledWith(
+      REPOSITORY_PREFERENCE_KEY,
+      JSON.stringify({ version: 1, repositoryPath: '\\\\server\\share\\repository' }),
+    )
+
+    preference.remember('\\\\?\\Volume{test}\\repository')
+    expect(preference.repositoryPath.value).toBe('\\\\?\\Volume{test}\\repository')
   })
 })
