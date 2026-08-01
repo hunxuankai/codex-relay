@@ -341,8 +341,7 @@ fn run_blocking(
     while job.active_processes()? > 0 && Instant::now() < active_deadline {
         thread::sleep(POLL_INTERVAL);
     }
-    if job.active_processes()? > 0 {
-        let _ = job.terminate();
+    if job.active_processes()? > 0 && !terminate_job_and_wait(&*job, &mut child) {
         join_reader(stdout_thread);
         join_reader(stderr_thread);
         return Err(CodexProcessError::ProcessTreeTermination);
@@ -997,6 +996,67 @@ try {
             run.await.unwrap().unwrap_err(),
             CodexProcessError::Cancelled
         );
+        assert!(!is_process_running(child_pid));
+    }
+
+    #[tokio::test]
+    #[serial(codex_process)]
+    async fn successful_parent_cleans_up_lingering_descendants_without_losing_exit_code() {
+        let directory = tempfile::tempdir().unwrap();
+        let parent_script = directory.path().join("parent-exits.ps1");
+        let pid_file = directory.path().join("child.pid");
+        let status_file = directory.path().join("parent.status");
+        let error_file = directory.path().join("parent.error");
+        fs::write(
+            &parent_script,
+            r#"param([string]$PidFile, [string]$StatusFile, [string]$ErrorFile)
+$ErrorActionPreference = 'Stop'
+try {
+    Set-Content -LiteralPath $StatusFile -Value 'before-start'
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = "$PSHOME\powershell.exe"
+    $startInfo.Arguments = '-NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 120"'
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $child = [System.Diagnostics.Process]::Start($startInfo)
+    Set-Content -LiteralPath $StatusFile -Value 'after-start'
+    Set-Content -LiteralPath $PidFile -Value $child.Id
+    Set-Content -LiteralPath $StatusFile -Value 'pid-written'
+} catch {
+    Set-Content -LiteralPath $ErrorFile -Value ($_ | Out-String)
+    throw
+}
+"#,
+        )
+        .unwrap();
+        let (_cancel_sender, cancel) = tokio::sync::watch::channel(false);
+        let invocation = ProcessInvocation {
+            executable: powershell(),
+            args: vec![
+                "-NoLogo".into(),
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-File".into(),
+                parent_script.as_os_str().to_owned(),
+                pid_file.as_os_str().to_owned(),
+                status_file.as_os_str().to_owned(),
+                error_file.as_os_str().to_owned(),
+            ],
+            env: filter_inherited_environment(std::env::vars_os()),
+            workdir: directory.path().to_owned(),
+            stdin: None,
+            stdout_file: None,
+        };
+        let run = tokio::spawn(async move {
+            SafeProcessRunner::default()
+                .run(invocation, PROCESS_TREE_TEST_TIMEOUT, cancel, None)
+                .await
+        });
+        let child_pid = wait_for_process_id(&pid_file, &status_file, &error_file).await;
+
+        let output = run.await.unwrap().unwrap();
+
+        assert_eq!(output.exit_code, Some(0));
         assert!(!is_process_running(child_pid));
     }
 

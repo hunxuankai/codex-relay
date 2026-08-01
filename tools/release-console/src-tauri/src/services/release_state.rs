@@ -1,4 +1,4 @@
-use crate::models::{ReleasePhase, ReleaseSession};
+use crate::models::{ReleaseFailureEvidence, ReleasePhase, ReleaseSession};
 use codex_relay_core::error::AppError;
 use codex_relay_core::infrastructure::atomic_file::atomic_write;
 use fs2::FileExt;
@@ -132,6 +132,28 @@ impl ReleaseStateStore {
         *session = updated;
         Ok(())
     }
+
+    pub fn fail(
+        &self,
+        session: &mut ReleaseSession,
+        step_id: impl Into<String>,
+        code: impl Into<String>,
+    ) -> Result<(), ReleaseStateError> {
+        let failed_from = session.phase;
+        let phase = failed_from
+            .transition_to(ReleasePhase::Failed)
+            .map_err(|_| ReleaseStateError::InvalidTransition)?;
+        let mut updated = session.clone();
+        updated.phase = phase;
+        updated.failure = Some(ReleaseFailureEvidence {
+            phase: failed_from,
+            step_id: step_id.into(),
+            code: code.into(),
+        });
+        self.save(&updated)?;
+        *session = updated;
+        Ok(())
+    }
 }
 
 fn validate_stored_session(bytes: &[u8]) -> Result<(), AppError> {
@@ -165,6 +187,20 @@ fn session_is_valid(session: &ReleaseSession) -> bool {
     if session.id.trim().is_empty()
         || session.repository_path.trim().is_empty()
         || semver::Version::parse(&session.target_version).is_err()
+    {
+        return false;
+    }
+    if let Some(failure) = &session.failure
+        && (session.phase != ReleasePhase::Failed
+            || matches!(
+                failure.phase,
+                ReleasePhase::Completed
+                    | ReleasePhase::CompletedWithWarnings
+                    | ReleasePhase::Failed
+                    | ReleasePhase::Cancelled
+            )
+            || failure.step_id.trim().is_empty()
+            || failure.code.trim().is_empty())
     {
         return false;
     }

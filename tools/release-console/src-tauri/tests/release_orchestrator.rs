@@ -1,11 +1,12 @@
 use codex_relay_release_console_lib::models::{
     CleanupRunEvidence, DraftAssetEvidence, DraftAuditEvidence, DraftIdentity,
-    PublishedReleaseEvidence, ReleasePhase, ReleaseSession, WorkflowDispatch, WorkflowRunStatus,
+    PublishedReleaseEvidence, ReleaseFailureEvidence, ReleasePhase, ReleaseSession,
+    WorkflowDispatch, WorkflowRunStatus,
 };
 use codex_relay_release_console_lib::services::git_release::GitPushOutcome;
 use codex_relay_release_console_lib::services::local_verification::{
     LocalCommandEvidence, LocalVerificationBackend, LocalVerificationBackendError,
-    LocalVerificationCommand,
+    LocalVerificationCommand, LocalVerificationFailure, LocalVerificationProcessError,
 };
 use codex_relay_release_console_lib::services::release_candidate::{
     ReleaseCandidatePlan, ReleaseCandidateTransaction,
@@ -119,6 +120,28 @@ impl LocalVerificationBackend for CancelledVerificationBackend {
         >,
     > {
         Box::pin(async { Err(LocalVerificationBackendError::Cancelled) })
+    }
+}
+
+struct TimedOutVerificationBackend;
+
+impl LocalVerificationBackend for TimedOutVerificationBackend {
+    fn run<'a>(
+        &'a self,
+        _repository_path: &'a Path,
+        _command: &'a LocalVerificationCommand,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<LocalCommandEvidence, LocalVerificationBackendError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async {
+            Err(LocalVerificationBackendError::Process(
+                LocalVerificationProcessError::Timeout,
+            ))
+        })
     }
 }
 
@@ -414,12 +437,21 @@ fn local_failure_before_commit_rolls_back_candidate_and_persists_failed_phase() 
         error,
         ReleaseOrchestratorError::LocalVerificationFailed {
             command_id,
-            exit_code: Some(1),
+            failure: LocalVerificationFailure::ExitCode(1),
         } if command_id == "release-structure-tests"
     ));
     assert!(!push.called.load(Ordering::SeqCst));
     assert_eq!(session.phase, ReleasePhase::Failed);
-    assert_eq!(store.load().unwrap().unwrap().phase, ReleasePhase::Failed);
+    let persisted = store.load().unwrap().unwrap();
+    assert_eq!(persisted.phase, ReleasePhase::Failed);
+    assert_eq!(
+        persisted.failure,
+        Some(ReleaseFailureEvidence {
+            phase: ReleasePhase::LocalChecks,
+            step_id: "release-structure-tests".into(),
+            code: "RELEASE_LOCAL_VERIFICATION_FAILED".into(),
+        })
+    );
     for file in &plan.files {
         assert_eq!(
             fs::read(repository.root.join(&file.relative_path)).unwrap(),
@@ -431,6 +463,52 @@ fn local_failure_before_commit_rolls_back_candidate_and_persists_failed_phase() 
             .join("codex-relay-release-console/candidate-transaction.json")
             .exists()
     );
+}
+
+#[test]
+fn local_process_failure_rolls_back_candidate_and_preserves_safe_classification() {
+    let repository = TempRepository::new();
+    let git_dir = repository.root.join(".git");
+    let store = ReleaseStateStore::new(git_dir.clone());
+    let plan =
+        ReleaseCandidateTransaction::plan(&repository.root, "0.5.0", VALID_RELEASE_NOTES).unwrap();
+    let mut session = ReleaseSession::new(
+        "session-test-process-failure",
+        repository.root.to_string_lossy(),
+        "0.5.0",
+    );
+    let push = UnexpectedPushBackend {
+        called: AtomicBool::new(false),
+    };
+
+    let error = tauri::async_runtime::block_on(ReleaseOrchestrator::new().run_to_pushed(
+        &mut session,
+        &store,
+        &repository.root,
+        &git_dir,
+        &plan,
+        &TimedOutVerificationBackend,
+        &push,
+    ))
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ReleaseOrchestratorError::LocalVerificationFailed {
+            command_id,
+            failure: LocalVerificationFailure::Process(
+                LocalVerificationProcessError::Timeout
+            ),
+        } if command_id == "release-structure-tests"
+    ));
+    assert!(!push.called.load(Ordering::SeqCst));
+    assert_eq!(session.phase, ReleasePhase::Failed);
+    for file in &plan.files {
+        assert_eq!(
+            fs::read(repository.root.join(&file.relative_path)).unwrap(),
+            file.before
+        );
+    }
 }
 
 #[test]
@@ -463,7 +541,16 @@ fn commit_failure_unstages_and_rolls_back_candidate_before_marking_failed() {
     assert!(matches!(error, ReleaseOrchestratorError::PushFailed));
     assert!(push.rollback_called.load(Ordering::SeqCst));
     assert_eq!(session.phase, ReleasePhase::Failed);
-    assert_eq!(store.load().unwrap().unwrap().phase, ReleasePhase::Failed);
+    let persisted = store.load().unwrap().unwrap();
+    assert_eq!(persisted.phase, ReleasePhase::Failed);
+    assert_eq!(
+        persisted.failure,
+        Some(ReleaseFailureEvidence {
+            phase: ReleasePhase::SourceAudit,
+            step_id: "commitPush".into(),
+            code: "RELEASE_PUSH_FAILED".into(),
+        })
+    );
     for file in &plan.files {
         assert_eq!(
             fs::read(repository.root.join(&file.relative_path)).unwrap(),

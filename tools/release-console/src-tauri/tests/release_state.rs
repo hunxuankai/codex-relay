@@ -1,5 +1,6 @@
 use codex_relay_release_console_lib::models::{
-    DraftAssetEvidence, DraftAuditEvidence, ReleasePhase, ReleaseSession, WorkflowDispatch,
+    DraftAssetEvidence, DraftAuditEvidence, ReleaseFailureEvidence, ReleasePhase, ReleaseSession,
+    WorkflowDispatch,
 };
 use codex_relay_release_console_lib::services::release_state::{
     ReleaseStateError, ReleaseStateStore, RepositorySessionLock,
@@ -62,6 +63,72 @@ fn versioned_session_is_saved_atomically_and_loaded_with_phase() {
     assert_eq!(persisted["schemaVersion"], 1);
     assert_eq!(persisted["session"]["phase"], "planned");
     assert_eq!(persisted["session"]["targetVersion"], "0.5.0");
+    assert!(persisted["session"]["failure"].is_null());
+}
+
+#[test]
+fn legacy_failed_session_without_failure_evidence_remains_readable() {
+    let git_dir = TempGitDir::new();
+    let state_file = git_dir
+        .path
+        .join("codex-relay-release-console/session.json");
+    fs::create_dir_all(state_file.parent().unwrap()).unwrap();
+    let legacy = br#"{
+  "schemaVersion": 1,
+  "session": {
+    "id": "session-legacy-failed",
+    "repositoryPath": "D:\\safe-temp\\repository",
+    "targetVersion": "0.5.0",
+    "phase": "failed",
+    "candidateSha": null,
+    "remoteMainSha": null
+  }
+}
+"#;
+    fs::write(&state_file, legacy).unwrap();
+
+    let loaded = ReleaseStateStore::new(git_dir.path.clone())
+        .load()
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(loaded.phase, ReleasePhase::Failed);
+    assert_eq!(loaded.failure, None);
+    assert_eq!(fs::read(state_file).unwrap(), legacy);
+}
+
+#[test]
+fn nonfailed_session_with_failure_evidence_is_rejected_without_rewriting_file() {
+    let git_dir = TempGitDir::new();
+    let state_file = git_dir
+        .path
+        .join("codex-relay-release-console/session.json");
+    fs::create_dir_all(state_file.parent().unwrap()).unwrap();
+    let invalid = br#"{
+  "schemaVersion": 1,
+  "session": {
+    "id": "session-invalid-failure",
+    "repositoryPath": "D:\\safe-temp\\repository",
+    "targetVersion": "0.5.0",
+    "phase": "planned",
+    "candidateSha": null,
+    "remoteMainSha": null,
+    "failure": {
+      "phase": "planned",
+      "stepId": "plan",
+      "code": "RELEASE_PLAN_FAILED"
+    }
+  }
+}
+"#;
+    fs::write(&state_file, invalid).unwrap();
+
+    let error = ReleaseStateStore::new(git_dir.path.clone())
+        .load()
+        .unwrap_err();
+
+    assert!(matches!(error, ReleaseStateError::InvalidState));
+    assert_eq!(fs::read(state_file).unwrap(), invalid);
 }
 
 #[test]
@@ -120,7 +187,9 @@ fn active_session_blocks_reinitialization_until_it_reaches_a_terminal_phase() {
     terminal.phase = ReleasePhase::Failed;
     store.save(&terminal).unwrap();
     store.initialize(&second).unwrap();
-    assert_eq!(store.load().unwrap().unwrap(), second);
+    let initialized = store.load().unwrap().unwrap();
+    assert_eq!(initialized, second);
+    assert_eq!(initialized.failure, None);
 }
 
 #[test]
@@ -140,6 +209,33 @@ fn phase_advance_is_persisted_and_invalid_skip_leaves_last_valid_state() {
     assert!(matches!(error, ReleaseStateError::InvalidTransition));
     assert_eq!(session.phase, ReleasePhase::Planned);
     assert_eq!(store.load().unwrap().unwrap().phase, ReleasePhase::Planned);
+}
+
+#[test]
+fn failure_checkpoint_is_saved_atomically_with_the_terminal_phase() {
+    let git_dir = TempGitDir::new();
+    let store = ReleaseStateStore::new(git_dir.path.clone());
+    let mut session =
+        ReleaseSession::new("session-local-failure", r"D:\safe-temp\repository", "0.5.0");
+    session.phase = ReleasePhase::LocalChecks;
+    store.save(&session).unwrap();
+
+    store
+        .fail(
+            &mut session,
+            "full-project-check",
+            "RELEASE_LOCAL_VERIFICATION_FAILED",
+        )
+        .unwrap();
+
+    let expected = ReleaseFailureEvidence {
+        phase: ReleasePhase::LocalChecks,
+        step_id: "full-project-check".into(),
+        code: "RELEASE_LOCAL_VERIFICATION_FAILED".into(),
+    };
+    assert_eq!(session.phase, ReleasePhase::Failed);
+    assert_eq!(session.failure.as_ref(), Some(&expected));
+    assert_eq!(store.load().unwrap().unwrap(), session);
 }
 
 #[test]

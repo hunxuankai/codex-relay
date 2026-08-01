@@ -3,7 +3,7 @@ use codex_relay_release_console_lib::infrastructure::process::filter_release_env
 use codex_relay_release_console_lib::services::local_verification::{
     LocalArtifactService, LocalCommandEvidence, LocalExecutable, LocalVerificationBackend,
     LocalVerificationBackendError, LocalVerificationCommand, LocalVerificationError,
-    LocalVerificationService,
+    LocalVerificationFailure, LocalVerificationProcessError, LocalVerificationService,
 };
 use std::ffi::OsString;
 use std::fs;
@@ -14,6 +14,30 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
+
+fn find_on_path(file_name: &str) -> PathBuf {
+    let path = std::env::var_os("PATH").expect("PATH must be available for release checks");
+    std::env::split_paths(&path)
+        .map(|directory| directory.join(file_name))
+        .find(|candidate| candidate.is_file())
+        .unwrap_or_else(|| panic!("{file_name} must be available for release checks"))
+}
+
+fn set_environment(
+    environment: &mut Vec<(OsString, OsString)>,
+    name: &str,
+    value: impl Into<OsString>,
+) {
+    let value = value.into();
+    if let Some((_, existing)) = environment
+        .iter_mut()
+        .find(|(existing, _)| existing.to_string_lossy().eq_ignore_ascii_case(name))
+    {
+        *existing = value;
+    } else {
+        environment.push((OsString::from(name), value));
+    }
+}
 
 struct RecordingBackend {
     commands: Mutex<Vec<LocalVerificationCommand>>,
@@ -134,8 +158,8 @@ fn nonzero_command_stops_later_checks_and_preserves_failed_step_identity() {
         error,
         LocalVerificationError::CommandFailed {
             command_id,
-            exit_code,
-        } if command_id == "release-console-rust-tests" && exit_code == Some(1)
+            failure: LocalVerificationFailure::ExitCode(1),
+        } if command_id == "release-console-rust-tests"
     ));
     assert_eq!(
         backend.commands.into_inner().unwrap(),
@@ -157,12 +181,16 @@ impl LocalVerificationBackend for BackendFailureBackend {
                 + 'a,
         >,
     > {
-        Box::pin(async { Err(LocalVerificationBackendError::Failed) })
+        Box::pin(async {
+            Err(LocalVerificationBackendError::Process(
+                LocalVerificationProcessError::Timeout,
+            ))
+        })
     }
 }
 
 #[test]
-fn backend_failure_preserves_command_identity_without_inventing_an_exit_code() {
+fn backend_failure_preserves_command_identity_and_safe_process_classification() {
     let service = LocalVerificationService::new();
 
     let error = tauri::async_runtime::block_on(service.run(
@@ -175,7 +203,9 @@ fn backend_failure_preserves_command_identity_without_inventing_an_exit_code() {
         error,
         LocalVerificationError::CommandFailed {
             command_id,
-            exit_code: None,
+            failure: LocalVerificationFailure::Process(
+                LocalVerificationProcessError::Timeout
+            ),
         } if command_id == "release-structure-tests"
     ));
 }
@@ -301,13 +331,6 @@ impl LocalVerificationBackend for FirstCommandProcessBackend {
 
 #[test]
 fn filtered_process_backend_runs_release_structure_tests_without_encoding_sensitive_failure() {
-    let path = std::env::var_os("PATH").expect("PATH must be available for release checks");
-    let find_on_path = |file_name: &str| {
-        std::env::split_paths(&path)
-            .map(|directory| directory.join(file_name))
-            .find(|candidate| candidate.is_file())
-            .unwrap_or_else(|| panic!("{file_name} must be available for release checks"))
-    };
     let (_cancel_sender, cancel) = tokio::sync::watch::channel(false);
     let backend = FirstCommandProcessBackend {
         process: ProcessLocalVerificationBackend::new(
@@ -329,4 +352,50 @@ fn filtered_process_backend_runs_release_structure_tests_without_encoding_sensit
 
     assert_eq!(evidence[0].id, "release-structure-tests");
     assert_eq!(evidence[0].exit_code, 0);
+}
+
+#[test]
+#[ignore = "runs the complete project check through the production process backend"]
+fn filtered_process_backend_runs_full_project_check_without_backend_failure() {
+    let safe_root = tempfile::tempdir().unwrap();
+    let profile = safe_root.path().join("profile");
+    let app_data = safe_root.path().join("appdata");
+    let local_app_data = safe_root.path().join("localappdata");
+    let npm_cache = safe_root.path().join("npm-cache");
+    let temp = safe_root.path().join("temp");
+    for directory in [&profile, &app_data, &local_app_data, &npm_cache, &temp] {
+        fs::create_dir_all(directory).unwrap();
+    }
+    let mut environment = filter_release_environment(std::env::vars_os());
+    for (name, value) in [
+        ("USERPROFILE", profile.as_os_str()),
+        ("APPDATA", app_data.as_os_str()),
+        ("LOCALAPPDATA", local_app_data.as_os_str()),
+        ("NPM_CONFIG_CACHE", npm_cache.as_os_str()),
+        ("TEMP", temp.as_os_str()),
+        ("TMP", temp.as_os_str()),
+    ] {
+        set_environment(&mut environment, name, value);
+    }
+    let (_cancel_sender, cancel) = tokio::sync::watch::channel(false);
+    let backend = ProcessLocalVerificationBackend::new(
+        find_on_path("npm.cmd"),
+        find_on_path("cargo.exe"),
+        environment,
+        cancel,
+    );
+    let command = LocalVerificationCommand {
+        id: "full-project-check".into(),
+        executable: LocalExecutable::Npm,
+        args: vec!["run".into(), "check".into()],
+    };
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap();
+
+    let evidence = tauri::async_runtime::block_on(backend.run(&repository, &command)).unwrap();
+
+    assert_eq!(evidence.id, "full-project-check");
+    assert_eq!(evidence.exit_code, 0);
 }

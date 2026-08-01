@@ -15,6 +15,7 @@ const session: ReleaseSession = {
   published: null,
   cleanup: null,
   cleanupWarning: null,
+  failure: null,
 }
 
 describe('ReleaseStepDetails', () => {

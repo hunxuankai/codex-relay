@@ -23,6 +23,7 @@ function session(id: string, phase: ReleaseSession['phase']): ReleaseSession {
     published: null,
     cleanup: null,
     cleanupWarning: null,
+    failure: null,
   }
 }
 
@@ -152,6 +153,53 @@ describe('useReleaseSession', () => {
       code: 'RELEASE_CANCEL_AFTER_PUSH_FORBIDDEN',
       message: '候选已推送，不能回滚取消。',
     })
+  })
+
+  it('clears the previous event channel before loading a persisted session', async () => {
+    let startEvent: ((event: ReleaseEvent) => void) | undefined
+    const persisted = {
+      ...session('session-2', 'failed'),
+      repositoryPath: 'D:\\safe-temp\\repository-2',
+      failure: {
+        phase: 'localChecks' as const,
+        stepId: 'full-project-check',
+        code: 'RELEASE_LOCAL_VERIFICATION_FAILED',
+      },
+    }
+    const client = {
+      inspectRepository: vi.fn(),
+      pushRepository: vi.fn(),
+      preparePlan: vi.fn(),
+      startRelease: vi.fn(
+        async (
+          _planId: string,
+          _proxy: typeof directProxy,
+          onEvent: (event: ReleaseEvent) => void,
+        ) => {
+          startEvent = onEvent
+          return session('session-1', 'localChecks')
+        },
+      ),
+      getReleaseSession: vi.fn().mockResolvedValue(persisted),
+      resumeRelease: vi.fn(),
+      cancelRelease: vi.fn(),
+      publishRelease: vi.fn(),
+      exportSummary: vi.fn(),
+    }
+    const release = useReleaseSession({ client })
+
+    await release.start('plan-1', directProxy)
+    startEvent?.({
+      kind: 'stepFailed',
+      stepId: 'release-structure-tests',
+      code: 'RELEASE_LOCAL_VERIFICATION_FAILED',
+      message: '旧会话失败。',
+    })
+    await release.load(persisted.repositoryPath)
+    startEvent?.({ kind: 'sessionUpdated', session: session('stale', 'failed') })
+
+    expect(release.session.value).toEqual(persisted)
+    expect(release.events.value).toEqual([])
   })
 
   it('passes the explicitly displayed Draft identity to publish', async () => {

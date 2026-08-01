@@ -438,6 +438,7 @@ describe('release console shell', () => {
       published: null,
       cleanup: null,
       cleanupWarning: null,
+      failure: null,
     }
     window.localStorage.setItem(
       REPOSITORY_PREFERENCE_KEY,

@@ -168,6 +168,12 @@ export interface CleanupRunEvidence {
   jobs: readonly WorkflowJobStatus[]
 }
 
+export interface ReleaseFailureEvidence {
+  phase: ReleasePhase
+  stepId: string
+  code: string
+}
+
 export interface ReleaseSession {
   id: string
   repositoryPath: string
@@ -180,6 +186,7 @@ export interface ReleaseSession {
   published: PublishedReleaseEvidence | null
   cleanup: CleanupRunEvidence | null
   cleanupWarning: string | null
+  failure: ReleaseFailureEvidence | null
 }
 
 export type ReleaseEvent =

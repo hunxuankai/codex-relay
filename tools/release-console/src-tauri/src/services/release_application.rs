@@ -1084,19 +1084,23 @@ impl SystemReleaseApplication {
         code: &str,
         message: &str,
     ) {
-        if let Ok(Some(mut current)) = store.load()
-            && !matches!(
+        if let Ok(Some(mut current)) = store.load() {
+            let should_emit = if matches!(
                 current.phase,
                 ReleasePhase::Committed | ReleasePhase::Failed | ReleasePhase::Cancelled
-            )
-        {
-            let _ = store.advance(&mut current, ReleasePhase::Failed);
-            emit(
-                events,
-                ReleaseEvent::SessionUpdated {
-                    session: Box::new(current),
-                },
-            );
+            ) {
+                current.phase == ReleasePhase::Failed
+            } else {
+                store.fail(&mut current, step_id, code).is_ok()
+            };
+            if should_emit {
+                emit(
+                    events,
+                    ReleaseEvent::SessionUpdated {
+                        session: Box::new(current),
+                    },
+                );
+            }
         }
         emit(
             events,
@@ -1685,7 +1689,7 @@ mod tests {
         let sink = TestEventSink::default();
         let error = crate::services::release_orchestrator::ReleaseOrchestratorError::LocalVerificationFailed {
             command_id: "release-structure-tests".into(),
-            exit_code: Some(1),
+            failure: crate::services::local_verification::LocalVerificationFailure::ExitCode(1),
         };
 
         SystemReleaseApplication::new().finish_with_orchestrator_error(
@@ -1695,7 +1699,16 @@ mod tests {
             &error,
         );
 
-        assert_eq!(store.load().unwrap().unwrap().phase, ReleasePhase::Failed);
+        let persisted = store.load().unwrap().unwrap();
+        assert_eq!(persisted.phase, ReleasePhase::Failed);
+        assert_eq!(
+            persisted.failure,
+            Some(crate::models::ReleaseFailureEvidence {
+                phase: ReleasePhase::Idle,
+                step_id: "release-structure-tests".into(),
+                code: "RELEASE_LOCAL_VERIFICATION_FAILED".into(),
+            })
+        );
         assert!(sink.events.lock().unwrap().iter().any(|event| {
             matches!(
                 event,
@@ -1711,7 +1724,7 @@ mod tests {
     }
 
     #[test]
-    fn local_verification_backend_failure_does_not_invent_an_exit_code() {
+    fn local_verification_timeout_emits_specific_safe_failure_evidence() {
         let directory = tempfile::tempdir().unwrap();
         let store = ReleaseStateStore::new(directory.path().to_path_buf());
         let session = ReleaseSession::new(
@@ -1723,7 +1736,9 @@ mod tests {
         let sink = TestEventSink::default();
         let error = crate::services::release_orchestrator::ReleaseOrchestratorError::LocalVerificationFailed {
             command_id: "release-structure-tests".into(),
-            exit_code: None,
+            failure: crate::services::local_verification::LocalVerificationFailure::Process(
+                crate::services::local_verification::LocalVerificationProcessError::Timeout,
+            ),
         };
 
         SystemReleaseApplication::new().finish_with_orchestrator_error(
@@ -1742,7 +1757,91 @@ mod tests {
                     message,
                 } if step_id == "release-structure-tests"
                     && code == "RELEASE_LOCAL_VERIFICATION_FAILED"
-                    && message == "本地发布门禁命令未能完成，且没有可用退出码；候选文件已回滚，尚未提交或推送。"
+                    && message == "本地发布门禁超过允许时间；候选文件已回滚，尚未提交或推送。"
+            )
+        }));
+    }
+
+    #[test]
+    fn local_verification_process_failures_keep_specific_safe_messages() {
+        use crate::services::local_verification::{
+            LocalVerificationFailure, LocalVerificationProcessError,
+        };
+
+        let cases = [
+            (
+                LocalVerificationProcessError::JobUnavailable,
+                "本地发布门禁进程无法安全启动；候选文件已回滚，尚未提交或推送。",
+            ),
+            (
+                LocalVerificationProcessError::OutputTooLarge,
+                "本地发布门禁输出超过安全上限；候选文件已回滚，尚未提交或推送。",
+            ),
+            (
+                LocalVerificationProcessError::Timeout,
+                "本地发布门禁超过允许时间；候选文件已回滚，尚未提交或推送。",
+            ),
+            (
+                LocalVerificationProcessError::ProcessTreeTermination,
+                "本地发布门禁进程树未能安全结束；候选文件已回滚，尚未提交或推送。",
+            ),
+            (
+                LocalVerificationProcessError::OutputRead,
+                "无法完整读取本地发布门禁结果；候选文件已回滚，尚未提交或推送。",
+            ),
+            (
+                LocalVerificationProcessError::InputWrite,
+                "本地发布门禁输入边界失败；候选文件已回滚，尚未提交或推送。",
+            ),
+        ];
+
+        for (failure, expected) in cases {
+            let error = ReleaseOrchestratorError::LocalVerificationFailed {
+                command_id: "full-project-check".into(),
+                failure: LocalVerificationFailure::Process(failure),
+            };
+
+            assert_eq!(error.failure_message(), expected);
+        }
+    }
+
+    #[test]
+    fn already_failed_session_reemits_the_persisted_failure_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReleaseStateStore::new(directory.path().to_path_buf());
+        let mut session = ReleaseSession::new(
+            "session-persisted-local-failure",
+            r"D:\safe-temp\repository",
+            "0.5.0",
+        );
+        session.phase = ReleasePhase::LocalChecks;
+        store.save(&session).unwrap();
+        store
+            .fail(
+                &mut session,
+                "full-project-check",
+                "RELEASE_LOCAL_VERIFICATION_FAILED",
+            )
+            .unwrap();
+        let sink = TestEventSink::default();
+        let error = crate::services::release_orchestrator::ReleaseOrchestratorError::LocalVerificationFailed {
+            command_id: "full-project-check".into(),
+            failure: crate::services::local_verification::LocalVerificationFailure::ExitCode(1),
+        };
+
+        SystemReleaseApplication::new().finish_with_orchestrator_error(
+            &session.id,
+            &store,
+            Some(&sink),
+            &error,
+        );
+
+        assert!(sink.events.lock().unwrap().iter().any(|event| {
+            matches!(
+                event,
+                ReleaseEvent::SessionUpdated { session: snapshot }
+                    if snapshot.phase == ReleasePhase::Failed
+                        && snapshot.failure == session.failure
             )
         }));
     }

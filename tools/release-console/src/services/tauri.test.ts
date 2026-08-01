@@ -91,6 +91,7 @@ describe('release console typed Tauri service', () => {
       published: null,
       cleanup: null,
       cleanupWarning: null,
+      failure: null,
     }
     invokeMock
       .mockResolvedValueOnce({
@@ -171,6 +172,7 @@ describe('release console typed Tauri service', () => {
           published: null,
           cleanup: null,
           cleanupWarning: null,
+          failure: null,
         },
       }
     })

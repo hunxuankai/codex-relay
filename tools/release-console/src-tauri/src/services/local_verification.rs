@@ -102,9 +102,39 @@ impl LocalArtifactService {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum LocalVerificationProcessError {
+    #[error("无法创建本地门禁 Job Object")]
+    JobUnavailable,
+    #[error("无法将本地门禁进程加入 Job Object")]
+    JobAssignment,
+    #[error("本地门禁进程启动失败")]
+    ProcessStart,
+    #[error("本地门禁进程恢复失败")]
+    ProcessResume,
+    #[error("本地门禁输出超过安全上限")]
+    OutputTooLarge,
+    #[error("本地门禁进程超时")]
+    Timeout,
+    #[error("本地门禁进程树未能安全终止")]
+    ProcessTreeTermination,
+    #[error("读取本地门禁输出失败")]
+    OutputRead,
+    #[error("本地门禁输入超过安全上限")]
+    InputTooLarge,
+    #[error("写入本地门禁输入失败")]
+    InputWrite,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LocalVerificationFailure {
+    ExitCode(i32),
+    Process(LocalVerificationProcessError),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum LocalVerificationBackendError {
-    #[error("本地命令失败")]
-    Failed,
+    #[error("本地命令进程失败：{0}")]
+    Process(LocalVerificationProcessError),
     #[error("本地命令已取消")]
     Cancelled,
 }
@@ -128,7 +158,7 @@ pub enum LocalVerificationError {
     #[error("本地发布门禁失败：{command_id}")]
     CommandFailed {
         command_id: String,
-        exit_code: Option<i32>,
+        failure: LocalVerificationFailure,
     },
     #[error("本地发布门禁已取消")]
     Cancelled,
@@ -205,17 +235,17 @@ impl LocalVerificationService {
                 Err(LocalVerificationBackendError::Cancelled) => {
                     return Err(LocalVerificationError::Cancelled);
                 }
-                Err(LocalVerificationBackendError::Failed) => {
+                Err(LocalVerificationBackendError::Process(error)) => {
                     return Err(LocalVerificationError::CommandFailed {
                         command_id: command.id.clone(),
-                        exit_code: None,
+                        failure: LocalVerificationFailure::Process(error),
                     });
                 }
             };
             if item.exit_code != 0 {
                 return Err(LocalVerificationError::CommandFailed {
                     command_id: command.id.clone(),
-                    exit_code: Some(item.exit_code),
+                    failure: LocalVerificationFailure::ExitCode(item.exit_code),
                 });
             }
             evidence.push(item);

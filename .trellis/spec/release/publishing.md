@@ -367,13 +367,13 @@ git -c http.proxy=<url-or-empty> -c https.proxy=<url-or-empty> \
     push origin <expected_sha>:refs/heads/main
 ```
 
-### 0.4 本地发布门禁编码与错误证据契约
+### 0.4 本地发布门禁进程、错误证据与失败进度契约
 
 #### 1. 范围/触发条件
 
-修改 `scripts/validate-release-request.ps1`、发布结构测试、本地门禁命令、候选回滚后的错误传播或
-`ReleaseEvent::StepFailed` 时，必须遵循本节。Windows 过滤环境可能改变 PowerShell 中文输出的编码；
-机器判断不得依赖本地化文本能否按 UTF-8 解码。
+修改 `SafeProcessRunner` 的主进程退出后收尾、本地门禁命令、发布结构测试、候选回滚后的错误传播、
+`ReleaseSession` 终态字段或 `ReleaseTimeline` 时，必须遵循本节。Windows 过滤环境可能改变
+PowerShell 中文输出编码；机器判断不得依赖本地化文本，也不得用终态 phase 反推已丢失的失败现场。
 
 #### 2. 签名
 
@@ -386,36 +386,88 @@ RELEASE_NOTES_SECRET_DETECTED: 发布说明包含疑似秘密，已停止发布�
 Rust 错误证据固定为：
 
 ```rust
+enum LocalVerificationProcessError {
+    JobUnavailable,
+    JobAssignment,
+    ProcessStart,
+    ProcessResume,
+    OutputTooLarge,
+    Timeout,
+    ProcessTreeTermination,
+    OutputRead,
+    InputTooLarge,
+    InputWrite,
+}
+
+enum LocalVerificationFailure {
+    ExitCode(i32),
+    Process(LocalVerificationProcessError),
+}
+
 LocalVerificationError::CommandFailed {
     command_id: String,
-    exit_code: Option<i32>,
+    failure: LocalVerificationFailure,
 }
 
 ReleaseOrchestratorError::LocalVerificationFailed {
     command_id: String,
-    exit_code: Option<i32>,
+    failure: LocalVerificationFailure,
 }
+
+struct ReleaseFailureEvidence {
+    phase: ReleasePhase,
+    step_id: String,
+    code: String,
+}
+```
+
+失败终态必须通过以下边界写入：
+
+```rust
+ReleaseStateStore::fail(
+    session: &mut ReleaseSession,
+    step_id: impl Into<String>,
+    code: impl Into<String>,
+) -> Result<(), ReleaseStateError>
 ```
 
 前端事件 schema 不变：
 
 ```typescript
 { kind: 'stepFailed'; stepId: string; code: string; message: string }
+
+interface ReleaseSession {
+  failure: {
+    phase: ReleasePhase
+    stepId: string
+    code: string
+  } | null
+}
 ```
 
 #### 3. 契约
 
 - 自动化测试只把 ASCII 稳定码作为脚本错误契约；中文后缀只用于人工阅读，不得作为唯一断言。
 - 疑似秘密发布说明必须以非零状态停止，且在拒绝后不得创建或追加 GitHub workflow output。
-- `LocalVerificationBackend` 返回非零 `LocalCommandEvidence` 时保存 `Some(exit_code)`；进程后端失败且没有
-  可用退出码时保存 `None`；取消继续独立映射为 `Cancelled`。
-- `ReleaseOrchestrator` 必须先完成候选事务回滚，再把命令 ID 与可选退出码传给 application。回滚失败
+- `SafeProcessRunner` 得到主进程退出状态后仍按固定宽限等待 Job Object。宽限后有剩余后代时，调用
+  `terminate_job_and_wait`；若安全终止和退出验证成功，保留主进程真实退出码。只有验证失败才返回
+  `ProcessTreeTermination`。不得因为“曾有残留后代”就无条件抹掉成功退出码。
+- `LocalVerificationBackend` 返回非零 `LocalCommandEvidence` 时使用 `ExitCode(code)`；进程后端失败时
+  穷尽映射为 `Process(category)`；取消继续独立映射为 `Cancelled`。
+- `ReleaseOrchestrator` 必须先完成候选事务回滚，再把命令 ID 与类型化失败传给 application。回滚失败
   优先返回 `RELEASE_ROLLBACK_INCOMPLETE`，不得发送“候选已回滚”的消息。
 - 本地门禁普通失败事件使用具体命令 ID 作为 `stepId`，错误码固定为
-  `RELEASE_LOCAL_VERIFICATION_FAILED`。有退出码时显示“退出码 N”；没有退出码时显示“命令未能完成，
-  且没有可用退出码”；两种情况都明确候选文件已回滚、尚未提交或推送。
+  `RELEASE_LOCAL_VERIFICATION_FAILED`。消息必须区分退出码、启动/恢复、超时、输出上限、进程树终止、
+  输出读取和输入边界；只陈述实际保留的分类。
+- 失败 phase、具体 `stepId` 和稳定 code 必须通过 `ReleaseStateStore::fail` 在一次原子保存中写入
+  `ReleaseSession.failure`。application 对已失败会话必须再次发送该权威 session 快照，不能依赖
+  125 ms watcher 恰好观察到终态。
+- `failure` 使用 serde default，session schema version 保持 1；旧失败会话缺字段时继续读取为 null，
+  但界面不得猜测精确失败步骤。新 `ReleaseSession` 固定 `failure=null`。
+- 时间线优先消费持久化 failure，其次才使用本轮 `stepFailed` 和最后非终态 phase。失败步骤之前为
+  “已完成”，当前为“失败”，之后为“未开始”；加载其他仓库 session 前必须失效旧事件通道。
 - stdout、stderr、环境变量、代理 URL、Authorization、Token 和真实密钥不得进入事件、通知、持久化
-  session、任务材料或测试失败输出。过滤环境回归只断言安全元数据和退出状态。
+  session、任务材料或测试失败输出。failure 也不得保存 PID、命令行或本地化 message。
 
 #### 4. 验证与错误矩阵
 
@@ -423,10 +475,16 @@ ReleaseOrchestratorError::LocalVerificationFailed {
 |---|---|
 | 发布说明命中疑似秘密规则 | 非零退出；包含 `RELEASE_NOTES_SECRET_DETECTED`；workflow output 不存在 |
 | `release-structure-tests` 返回退出码 1 | `stepId=release-structure-tests`，code 保持 `RELEASE_LOCAL_VERIFICATION_FAILED`，消息包含退出码 1 和已回滚边界 |
-| 进程后端失败且没有退出码 | 同一具体 `stepId/code`，消息明确无可用退出码，不虚构启动、超时或其它底层类别 |
+| 主进程退出 0，剩余后代可安全终止 | 返回 `LocalCommandEvidence.exit_code=0`，不得改写为进程树失败 |
+| 剩余后代无法安全终止或验证 | `Process(ProcessTreeTermination)`，消息明确进程树未能安全结束 |
+| 进程超过本地门禁超时 | `Process(Timeout)`，消息明确超过允许时间，不显示“无退出码” |
+| 子进程输出超过安全上限 | `Process(OutputTooLarge)`，终止进程树并显示安全分类 |
 | 用户取消本地门禁 | session=`cancelled`，继续使用 `RELEASE_CANCELLED`，不改写为普通命令失败 |
 | 候选回滚未完整验证 | `RELEASE_ROLLBACK_INCOMPLETE`，不得声称候选已回滚 |
+| 失败后关闭并重新打开控制台 | 从 `session.failure` 恢复此前完成、当前失败和后续未开始步骤 |
+| schema v1 旧失败会话没有 failure | 会话可读取；不显示虚构的精确失败步骤 |
 | 过滤环境执行固定发布结构测试 | 真实 npm shim 退出 0；不得因中文乱码使测试误失败 |
+| 生产 backend 执行 `full-project-check` | 显式慢速探针返回真实退出码；默认测试套件不递归执行该探针 |
 
 #### 5. 良好/基线/错误用例
 
@@ -434,43 +492,61 @@ ReleaseOrchestratorError::LocalVerificationFailed {
   秘密说明被拒绝且结构测试通过。
 - 良好：`release-structure-tests` 退出 1，界面显示
   `[release-structure-tests] RELEASE_LOCAL_VERIFICATION_FAILED`、退出码和“尚未提交或推送”。
+- 良好：`npm run check` 主进程退出 0，但一个后代超过 5 秒；runner 安全终止并验证后仍返回 0。
+- 良好：失败 session 持久化 `{ phase: 'localChecks', stepId: 'full-project-check', code: ... }`，
+  控制台重启后“发布专项”已完成、“完整检查”失败、“普通构建”未开始。
 - 基线：普通远端或 Push 编排错误仍使用 `releasePipeline` 与现有通用安全消息。
+- 基线：旧失败 session 没有 failure 时保持保守展示，不从 `failed` phase 猜测历史步骤。
 - 错误：断言 `diagnostic.includes('发布说明包含疑似秘密')`，把 Windows 输出代码页变成发布门禁。
-- 错误：只向 application 传 `error.code()`，丢失命令 ID/退出码；或把原始 stderr 发到 WebView。
-- 错误：后端只知道“失败且无退出码”时写成“启动失败”或“超时”，虚构未保留的底层证据。
+- 错误：主进程退出后只要 Job 仍有活动进程，就调用 `terminate()` 并无条件返回
+  `ProcessTreeTermination`，不验证终止是否成功。
+- 错误：只向 application 传 `error.code()`，或用 `Option<i32>` 把所有进程失败折叠成 None。
+- 错误：只在实时事件数组保存失败位置；重启后把所有步骤重置为“未开始”。
 
 #### 6. 必需测试
 
 - `src/release-request.test.ts`：断言非零退出、`RELEASE_NOTES_SECRET_DETECTED` 和 workflow output 不存在。
-- `tests/local_verification.rs`：断言非零退出保留 `Some(code)`、backend 失败保留 `None`、后续命令停止；
-  通过真实 `ProcessLocalVerificationBackend` 与过滤环境执行生产定义的第一条发布结构测试。
-- `tests/release_orchestrator.rs`：断言本地失败先回滚六文件和事务标记，再保留具体命令 ID/退出码，且不 Push。
-- `release_application.rs` 单元测试：断言有/无退出码两种 `StepFailed` 的具体 `stepId`、稳定 code、安全消息，
-  并保留其他编排错误的通用行为。
+- core `codex_process`：真实父进程退出 0、后代继续运行时，断言安全终止后代并保留 `Some(0)`；
+  无法终止、取消、超时和输出上限契约继续通过。
+- `tests/local_verification.rs`：断言 `ExitCode` / `Process(category)`、后续命令停止和过滤环境结构测试；
+  默认 ignored 的完整检查探针必须在 Cargo 外层退出后直接运行测试二进制，避免嵌套 target 锁。
+- `tests/release_orchestrator.rs`：断言本地失败先回滚，再保留分类且原子写入 failure，不 Push。
+- `tests/release_state.rs`：断言 `fail` 原子保存、旧 schema v1 兼容、非法非终态 failure 拒绝和新 session 清空。
+- `release_application.rs`：断言分类消息，并对已失败 session 显式重发带 failure 的权威快照。
+- `ReleaseTimeline.test.ts` / `useReleaseSession.test.ts`：断言跨重启失败投影、旧事件回退、保守旧会话
+  和加载 session 时失效旧事件通道。
 
 #### 7. 错误与正确做法
 
-错误：机器测试依赖本地化子进程文本，并在跨层调用中只保留通用错误码。
-
-```typescript
-expect(diagnostic).toContain('发布说明包含疑似秘密')
-```
+错误：把“曾有剩余后代”直接等同于“进程树终止失败”，并在跨层调用中只保留可选退出码。
 
 ```rust
-finish_with_error(error.code());
+if job.active_processes()? > 0 {
+    let _ = job.terminate();
+    return Err(ProcessError::ProcessTreeTermination);
+}
+
+LocalVerificationError::CommandFailed {
+    command_id,
+    exit_code: None,
+}
 ```
 
-正确：脚本提供 ASCII 稳定码，错误对象保留最小安全证据，再由 application 生成用户事件。
-
-```typescript
-expect(diagnostic).toContain('RELEASE_NOTES_SECRET_DETECTED')
-```
+正确：验证安全终止结果、保留类型化失败，并原子持久化失败检查点。
 
 ```rust
+if job.active_processes()? > 0 && !terminate_job_and_wait(&*job, &mut child) {
+    return Err(ProcessError::ProcessTreeTermination);
+}
+
 ReleaseOrchestratorError::LocalVerificationFailed {
     command_id,
-    exit_code,
+    failure: LocalVerificationFailure::Process(
+        LocalVerificationProcessError::Timeout,
+    ),
 }
+
+state_store.fail(session, step_id, error.code())?;
 ```
 
 ## 1. 发布边界

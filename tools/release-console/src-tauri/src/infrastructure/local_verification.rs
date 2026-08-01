@@ -1,7 +1,7 @@
 use super::process::{ProcessError, ProcessInvocation, SafeProcessRunner};
 use crate::services::local_verification::{
     LocalCommandEvidence, LocalExecutable, LocalVerificationBackend, LocalVerificationBackendError,
-    LocalVerificationCommand,
+    LocalVerificationCommand, LocalVerificationProcessError,
 };
 use std::ffi::OsString;
 use std::future::Future;
@@ -80,7 +80,36 @@ impl LocalVerificationBackend for ProcessLocalVerificationBackend {
                 .await
                 .map_err(|error| match error {
                     ProcessError::Cancelled => LocalVerificationBackendError::Cancelled,
-                    _ => LocalVerificationBackendError::Failed,
+                    ProcessError::JobUnavailable => LocalVerificationBackendError::Process(
+                        LocalVerificationProcessError::JobUnavailable,
+                    ),
+                    ProcessError::JobAssignment => LocalVerificationBackendError::Process(
+                        LocalVerificationProcessError::JobAssignment,
+                    ),
+                    ProcessError::ProcessStart => LocalVerificationBackendError::Process(
+                        LocalVerificationProcessError::ProcessStart,
+                    ),
+                    ProcessError::ProcessResume => LocalVerificationBackendError::Process(
+                        LocalVerificationProcessError::ProcessResume,
+                    ),
+                    ProcessError::OutputTooLarge => LocalVerificationBackendError::Process(
+                        LocalVerificationProcessError::OutputTooLarge,
+                    ),
+                    ProcessError::Timeout => LocalVerificationBackendError::Process(
+                        LocalVerificationProcessError::Timeout,
+                    ),
+                    ProcessError::ProcessTreeTermination => LocalVerificationBackendError::Process(
+                        LocalVerificationProcessError::ProcessTreeTermination,
+                    ),
+                    ProcessError::OutputRead => LocalVerificationBackendError::Process(
+                        LocalVerificationProcessError::OutputRead,
+                    ),
+                    ProcessError::InputTooLarge => LocalVerificationBackendError::Process(
+                        LocalVerificationProcessError::InputTooLarge,
+                    ),
+                    ProcessError::InputWrite => LocalVerificationBackendError::Process(
+                        LocalVerificationProcessError::InputWrite,
+                    ),
                 })?;
             Ok(LocalCommandEvidence {
                 id: command.id.clone(),

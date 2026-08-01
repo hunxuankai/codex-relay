@@ -129,6 +129,8 @@ expect(diagnostic).toContain('RELEASE_NOTES_SECRET_DETECTED')
 
 - [ ] 是否有消费者把本地化 stdout/stderr 当作唯一成功或失败契约？
 - [ ] 错误经过 service → orchestrator → event/API 时，具体步骤、退出状态和取消/回滚语义是否仍存在？
+- [ ] 主进程退出状态与后代清理结果是否分别保留？可验证的安全终止不得无条件抹掉主退出码，
+  真正无法终止时也不得伪装成普通非零退出。
 - [ ] 集成测试是否使用生产环境过滤、真实命令 shim 和同一工作目录，而不只测试直接执行或 mock backend？
 - [ ] 安全消息是否只陈述实际保留的证据，没有把“无退出码”猜成启动失败或超时？
 

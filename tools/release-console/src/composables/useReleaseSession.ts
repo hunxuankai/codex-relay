@@ -153,6 +153,8 @@ export function useReleaseSession(options: UseReleaseSessionOptions = {}) {
 
   async function load(repositoryPath: string) {
     const sequence = beginOperation()
+    channelGeneration += 1
+    events.value = []
     try {
       const value = await client.getReleaseSession(repositoryPath)
       if (sequence === operationSequence) session.value = value

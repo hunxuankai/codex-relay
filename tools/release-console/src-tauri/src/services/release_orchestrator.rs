@@ -9,7 +9,8 @@ use crate::services::github_release::{
     DraftAuditService, GithubReleaseService, REMOTE_MONITOR_ATTEMPTS, REMOTE_MONITOR_DELAY,
 };
 use crate::services::local_verification::{
-    LocalVerificationBackend, LocalVerificationError, LocalVerificationService,
+    LocalVerificationBackend, LocalVerificationError, LocalVerificationFailure,
+    LocalVerificationProcessError, LocalVerificationService,
 };
 use crate::services::release_candidate::{ReleaseCandidatePlan, ReleaseCandidateTransaction};
 use crate::services::release_state::{ReleaseStateStore, RepositorySessionLock};
@@ -277,7 +278,7 @@ pub enum ReleaseOrchestratorError {
     #[error("本地发布门禁失败：{command_id}")]
     LocalVerificationFailed {
         command_id: String,
-        exit_code: Option<i32>,
+        failure: LocalVerificationFailure,
     },
     #[error("本地发布门禁失败，且候选未能完整回滚")]
     RollbackFailed,
@@ -325,13 +326,31 @@ impl ReleaseOrchestratorError {
     pub(crate) fn failure_message(&self) -> String {
         match self {
             Self::LocalVerificationFailed {
-                exit_code: Some(exit_code),
+                failure: LocalVerificationFailure::ExitCode(exit_code),
                 ..
             } => format!("本地发布门禁退出码 {exit_code}；候选文件已回滚，尚未提交或推送。"),
             Self::LocalVerificationFailed {
-                exit_code: None, ..
-            } => "本地发布门禁命令未能完成，且没有可用退出码；候选文件已回滚，尚未提交或推送。"
-                .into(),
+                failure: LocalVerificationFailure::Process(error),
+                ..
+            } => {
+                let reason = match error {
+                    LocalVerificationProcessError::JobUnavailable
+                    | LocalVerificationProcessError::JobAssignment
+                    | LocalVerificationProcessError::ProcessStart
+                    | LocalVerificationProcessError::ProcessResume => {
+                        "本地发布门禁进程无法安全启动"
+                    }
+                    LocalVerificationProcessError::OutputTooLarge => "本地发布门禁输出超过安全上限",
+                    LocalVerificationProcessError::Timeout => "本地发布门禁超过允许时间",
+                    LocalVerificationProcessError::ProcessTreeTermination => {
+                        "本地发布门禁进程树未能安全结束"
+                    }
+                    LocalVerificationProcessError::OutputRead => "无法完整读取本地发布门禁结果",
+                    LocalVerificationProcessError::InputTooLarge
+                    | LocalVerificationProcessError::InputWrite => "本地发布门禁输入边界失败",
+                };
+                format!("{reason}；候选文件已回滚，尚未提交或推送。")
+            }
             _ => "发布流程失败，请查看对应阶段证据。".into(),
         }
     }
@@ -388,7 +407,11 @@ impl ReleaseOrchestrator {
             .await;
         if let Err(error) = verification {
             if ReleaseCandidateTransaction::rollback_active(repository_path, git_dir).is_err() {
-                let _ = state_store.advance(session, ReleasePhase::Failed);
+                let step_id = match &error {
+                    LocalVerificationError::CommandFailed { command_id, .. } => command_id,
+                    LocalVerificationError::Cancelled => "releasePipeline",
+                };
+                let _ = state_store.fail(session, step_id, "RELEASE_ROLLBACK_INCOMPLETE");
                 return Err(ReleaseOrchestratorError::RollbackFailed);
             }
             match error {
@@ -400,14 +423,14 @@ impl ReleaseOrchestrator {
                 }
                 LocalVerificationError::CommandFailed {
                     command_id,
-                    exit_code,
+                    failure,
                 } => {
                     state_store
-                        .advance(session, ReleasePhase::Failed)
+                        .fail(session, &command_id, "RELEASE_LOCAL_VERIFICATION_FAILED")
                         .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
                     return Err(ReleaseOrchestratorError::LocalVerificationFailed {
                         command_id,
-                        exit_code,
+                        failure,
                     });
                 }
             }
@@ -426,7 +449,7 @@ impl ReleaseOrchestrator {
                     .await;
                 let source_rollback =
                     ReleaseCandidateTransaction::rollback_active(repository_path, git_dir);
-                let _ = state_store.advance(session, ReleasePhase::Failed);
+                let _ = state_store.fail(session, "commitPush", "RELEASE_PUSH_FAILED");
                 if index_rollback.is_err() || source_rollback.is_err() {
                     return Err(ReleaseOrchestratorError::RollbackFailed);
                 }

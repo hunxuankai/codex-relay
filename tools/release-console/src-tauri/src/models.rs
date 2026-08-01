@@ -335,6 +335,14 @@ pub enum ReleasePhase {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReleaseFailureEvidence {
+    pub phase: ReleasePhase,
+    pub step_id: String,
+    pub code: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReleaseSession {
     pub id: String,
     pub repository_path: String,
@@ -352,6 +360,8 @@ pub struct ReleaseSession {
     pub cleanup: Option<CleanupRunEvidence>,
     #[serde(default)]
     pub cleanup_warning: Option<String>,
+    #[serde(default)]
+    pub failure: Option<ReleaseFailureEvidence>,
 }
 
 impl ReleaseSession {
@@ -372,6 +382,7 @@ impl ReleaseSession {
             published: None,
             cleanup: None,
             cleanup_warning: None,
+            failure: None,
         }
     }
 }

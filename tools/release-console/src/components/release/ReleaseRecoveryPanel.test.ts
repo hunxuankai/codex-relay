@@ -16,6 +16,7 @@ function session(phase: ReleasePhase): ReleaseSession {
     published: null,
     cleanup: null,
     cleanupWarning: null,
+    failure: null,
   }
 }
 

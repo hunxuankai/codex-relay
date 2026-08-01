@@ -28,6 +28,7 @@ describe('ReleaseResultPanel', () => {
         jobs: [],
       },
       cleanupWarning: null,
+      failure: null,
     }
 
     const wrapper = mount(ReleaseResultPanel, {
@@ -53,6 +54,7 @@ describe('ReleaseResultPanel', () => {
       published: null,
       cleanup: null,
       cleanupWarning: null,
+      failure: null,
     }
 
     const wrapper = mount(ReleaseResultPanel, {
@@ -82,6 +84,7 @@ describe('ReleaseResultPanel', () => {
       },
       cleanup: null,
       cleanupWarning: null,
+      failure: null,
     }
 
     const wrapper = mount(ReleaseResultPanel, {

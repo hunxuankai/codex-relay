@@ -15,6 +15,8 @@ interface TimelineStep {
   eventAliases?: string[]
 }
 
+type TimelineStepState = 'completed' | 'current' | 'failed' | 'waiting'
+
 const steps: TimelineStep[] = [
   { id: 'preflight', label: '仓库预检', phase: 'inspected' },
   { id: 'plan', label: '候选预览', phase: 'planned' },
@@ -52,6 +54,13 @@ const phaseOrder: ReleasePhase[] = [
   'completedWithWarnings',
 ]
 
+const failedCommandSteps: Record<string, string> = {
+  'release-structure-tests': 'releaseTests',
+  'release-console-rust-tests': 'releaseTests',
+  'full-project-check': 'fullChecks',
+  'ordinary-build': 'ordinaryBuild',
+}
+
 function phaseIndex(phase: ReleasePhase) {
   return phaseOrder.indexOf(phase)
 }
@@ -65,9 +74,55 @@ function completedEvent(step: TimelineStep) {
     ) as Extract<ReleaseEvent, { kind: 'stepCompleted' }> | undefined
 }
 
-function stepState(step: TimelineStep) {
+function latestNonTerminalEventPhase() {
+  const update = [...props.events]
+    .reverse()
+    .find(
+      (event) =>
+        event.kind === 'sessionUpdated' &&
+        !['failed', 'cancelled'].includes(event.session.phase),
+    ) as Extract<ReleaseEvent, { kind: 'sessionUpdated' }> | undefined
+  return update?.session.phase ?? null
+}
+
+function failureStepId(stepId: string, phase: ReleasePhase | null) {
+  const mapped = failedCommandSteps[stepId] ?? stepId
+  if (steps.some((step) => step.id === mapped)) return mapped
+  if (!phase) return null
+  if (phase === 'workflowQueued') return 'remoteRun'
+  return steps.find((step) => step.phase === phase)?.id ?? null
+}
+
+const failedStepIndex = computed(() => {
+  if (props.session?.phase !== 'failed') return -1
+  if (props.session.failure) {
+    const stepId = failureStepId(
+      props.session.failure.stepId,
+      props.session.failure.phase,
+    )
+    return steps.findIndex((step) => step.id === stepId)
+  }
+  const failedEvent = [...props.events]
+    .reverse()
+    .find((event) => event.kind === 'stepFailed') as
+    | Extract<ReleaseEvent, { kind: 'stepFailed' }>
+    | undefined
+  const stepId = failureStepId(
+    failedEvent?.stepId ?? 'releasePipeline',
+    latestNonTerminalEventPhase(),
+  )
+  return steps.findIndex((step) => step.id === stepId)
+})
+
+function stepState(step: TimelineStep): TimelineStepState {
   const current = props.session?.phase ?? 'idle'
-  if (current === 'failed') return 'waiting'
+  if (current === 'failed') {
+    const targetIndex = steps.indexOf(step)
+    if (failedStepIndex.value < 0) return 'waiting'
+    if (targetIndex < failedStepIndex.value) return 'completed'
+    if (targetIndex === failedStepIndex.value) return 'failed'
+    return 'waiting'
+  }
   if (current === 'cancelled') return 'waiting'
   const currentIndex = phaseIndex(current)
   const targetIndex = phaseIndex(step.phase)
@@ -82,6 +137,7 @@ function stateLabel(step: TimelineStep) {
   const state = stepState(step)
   if (state === 'completed') return '已完成'
   if (state === 'current') return '进行中'
+  if (state === 'failed') return '失败'
   return '未开始'
 }
 
@@ -89,6 +145,7 @@ function tagType(step: TimelineStep) {
   const state = stepState(step)
   if (state === 'completed') return 'success'
   if (state === 'current') return 'primary'
+  if (state === 'failed') return 'danger'
   return 'info'
 }
 
@@ -192,6 +249,10 @@ const visibleSteps = computed(() =>
   background: var(--accent-soft);
 }
 
+.release-step.is-failed {
+  background: color-mix(in srgb, var(--danger-color) 10%, transparent);
+}
+
 .step-index {
   display: grid;
   flex: 0 0 1.65rem;
@@ -209,6 +270,11 @@ const visibleSteps = computed(() =>
 .is-current .step-index {
   border-color: var(--accent-color);
   color: var(--accent-color);
+}
+
+.is-failed .step-index {
+  border-color: var(--danger-color);
+  color: var(--danger-color);
 }
 
 .step-copy {
