@@ -153,6 +153,65 @@ describe('ProviderList', () => {
     },
   )
 
+  it.each(['apply', 'applied', 'update'] as const)(
+    'keeps the %s compatibility explanation independent from the connection mutation',
+    async (action) => {
+      const wrapper = mount(ProviderList, {
+        props: {
+          providers: [provider({
+            configurationComplete: action !== 'apply',
+            connection: providerConnection({
+              role: 'source',
+              status: action === 'apply' ? 'none' : 'active',
+              action,
+              disabledReason: action === 'apply' ? '缺少受管 API Key。' : null,
+            }),
+          })],
+          selectedProviderId: 'provider-a',
+          busy: false,
+        },
+      })
+
+      const explanation = wrapper.get(
+        '[aria-label="查看 Provider A 的旧会话兼容性说明"]',
+      )
+      expect(explanation.attributes('disabled')).toBeUndefined()
+
+      await explanation.trigger('click')
+
+      expect(wrapper.emitted('connectionRisk')?.[0]).toEqual(['provider-a'])
+      expect(wrapper.emitted('connection')).toBeUndefined()
+
+      await wrapper.setProps({ busy: true })
+      expect(explanation.attributes('disabled')).toBeDefined()
+    },
+  )
+
+  it('does not show the compatibility explanation for restore or absent connection actions', () => {
+    const wrapper = mount(ProviderList, {
+      props: {
+        providers: [
+          provider({
+            connection: providerConnection({
+              role: 'identity',
+              status: 'stale',
+              action: 'restore',
+            }),
+          }),
+          provider({
+            id: 'provider-b',
+            name: 'Provider B',
+            isActive: false,
+          }),
+        ],
+        selectedProviderId: null,
+        busy: false,
+      },
+    })
+
+    expect(wrapper.findAll('[aria-label$="旧会话兼容性说明"]')).toHaveLength(0)
+  })
+
   it('prevents deleting an identity that still owns a stale connection recovery point', () => {
     const wrapper = mount(ProviderList, {
       props: {

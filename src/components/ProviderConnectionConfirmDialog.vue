@@ -25,6 +25,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   confirm: []
   cancel: []
+  showRisk: []
+  closed: []
 }>()
 
 const title = computed(() => {
@@ -98,10 +100,15 @@ function handleModelValue(value: boolean) {
     :close-on-press-escape="!busy"
     destroy-on-close
     role="alertdialog"
-    aria-describedby="provider-connection-impact"
+    :aria-describedby="
+      action === 'restore'
+        ? 'provider-connection-impact'
+        : 'provider-connection-impact provider-connection-compatibility-warning'
+    "
     @update:model-value="handleModelValue"
     @open-auto-focus="scheduleCancelFocus"
     @opened="scheduleCancelFocus"
+    @closed="emit('closed')"
   >
     <dl class="connection-summary">
       <div v-if="action !== 'restore'">
@@ -124,6 +131,25 @@ function handleModelValue(value: boolean) {
     <p id="provider-connection-impact" class="connection-impact">
       只更新目标身份的连接地址与当前认证，顶层 <code>model_provider</code> 保持不变。
     </p>
+    <aside
+      v-if="action !== 'restore'"
+      id="provider-connection-compatibility-warning"
+      class="connection-compatibility-warning"
+      role="note"
+    >
+      <p>旧会话的加密推理或压缩上下文可能与新连接不兼容，恢复会话时可能失败。</p>
+      <ElButton
+        class="connection-risk-details"
+        type="warning"
+        text
+        native-type="button"
+        aria-label="查看旧会话兼容性详细说明"
+        :disabled="busy"
+        @click="emit('showRisk')"
+      >
+        查看详细说明
+      </ElButton>
+    </aside>
     <template #footer>
       <div class="dialog-actions">
         <ElButton
@@ -182,6 +208,28 @@ function handleModelValue(value: boolean) {
   line-height: 1.6;
 }
 
+.connection-compatibility-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  border: 1px solid var(--warning-border);
+  border-radius: 0.65rem;
+  padding: 0.6rem 0.7rem;
+  background: var(--warning-soft);
+}
+
+.connection-compatibility-warning p {
+  margin: 0;
+  color: var(--warning-text);
+  line-height: 1.55;
+}
+
+.connection-risk-details {
+  flex: 0 0 auto;
+}
+
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
@@ -192,6 +240,11 @@ function handleModelValue(value: boolean) {
   .connection-summary div {
     grid-template-columns: 1fr;
     gap: 0.2rem;
+  }
+
+  .connection-compatibility-warning {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>

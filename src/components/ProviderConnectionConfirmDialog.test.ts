@@ -39,6 +39,34 @@ describe('ProviderConnectionConfirmDialog', () => {
     expect(wrapper.emitted('confirm')).toHaveLength(1)
   })
 
+  it.each(['apply', 'update'] as const)(
+    'warns about old-session compatibility before the %s mutation',
+    async (action) => {
+      const wrapper = mount(ProviderConnectionConfirmDialog, {
+        attachTo: document.body,
+        props: {
+          open: true,
+          action,
+          sourceProviderName: 'Provider B',
+          targetProviderId: 'provider-a',
+          baseUrlName: '主用地址',
+          apiKeyName: '主用密钥',
+          busy: false,
+        },
+      })
+      await flushPromises()
+
+      const text = document.body.textContent ?? ''
+      expect(text).toContain(
+        '旧会话的加密推理或压缩上下文可能与新连接不兼容，恢复会话时可能失败。',
+      )
+
+      await wrapper.get('[aria-label="查看旧会话兼容性详细说明"]').trigger('click')
+      expect(wrapper.emitted('showRisk')).toHaveLength(1)
+      wrapper.unmount()
+    },
+  )
+
   it('labels restore entries as the fixed recovery point', async () => {
     const wrapper = mount(ProviderConnectionConfirmDialog, {
       attachTo: document.body,
@@ -60,6 +88,8 @@ describe('ProviderConnectionConfirmDialog', () => {
     expect(text).toContain('Provider A 原地址')
     expect(text).toContain('恢复 API Key')
     expect(text).toContain('Provider A 原密钥')
+    expect(text).not.toContain('旧会话的加密推理或压缩上下文可能与新连接不兼容')
+    expect(wrapper.find('[aria-label="查看旧会话兼容性详细说明"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -93,5 +123,24 @@ describe('ProviderConnectionConfirmDialog', () => {
     await nextTick()
     expect(document.activeElement).toBe(opener)
     opener.remove()
+  })
+
+  it('forwards the dialog closed event for parent-level sequencing', async () => {
+    const wrapper = mount(ProviderConnectionConfirmDialog, {
+      props: {
+        open: false,
+        action: 'apply',
+        sourceProviderName: 'Provider B',
+        targetProviderId: 'provider-a',
+        baseUrlName: '主用地址',
+        apiKeyName: '主用密钥',
+        busy: false,
+      },
+    })
+
+    wrapper.getComponent({ name: 'ElDialog' }).vm.$emit('closed')
+    await nextTick()
+
+    expect(wrapper.emitted('closed')).toHaveLength(1)
   })
 })

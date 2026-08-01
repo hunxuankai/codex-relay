@@ -10,6 +10,7 @@ import ProviderAvailabilityPanel from '../components/ProviderAvailabilityPanel.v
 import ProviderBaseUrlManagerDialog from '../components/ProviderBaseUrlManagerDialog.vue'
 import ProviderCredentialControls from '../components/ProviderCredentialControls.vue'
 import ProviderConnectionConfirmDialog from '../components/ProviderConnectionConfirmDialog.vue'
+import ProviderConnectionRiskDialog from '../components/ProviderConnectionRiskDialog.vue'
 import ProviderEndpointControls from '../components/ProviderEndpointControls.vue'
 import ProviderList from '../components/ProviderList.vue'
 import ProviderPreferenceControls from '../components/ProviderPreferenceControls.vue'
@@ -62,6 +63,8 @@ const baseUrlManagerProviderId = shallowRef<string | null>(null)
 const apiKeyManagerProviderId = shallowRef<string | null>(null)
 const apiKeyManagerSuccessMessage = shallowRef<string | null>(null)
 const apiKeyManagerSuccessMessageId = shallowRef(0)
+const connectionRiskOpen = shallowRef(false)
+const connectionRiskRequestedFromConfirmation = shallowRef(false)
 const connectionConfirmation = shallowRef<{
   action: Exclude<ProviderConnectionAction, 'applied'>
   providerId: string
@@ -70,6 +73,11 @@ const connectionConfirmation = shallowRef<{
   baseUrlName: string
   apiKeyName: string
 } | null>(null)
+const connectionConfirmationOpen = computed(() =>
+  Boolean(connectionConfirmation.value) &&
+  !connectionRiskRequestedFromConfirmation.value &&
+  !connectionRiskOpen.value,
+)
 
 const interactionBusy = computed(() =>
   providerState.busy.value ||
@@ -164,6 +172,42 @@ function requestProviderConnection(providerId: string) {
   }
 }
 
+function openProviderConnectionRisk(providerId: string) {
+  const action = providerState.providers.value.find(
+    (provider) => provider.id === providerId,
+  )?.connection.action
+  if (action === 'apply' || action === 'applied' || action === 'update') {
+    connectionRiskRequestedFromConfirmation.value = false
+    connectionRiskOpen.value = true
+  }
+}
+
+function requestConnectionRiskFromConfirmation() {
+  if (!connectionConfirmation.value || connectionConfirmation.value.action === 'restore') return
+  connectionRiskRequestedFromConfirmation.value = true
+}
+
+function handleConnectionConfirmationClosed() {
+  if (connectionRiskRequestedFromConfirmation.value && connectionConfirmation.value) {
+    connectionRiskOpen.value = true
+  }
+}
+
+function closeProviderConnectionRisk() {
+  connectionRiskOpen.value = false
+}
+
+function handleConnectionRiskClosed() {
+  if (connectionRiskRequestedFromConfirmation.value) {
+    connectionRiskRequestedFromConfirmation.value = false
+  }
+}
+
+function cancelProviderConnectionConfirmation() {
+  connectionConfirmation.value = null
+  connectionRiskRequestedFromConfirmation.value = false
+}
+
 async function confirmProviderConnection() {
   const confirmation = connectionConfirmation.value
   if (!confirmation) return
@@ -175,6 +219,7 @@ async function confirmProviderConnection() {
     }
   } finally {
     connectionConfirmation.value = null
+    connectionRiskRequestedFromConfirmation.value = false
   }
 }
 
@@ -313,6 +358,7 @@ watch(apiKeyManagerProvider, (provider) => {
       @edit="openEdit"
       @use="providerState.switchTo"
       @connection="requestProviderConnection"
+      @connection-risk="openProviderConnectionRisk"
       @delete="requestDelete"
       @reorder="providerState.reorder"
     />
@@ -481,7 +527,7 @@ watch(apiKeyManagerProvider, (provider) => {
     />
     <ProviderConnectionConfirmDialog
       v-if="connectionConfirmation"
-      :open="true"
+      :open="connectionConfirmationOpen"
       :action="connectionConfirmation.action"
       :source-provider-name="connectionConfirmation.sourceProviderName"
       :target-provider-id="connectionConfirmation.targetProviderId"
@@ -489,7 +535,14 @@ watch(apiKeyManagerProvider, (provider) => {
       :api-key-name="connectionConfirmation.apiKeyName"
       :busy="providerState.busy.value"
       @confirm="confirmProviderConnection"
-      @cancel="connectionConfirmation = null"
+      @cancel="cancelProviderConnectionConfirmation"
+      @show-risk="requestConnectionRiskFromConfirmation"
+      @closed="handleConnectionConfirmationClosed"
+    />
+    <ProviderConnectionRiskDialog
+      :open="connectionRiskOpen"
+      @close="closeProviderConnectionRisk"
+      @closed="handleConnectionRiskClosed"
     />
     <ProviderBaseUrlManagerDialog
       v-if="baseUrlManagerProvider"

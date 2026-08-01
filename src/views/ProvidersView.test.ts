@@ -8,6 +8,7 @@ import ProviderApiKeyManagerDialog from '../components/ProviderApiKeyManagerDial
 import ProviderAvailabilityPanel from '../components/ProviderAvailabilityPanel.vue'
 import ProviderBaseUrlManagerDialog from '../components/ProviderBaseUrlManagerDialog.vue'
 import ProviderCredentialControls from '../components/ProviderCredentialControls.vue'
+import ProviderConnectionConfirmDialog from '../components/ProviderConnectionConfirmDialog.vue'
 import ProviderEndpointControls from '../components/ProviderEndpointControls.vue'
 import ProviderPreferenceControls from '../components/ProviderPreferenceControls.vue'
 import ProvidersView from './ProvidersView.vue'
@@ -362,6 +363,112 @@ describe('ProvidersView', () => {
     await flushPromises()
     expect(state.applyConnection).toHaveBeenCalledOnce()
     expect(state.applyConnection).toHaveBeenCalledWith('provider-b')
+  })
+
+  it('opens the old-session compatibility explanation without mutating the connection', async () => {
+    const state = controller()
+    const source = provider({
+      id: 'provider-b',
+      name: 'Provider B',
+      connection: providerConnection({
+        role: 'source',
+        status: 'active',
+        action: 'applied',
+        targetProviderId: 'provider-a',
+        sourceProviderName: 'Provider B',
+        appliedBaseUrlName: 'B 主用地址',
+        appliedApiKeyName: 'B 主用密钥',
+      }),
+    })
+    state.providers.value = [source]
+    state.selectedProviderId.value = 'provider-b'
+    state.selectedProvider.value = source
+    mockUseProviders.mockReturnValue(state)
+    const wrapper = mount(ProvidersView, { attachTo: document.body })
+    const trigger = wrapper.get('[aria-label="查看 Provider B 的旧会话兼容性说明"]')
+    ;(trigger.element as HTMLButtonElement).focus()
+
+    await trigger.trigger('click')
+    await flushPromises()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const dialog = document.body.querySelector('.provider-connection-risk-dialog')
+    const text = dialog?.textContent ?? ''
+    expect(text).toContain('旧会话兼容性说明')
+    expect(text).toContain('只替换 Base URL 与认证，不会改变顶层 model_provider 身份')
+    expect(text).toContain('加密推理、加密压缩上下文或响应状态')
+    expect(text).toContain('新连接不保证能识别这些不透明内容')
+    expect(text).toContain('OpenAI-compatible API 不等于会话上下文兼容')
+    expect(text).toContain('恢复自身连接后重试')
+    expect(text).toContain('使用新连接创建新会话')
+    expect(text).not.toContain('provider-a.example.test')
+    expect(text).not.toContain('test-key')
+    expect(state.applyConnection).not.toHaveBeenCalled()
+    expect(state.restoreConnection).not.toHaveBeenCalled()
+
+    const close = wrapper.get('[aria-label="关闭旧会话兼容性说明"]')
+    expect(document.activeElement).toBe(close.element)
+    await close.trigger('click')
+    await flushPromises()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(document.activeElement).toBe(trigger.element)
+    expect(state.applyConnection).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('suspends and resumes connection confirmation around the detailed explanation', async () => {
+    const state = controller()
+    const target = provider({ id: 'provider-a', name: 'Provider A', isActive: true })
+    const source = provider({
+      id: 'provider-b',
+      name: 'Provider B',
+      connection: providerConnection({
+        action: 'apply',
+        targetProviderId: 'provider-a',
+        sourceProviderName: 'Provider B',
+        appliedBaseUrlName: 'B 主用地址',
+        appliedApiKeyName: 'B 主用密钥',
+      }),
+    })
+    state.providers.value = [target, source]
+    state.activeProvider.value = target
+    state.selectedProviderId.value = 'provider-b'
+    state.selectedProvider.value = source
+    mockUseProviders.mockReturnValue(state)
+    const wrapper = mount(ProvidersView, { attachTo: document.body })
+
+    await wrapper.get('[aria-label="仅应用连接 Provider B"]').trigger('click')
+    await flushPromises()
+    const confirmation = wrapper.getComponent(ProviderConnectionConfirmDialog)
+    expect(confirmation.props('open')).toBe(true)
+
+    await wrapper.get('[aria-label="查看旧会话兼容性详细说明"]').trigger('click')
+    await nextTick()
+    const risk = wrapper.getComponent({ name: 'ProviderConnectionRiskDialog' })
+    expect(confirmation.props('open')).toBe(false)
+    expect(risk.props('open')).toBe(false)
+
+    confirmation.vm.$emit('closed')
+    await nextTick()
+    expect(risk.props('open')).toBe(true)
+    expect(confirmation.props('open')).toBe(false)
+    expect(state.applyConnection).not.toHaveBeenCalled()
+
+    risk.vm.$emit('close')
+    await nextTick()
+    expect(risk.props('open')).toBe(false)
+    expect(confirmation.props('open')).toBe(false)
+
+    risk.vm.$emit('closed')
+    await flushPromises()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(confirmation.props('open')).toBe(true)
+    expect(document.activeElement).toBe(
+      wrapper.get('[aria-label="取消连接确认"]').element,
+    )
+    expect(state.applyConnection).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('confirms the fixed recovery entries before restoring the current identity', async () => {
