@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from 'vue'
-import { ElAlert, ElConfigProvider, ElTag } from 'element-plus'
+import { computed, onMounted, shallowRef, watch } from 'vue'
+import { ElConfigProvider, ElMessage, ElMessageBox, ElTag } from 'element-plus'
 import DraftAuditPanel from './components/release/DraftAuditPanel.vue'
 import PublishConfirmDialog from './components/release/PublishConfirmDialog.vue'
 import ProxySettingsPanel from './components/release/ProxySettingsPanel.vue'
@@ -19,6 +19,7 @@ import {
   releaseProxyValidationReason,
   type ReleaseProxySettings,
 } from './types/network'
+import type { CommandError } from './types/release'
 
 const release = useReleaseSession()
 const releaseNetwork = useReleaseNetwork()
@@ -54,6 +55,40 @@ const hasActiveSession = computed(() => {
 const proxyInvalid = computed(
   () => releaseProxyValidationReason(releaseProxyPreference.settings.value) !== null,
 )
+const acknowledgementErrorCodes = new Set([
+  'RELEASE_ROLLBACK_INCOMPLETE',
+  'GIT_PROCESS_TREE_TERMINATION_FAILED',
+  'GITHUB_PROCESS_TREE_TERMINATION_FAILED',
+])
+
+function presentError(error: CommandError | null) {
+  if (!error) return
+  if (acknowledgementErrorCodes.has(error.code)) {
+    void ElMessageBox.alert(
+      `${error.message}\n\n错误码：${error.code}`,
+      '发布操作需要处理',
+      {
+        type: 'error',
+        confirmButtonText: '知道了',
+        closeOnClickModal: false,
+        closeOnPressEscape: true,
+        showClose: true,
+      },
+    ).catch(() => undefined)
+    return
+  }
+
+  ElMessage({
+    type: 'error',
+    message: `${error.message}（${error.code}）`,
+    duration: 5000,
+    grouping: true,
+    showClose: true,
+  })
+}
+
+watch(release.error, presentError)
+watch(releaseNetwork.error, presentError)
 
 async function inspectRepository() {
   const inspection = await release.inspect(
@@ -148,21 +183,12 @@ async function exportSummary() {
         </div>
       </header>
 
-      <ElAlert
-        v-if="release.error.value"
-        class="app-error"
-        type="error"
-        :closable="false"
-        show-icon
-        :title="release.error.value.message"
-      >
-        <template #default>
-          <span class="mono">{{ release.error.value.code }}</span>
-        </template>
-      </ElAlert>
-
       <div class="release-console-layout">
-        <ReleaseTimeline :session="release.session.value" :events="release.events.value" />
+        <ReleaseTimeline
+          class="release-timeline-panel"
+          :session="release.session.value"
+          :events="release.events.value"
+        />
 
         <section class="workspace" aria-label="发布工作区">
           <ReleaseRecoveryPanel
@@ -180,7 +206,6 @@ async function exportSummary() {
             :settings="releaseProxyPreference.settings.value"
             :result="releaseNetwork.result.value"
             :busy="releaseNetwork.busy.value"
-            :error="releaseNetwork.error.value"
             @update:settings="updateProxySettings"
             @test="testConnection"
           />
@@ -252,8 +277,10 @@ async function exportSummary() {
 <style scoped>
 .app-shell {
   display: grid;
-  align-content: start;
-  min-height: 100vh;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
   gap: 1rem;
   padding: 1.25rem;
 }
@@ -311,22 +338,27 @@ async function exportSummary() {
 .release-console-layout {
   display: grid;
   grid-template-columns: minmax(15.5rem, 0.72fr) minmax(0, 2.1fr);
-  align-items: start;
+  align-items: stretch;
+  min-height: 0;
+  overflow: hidden;
   gap: 1rem;
+}
+
+.release-timeline-panel,
+.workspace {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .workspace {
   display: grid;
+  align-content: start;
+  grid-auto-rows: max-content;
   min-width: 0;
   gap: 1rem;
-}
-
-.app-error {
-  overflow-wrap: anywhere;
-}
-
-.mono {
-  font-family: var(--font-mono);
+  padding-right: 0.25rem;
 }
 
 @media (max-width: 900px) {
@@ -342,11 +374,27 @@ async function exportSummary() {
 
 @media (max-width: 820px) {
   .app-shell {
+    grid-template-rows: auto;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
     padding: 0.75rem;
   }
 
   .release-console-layout {
     grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    overflow: visible;
+  }
+
+  .release-timeline-panel,
+  .workspace {
+    overflow-y: visible;
+    scrollbar-gutter: auto;
+  }
+
+  .workspace {
+    padding-right: 0;
   }
 }
 </style>

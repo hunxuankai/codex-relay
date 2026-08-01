@@ -15,7 +15,6 @@ describe('ProxySettingsPanel', () => {
         },
         result: null,
         busy: false,
-        error: null,
       },
     })
 
@@ -48,7 +47,6 @@ describe('ProxySettingsPanel', () => {
         },
         result: null,
         busy: false,
-        error: null,
       },
     })
 

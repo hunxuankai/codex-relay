@@ -2,7 +2,11 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReleasePreflightResult } from './types/release'
 
-const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }))
+const { invokeMock, messageMock, messageBoxAlertMock } = vi.hoisted(() => ({
+  invokeMock: vi.fn(),
+  messageMock: vi.fn(),
+  messageBoxAlertMock: vi.fn(),
+}))
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
@@ -10,6 +14,18 @@ vi.mock('@tauri-apps/api/core', () => ({
     onmessage?: (message: T) => void
   },
 }))
+
+vi.mock('element-plus', async () => {
+  const actual = await vi.importActual<typeof import('element-plus')>('element-plus')
+  return {
+    ...actual,
+    ElMessage: messageMock,
+    ElMessageBox: {
+      ...actual.ElMessageBox,
+      alert: messageBoxAlertMock,
+    },
+  }
+})
 
 import App from './App.vue'
 import appSource from './App.vue?raw'
@@ -78,6 +94,9 @@ describe('release console shell', () => {
     window.localStorage.clear()
     invokeMock.mockReset()
     invokeMock.mockResolvedValue({ success: true, data: null })
+    messageMock.mockReset()
+    messageBoxAlertMock.mockReset()
+    messageBoxAlertMock.mockResolvedValue('confirm')
   })
 
   it('keeps App as a composition surface for the visual release workflow', () => {
@@ -106,6 +125,109 @@ describe('release console shell', () => {
     expect(appSource).toMatch(
       /@media \(max-width: 820px\)[\s\S]*?\.release-console-layout\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/,
     )
+  })
+
+  it('keeps the release progress panel fixed while the desktop workspace scrolls independently', () => {
+    expect(appSource).toMatch(
+      /\.app-shell\s*\{[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\);[\s\S]*?height:\s*100vh;[\s\S]*?overflow:\s*hidden;/,
+    )
+    expect(appSource).toMatch(
+      /\.release-console-layout\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?overflow:\s*hidden;/,
+    )
+    expect(appSource).toMatch(
+      /\.release-timeline-panel,[\s\S]*?\.workspace\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?overflow-y:\s*auto;/,
+    )
+    expect(appSource).toMatch(
+      /\.workspace\s*\{[\s\S]*?grid-auto-rows:\s*max-content;/,
+    )
+    expect(appSource).toMatch(
+      /@media \(max-width: 820px\)[\s\S]*?\.app-shell\s*\{[\s\S]*?height:\s*auto;[\s\S]*?overflow:\s*visible;/,
+    )
+  })
+
+  it('shows ordinary release command failures as temporary Element Plus messages', async () => {
+    invokeMock.mockResolvedValueOnce({
+      success: false,
+      error: { code: 'GIT_REPOSITORY_INVALID', message: '无法读取 Git 仓库。' },
+    })
+    const wrapper = mount(App)
+
+    await wrapper.get<HTMLInputElement>('input[aria-label="仓库路径"]').setValue(
+      'D:\\safe-temp\\missing-repository',
+    )
+    await wrapper.get('[data-testid="inspect-button"]').trigger('click')
+    await flushPromises()
+
+    expect(messageMock).toHaveBeenCalledWith({
+      type: 'error',
+      message: '无法读取 Git 仓库。（GIT_REPOSITORY_INVALID）',
+      duration: 5000,
+      grouping: true,
+      showClose: true,
+    })
+    expect(messageBoxAlertMock).not.toHaveBeenCalled()
+    expect(wrapper.find('.app-error').exists()).toBe(false)
+    expect(appSource).not.toContain('<ElAlert')
+  })
+
+  it('shows connection command failures as temporary messages instead of persistent panel text', async () => {
+    invokeMock.mockResolvedValueOnce({
+      success: false,
+      error: { code: 'GITHUB_COMMAND_FAILED', message: 'GitHub API 连接失败。' },
+    })
+    const wrapper = mount(App)
+
+    await wrapper.get('[data-testid="test-connection-button"]').trigger('click')
+    await flushPromises()
+
+    expect(messageMock).toHaveBeenCalledWith({
+      type: 'error',
+      message: 'GitHub API 连接失败。（GITHUB_COMMAND_FAILED）',
+      duration: 5000,
+      grouping: true,
+      showClose: true,
+    })
+    expect(wrapper.text()).not.toContain('GitHub API 连接失败。')
+  })
+
+  it.each([
+    {
+      code: 'RELEASE_ROLLBACK_INCOMPLETE',
+      message: '候选文件未能完整回滚，请人工检查仓库。',
+    },
+    {
+      code: 'GIT_PROCESS_TREE_TERMINATION_FAILED',
+      message: 'Git 进程树未能完整终止，请人工检查。',
+    },
+    {
+      code: 'GITHUB_PROCESS_TREE_TERMINATION_FAILED',
+      message: 'GitHub CLI 进程树未能完整终止，请人工检查。',
+    },
+  ])('requires acknowledgement for $code failures', async ({ code, message }) => {
+    invokeMock.mockResolvedValueOnce({
+      success: false,
+      error: { code, message },
+    })
+    const wrapper = mount(App)
+
+    await wrapper.get<HTMLInputElement>('input[aria-label="仓库路径"]').setValue(
+      'D:\\safe-temp\\repository',
+    )
+    await wrapper.get('[data-testid="inspect-button"]').trigger('click')
+    await flushPromises()
+
+    expect(messageBoxAlertMock).toHaveBeenCalledWith(
+      `${message}\n\n错误码：${code}`,
+      '发布操作需要处理',
+      {
+        type: 'error',
+        confirmButtonText: '知道了',
+        closeOnClickModal: false,
+        closeOnPressEscape: true,
+        showClose: true,
+      },
+    )
+    expect(messageMock).not.toHaveBeenCalled()
   })
 
   it('keeps planning and start controls locked while a release session is active', () => {

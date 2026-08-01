@@ -15,13 +15,11 @@ import {
   type ReleaseConnectionTestResult,
   type ReleaseProxySettings,
 } from '../../types/network'
-import type { CommandError } from '../../types/release'
 
 const props = defineProps<{
   settings: ReleaseProxySettings
   result: ReleaseConnectionTestResult | null
   busy: boolean
-  error: CommandError | null
 }>()
 
 const emit = defineEmits<{
@@ -106,7 +104,6 @@ function update(patch: Partial<ReleaseProxySettings>) {
     </div>
 
     <p v-if="invalidReason" class="proxy-warning">{{ invalidReason }}</p>
-    <p v-if="error" class="proxy-warning">{{ error.message }}（{{ error.code }}）</p>
 
     <div v-if="connectionResults.length > 0" class="connection-results" aria-live="polite">
       <article
