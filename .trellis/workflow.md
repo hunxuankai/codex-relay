@@ -155,7 +155,7 @@ python ./.trellis/scripts/get_context.py --mode phase --step <X.Y>  # detailed g
 ```
 Phase 1：规划 → 分类并按判断创建任务，然后编写规划材料
 Phase 2：实施 → 仅在任务状态为 in_progress 后实施；每个行为切片执行一个红色测试 → 绿色实现 → 重构
-Phase 3：完成 → 验证、更新规范、提交并收尾
+Phase 3：完成 → 验证、更新规范、提交、收尾并推送
 ```
 
 ### 请求分类
@@ -254,7 +254,7 @@ Inline 模式：跳过 JSONL 整理；Phase 2 通过 `trellis-before-dev` 读取
 
 [workflow-state:in_progress]
 先确认当前请求属于活动任务；若不相关，保持旧任务原状，并按请求分类决定直接处理或创建新任务。
-流程：选择一个行为 -> 红色测试 -> 绿色实现 -> 保持绿色时重构 -> `trellis-check` -> `trellis-update-spec` -> 提交（Phase 3.4）-> `/trellis:finish-work`。
+流程：选择一个行为 -> 红色测试 -> 绿色实现 -> 保持绿色时重构 -> `trellis-check` -> `trellis-update-spec` -> 提交（Phase 3.4）-> `/trellis:finish-work` -> 推送已配置上游。
 主会话默认派发 implement/check 子 Agent。子 Agent 自我豁免：如果已经作为 `trellis-implement` 运行，不要再启动 `trellis-implement` 或 `trellis-check`；如果已经作为 `trellis-check` 运行，不要再启动 `trellis-check` 或 `trellis-implement`。只有主会话可以派发。
 派发 prompt 以 `Active task: <task path from task.py current>` 开头。上下文读取顺序：JSONL 条目 -> `prd.md` -> 存在时的 `design.md` -> 存在时的 `implement.md`。
 [/workflow-state:in_progress]
@@ -265,17 +265,17 @@ Inline 模式：跳过 JSONL 整理；Phase 2 通过 `trellis-before-dev` 读取
 
 [workflow-state:in_progress-inline]
 先确认当前请求属于活动任务；若不相关，保持旧任务原状，并按请求分类决定直接处理或创建新任务。
-流程：`trellis-before-dev` -> 选择一个行为 -> 红色测试 -> 绿色实现 -> 保持绿色时重构 -> `trellis-check` -> 验证 -> `trellis-update-spec` -> 提交（Phase 3.4）-> `/trellis:finish-work`。
+流程：`trellis-before-dev` -> 选择一个行为 -> 红色测试 -> 绿色实现 -> 保持绿色时重构 -> `trellis-check` -> 验证 -> `trellis-update-spec` -> 提交（Phase 3.4）-> `/trellis:finish-work` -> 推送已配置上游。
 Inline 模式下不要派发 implement/check 子 Agent。
 上下文读取顺序：`prd.md` -> 存在时的 `design.md` -> 存在时的 `implement.md`，再加上 Skill 加载的相关规范/研究材料。
-当存在两个或更多独立、读多写少的研究、代码探索、测试/日志分析或只读审查分支时，可以派发受控辅助子 Agent；它们不得并发修改重叠文件，也不能替代主会话的修复、Trellis check、最终验证、规范更新、提交或归档。
+当存在两个或更多独立、读多写少的研究、代码探索、测试/日志分析或只读审查分支时，可以派发受控辅助子 Agent；它们不得并发修改重叠文件，也不能替代主会话的修复、Trellis check、最终验证、规范更新、提交、推送或归档。
 [/workflow-state:in_progress-inline]
 
 ### Phase 3：完成
 - 3.2 调试复盘 `[on demand]`
 - 3.3 规范更新 `[required · once]`
 - 3.4 提交改动 `[required · once]`
-- 3.5 收尾提醒
+- 3.5 收尾并推送 `[required · once]`
 
 > 注意：步骤 3.1 已并入 2.2（最后一轮全范围检查）和 3.4（提交前导检查）。保留编号稳定，避免破坏外部引用。
 
@@ -287,7 +287,7 @@ Inline 模式下不要派发 implement/check 子 Agent。
      channel 进行编辑。 -->
 
 [workflow-state:completed]
-代码已提交。运行 `/trellis:finish-work`；如果工作区仍有改动，先返回 Phase 3.4。
+代码已提交。运行 `/trellis:finish-work`，完成归档和会话日志提交后推送已配置上游；如果工作区仍有本任务改动，先返回 Phase 3.4。
 [/workflow-state:completed]
 
 ### 规则
@@ -712,7 +712,8 @@ Check Agent 的工作：
 先返回 Phase 3.3；规范改动应进入同一任务的提交批次，不能成为被遗忘的后续事项。
 
 AI 驱动本任务代码改动的批量提交，使 `/finish-work` 随后能在干净工作区运行。
-目标：**先**生成工作提交，再生成记账提交（归档 + 日志），两者绝不交错。
+目标：**先**生成工作提交，再生成记账提交（归档 + 日志），两者绝不交错；最终 push
+统一放在 3.5，确保这些相关提交一次推送到已配置上游。
 
 **逐步操作**：
 
@@ -739,7 +740,8 @@ AI 驱动本任务代码改动的批量提交，使 `/finish-work` 随后能在�
    提交，而不是每个文件一个提交。每个条目包含 `<中文提交消息>` + 文件列表。
    在底部单独列出无法识别的文件。
 
-5. **只展示一次计划，并请求一次性确认**。格式：
+5. **只展示一次执行计划**。用户已在 `AGENTS.md` 中授权 AI 通过质量门禁后直接
+   提交，无需等待额外的“ok”。格式：
    ```
    建议的提交（按顺序）：
      1. <中文提交消息>
@@ -748,30 +750,40 @@ AI 驱动本任务代码改动的批量提交，使 `/finish-work` 随后能在�
      2. <中文提交消息>
         - <file>
 
-   无法识别的未提交文件（不包含在任何提交中，请确认纳入或排除）：
+   无法识别的未提交文件（默认排除，不包含在任何提交中）：
      - <file>
      - <file>
 
-   回复“ok”/“行”执行。回复修改意见，或回复“我自己来”/“manual”中止。
+   以下无法识别文件将排除在本次提交之外；如需调整，请直接打断并说明。
    ```
 
-6. **确认后**：按顺序为每个批次运行 `git add <files>` +
-   `git commit -m "<msg>"`。不要 amend，不要 push。
+6. **直接执行**：按顺序为每个批次运行 `git add <files>` +
+   `git commit -m "<msg>"`。不要 amend；此处先不 push，待 3.5 生成适用的归档和
+   会话日志提交后一并推送。用户已明确要求暂不提交或暂不推送时，以最新指示为准。
 
-7. **拒绝后**（用户回复“不行”/“我自己来”/“manual”或反对计划）：停止。
-   不要尝试第二份计划。用户会手动提交；用户确认后跳到 3.5。
+7. **提交后复核**：运行 `git status --porcelain` 和 `git log --oneline -5`，确认每个
+   计划批次已提交且没有混入无法识别的文件；然后进入 3.5。
 
 **规则**：
 - 任何位置都不得使用 `git commit --amend`；采用三阶段三提交流程
   （工作提交 -> 归档提交 -> 日志提交）。
-- 本步骤绝不 push 到远程。
-- 如果用户接受文件分组但希望修改消息措辞，编辑消息并再确认一次；如果用户拒绝
-  分组，则退出到手动模式。
-- 批量计划只使用一个 prompt；不要逐个提交询问。
+- 阶段 3.4 不 push；最终 push 在 3.5 完成本次工作全部相关提交后执行。
+- 用户在执行前明确要求调整消息或文件分组时先应用其最新指示；明确要求手动处理时停止。
+- 批量计划只展示一次；不要逐个提交询问。
 
-#### 3.5 收尾提醒
+#### 3.5 收尾并推送 `[required · once]`
 
-完成上述步骤后，提醒用户可以运行 `/finish-work` 收尾（归档任务并记录会话）。
+1. 加载 `trellis-finish-work` Skill，完成适用的任务归档与会话日志提交；没有活动任务时
+   跳过这些记账操作。
+2. 确认本次工作全部相关提交已完成，且工作树中没有遗漏的本任务改动。无关并行改动
+   不得暂存、提交或修改。
+3. 读取当前分支已配置的远程与上游分支，使用精确的普通非强制 RefSpec
+   `git push <remote> HEAD:<upstream-branch>`；不得 force push、推送 Tag、猜测未配置的
+   远端或擅自改推其他分支。
+4. push 成功后比较 `git rev-parse HEAD` 与 `git rev-parse '@{upstream}'`；两者必须一致。
+   若未配置上游或 push 失败，保留本地提交并如实报告，不得声称交付完成。
+5. 最终报告提交哈希、远端跟踪分支、push 输出摘要以及上述 SHA 验证证据。用户明确要求
+   暂不推送时，以最新指示为准。
 
 ---
 

@@ -15,7 +15,7 @@
 
 ```text
 create → PRD → design → implement → start
-→ red/green/refactor → check → update spec → commit → finish → archive
+→ red/green/refactor → check → update spec → commit → finish → archive → session log → push
 ```
 
 Trellis 负责任务指针、规划材料、研究、上下文选择、实施检查点、质量检查、规范更新和开发日志。
@@ -30,7 +30,7 @@ codex:
 ```
 
 `inline` 只规定核心 Implement/Check 由主会话直接执行，不等于禁止所有辅助子 Agent。
-主 Agent 仍拥有用户沟通、任务状态、TDD 顺序、最终修复与验证、规范更新、提交和归档。
+主 Agent 仍拥有用户沟通、任务状态、TDD 顺序、最终修复与验证、规范更新、提交、推送和归档。
 
 满足以下条件时，主 Agent 应考虑派发受控辅助子 Agent：
 
@@ -82,10 +82,13 @@ codex:
 - 复杂任务在 `task.py start` 前必须有 `prd.md`、`design.md` 和 `implement.md`。
 - 自动创建任务或进入规划不自动等于批准实施；必须确认用户已明确要求或批准实施。
 - 工作开始、每个阶段和暂停前更新 `implement.md`。
-- 提交前执行 Trellis check、完整验证和 spec 更新判断。
+- 提交前执行 Trellis check、完整验证和 spec 更新判断；完成本任务全部相关提交后再执行最终 push 并验证远端状态。
 
-## 用户提交授权
+## 用户提交与推送授权
 
-- 用户已授权 AI 在开发完成并通过本轮必要验证后直接创建 Git 提交，无需等待额外的“ok”。
-- 该授权不改变提交前的质量门禁：必须精确暂存本次相关改动、排除无关文件，并在交付中报告提交哈希和实际验证证据。
-- 用户后续明确要求暂不提交时，以最新指示为准。
+- 用户已授权 AI 在开发完成并通过本轮必要验证后直接创建 Git 提交，并在本次工作全部相关提交完成后执行普通非强制 push，无需等待额外的“ok”。
+- 对 Trellis 任务，最终 push 位于阶段 3.4 工作提交以及适用的归档、会话日志提交之后；无任务的直接小改动则在最终工作提交后 push。
+- push 只使用当前分支已配置的远程与上游分支，并采用精确的普通非强制 RefSpec（`HEAD:<upstream-branch>`）；不得 force push、推送 Tag、猜测未配置的远端或擅自改推其他分支。
+- 该授权不改变质量门禁：必须精确暂存本次相关改动、排除无关文件，并在交付中报告提交哈希、远端分支和实际验证证据。
+- push 后必须验证远程跟踪分支与本地 `HEAD` 一致；若未配置上游或 push 失败，保留本地提交并如实报告，不得声称交付完成。
+- 用户后续明确要求暂不提交或暂不推送时，以最新指示为准。
