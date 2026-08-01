@@ -522,6 +522,7 @@ fn preflight_combines_real_git_inspection_with_mocked_tool_and_github_state() {
             },
             active_release_runs: 0,
             conflicting_drafts: 0,
+            latest_release_tag: Some("v0.4.0".into()),
         },
     };
 
@@ -529,6 +530,12 @@ fn preflight_combines_real_git_inspection_with_mocked_tool_and_github_state() {
         tauri::async_runtime::block_on(service.inspect(&backend, &repository, &probe)).unwrap();
 
     assert_eq!(result.repository.local_branch, "master");
+    assert_eq!(
+        PathBuf::from(&result.repository_path)
+            .canonicalize()
+            .unwrap(),
+        repository.canonicalize().unwrap()
+    );
     assert_eq!(result.external, probe.snapshot);
 }
 
@@ -555,6 +562,7 @@ fn preflight_blocks_missing_tools_active_runs_and_conflicting_drafts() {
                 },
                 active_release_runs: 0,
                 conflicting_drafts: 0,
+                latest_release_tag: None,
             },
             "tool",
         ),
@@ -563,6 +571,7 @@ fn preflight_blocks_missing_tools_active_runs_and_conflicting_drafts() {
                 tools: available_tools.clone(),
                 active_release_runs: 1,
                 conflicting_drafts: 0,
+                latest_release_tag: None,
             },
             "run",
         ),
@@ -571,6 +580,7 @@ fn preflight_blocks_missing_tools_active_runs_and_conflicting_drafts() {
                 tools: available_tools,
                 active_release_runs: 0,
                 conflicting_drafts: 1,
+                latest_release_tag: None,
             },
             "draft",
         ),

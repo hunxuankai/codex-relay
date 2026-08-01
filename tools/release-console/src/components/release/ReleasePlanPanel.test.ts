@@ -32,6 +32,8 @@ describe('ReleasePlanPanel', () => {
 
     expect(wrapper.text()).toContain('package.json')
     expect(wrapper.text()).toContain('.github/release-notes.md')
+    expect(wrapper.text()).toContain('根据 Git 提交与固定模板生成')
+    expect(wrapper.text()).toContain('不调用 Codex')
     expect(wrapper.get('[data-testid="start-release-button"]').attributes('disabled')).toBeUndefined()
 
     await wrapper.get('textarea[aria-label="发布说明"]').setValue('维护者编辑后的说明')

@@ -199,6 +199,7 @@ impl SystemReleaseApplication {
         if matches!(purpose, PreflightPurpose::Recovery) {
             return Ok((
                 ReleasePreflightResult {
+                    repository_path: repository_path.to_string_lossy().into_owned(),
                     repository,
                     external: ExternalPreflightSnapshot {
                         tools: ToolchainInspection {
@@ -210,6 +211,7 @@ impl SystemReleaseApplication {
                         },
                         active_release_runs: 0,
                         conflicting_drafts: 0,
+                        latest_release_tag: None,
                     },
                 },
                 tools,
@@ -279,6 +281,7 @@ impl SystemReleaseApplication {
             .map_err(|_| app_error("GITHUB_PREFLIGHT_FAILED", "无法读取 GitHub Draft 状态。"))?;
         let releases: Vec<Value> = serde_json::from_slice(&releases.stdout)
             .map_err(|_| app_error("GITHUB_RESPONSE_INVALID", "GitHub CLI 返回无效 JSON。"))?;
+        let latest_release_tag = latest_published_release_tag(&releases);
         let conflicting_drafts = releases
             .iter()
             .filter(|release| release.get("draft").and_then(Value::as_bool) == Some(true))
@@ -288,11 +291,13 @@ impl SystemReleaseApplication {
 
         Ok((
             ReleasePreflightResult {
+                repository_path: repository_path.to_string_lossy().into_owned(),
                 repository,
                 external: ExternalPreflightSnapshot {
                     tools: versions,
                     active_release_runs,
                     conflicting_drafts,
+                    latest_release_tag,
                 },
             },
             tools,
@@ -1162,6 +1167,20 @@ fn validate_remote_conflicts(
     Ok(())
 }
 
+fn latest_published_release_tag(releases: &[Value]) -> Option<String> {
+    releases
+        .iter()
+        .find(|release| {
+            release.get("draft").and_then(Value::as_bool) == Some(false)
+                && release.get("prerelease").and_then(Value::as_bool) == Some(false)
+        })
+        .and_then(|release| release.get("tag_name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1193,6 +1212,34 @@ mod tests {
                 .code,
             "GITHUB_CONFLICTING_DRAFT"
         );
+    }
+
+    #[test]
+    fn latest_published_release_tag_skips_drafts_and_prereleases() {
+        let releases = vec![
+            serde_json::json!({
+                "tag_name": "v0.6.0",
+                "draft": true,
+                "prerelease": false
+            }),
+            serde_json::json!({
+                "tag_name": "v0.5.0-rc.1",
+                "draft": false,
+                "prerelease": true
+            }),
+            serde_json::json!({
+                "tag_name": "v0.4.0",
+                "draft": false,
+                "prerelease": false
+            }),
+        ];
+
+        assert_eq!(
+            latest_published_release_tag(&releases),
+            Some("v0.4.0".to_string())
+        );
+        assert_eq!(latest_published_release_tag(&releases[..2]), None);
+        assert_eq!(latest_published_release_tag(&[]), None);
     }
 
     #[test]

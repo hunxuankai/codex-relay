@@ -36,7 +36,10 @@ const startDisabled = computed(() => props.busy || props.plan === null || !planM
       <div class="notes-heading">
         <div>
           <label class="field-label" for="release-notes">简体中文发布说明</label>
-          <p>该正文会同时进入 GitHub Release 和 latest.json.notes。</p>
+          <p>
+            根据 Git 提交与固定模板生成，不调用 Codex；正文会同时进入 GitHub Release 和
+            latest.json.notes。
+          </p>
         </div>
         <ElButton size="small" :disabled="busy" @click="emit('regenerate')">重新生成计划</ElButton>
       </div>

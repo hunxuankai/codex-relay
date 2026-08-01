@@ -27,11 +27,13 @@ pub struct ExternalPreflightSnapshot {
     pub tools: ToolchainInspection,
     pub active_release_runs: usize,
     pub conflicting_drafts: usize,
+    pub latest_release_tag: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReleasePreflightResult {
+    pub repository_path: String,
     pub repository: RepositoryInspection,
     pub external: ExternalPreflightSnapshot,
 }

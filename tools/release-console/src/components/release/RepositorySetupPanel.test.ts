@@ -29,6 +29,7 @@ describe('RepositorySetupPanel', () => {
         repositoryPath: 'D:\\safe-temp\\repository',
         targetVersion: '0.5.0',
         inspection: {
+          repositoryPath: 'D:\\safe-temp\\repository',
           repository: {
             localBranch: 'master',
             defaultBranch: 'main',
@@ -41,6 +42,7 @@ describe('RepositorySetupPanel', () => {
             tools: { git: '2.50', node: '24', npm: '11', cargo: '1.90', gh: '2.76' },
             activeReleaseRuns: 0,
             conflictingDrafts: 0,
+            latestReleaseTag: 'v0.4.0',
           },
         },
         busy: false,
@@ -49,9 +51,41 @@ describe('RepositorySetupPanel', () => {
 
     expect(wrapper.text()).toContain('hunxuankai/codex-relay')
     expect(wrapper.text()).toContain('master → main')
+    expect(wrapper.text()).toContain('线上 Latest')
+    expect(wrapper.text()).toContain('v0.4.0')
     await wrapper.get('[data-testid="inspect-button"]').trigger('click')
     await wrapper.get('[data-testid="plan-button"]').trigger('click')
     expect(wrapper.emitted('inspect')).toHaveLength(1)
     expect(wrapper.emitted('preparePlan')).toHaveLength(1)
+  })
+
+  it('shows an explicit empty state when the repository has no published release', () => {
+    const wrapper = mount(RepositorySetupPanel, {
+      props: {
+        repositoryPath: 'D:\\safe-temp\\repository',
+        targetVersion: '0.1.0',
+        inspection: {
+          repositoryPath: 'D:\\safe-temp\\repository',
+          repository: {
+            localBranch: 'master',
+            defaultBranch: 'main',
+            headSha: 'a'.repeat(40),
+            remoteMainSha: 'a'.repeat(40),
+            remoteUrl: 'https://github.com/hunxuankai/codex-relay.git',
+            clean: true,
+          },
+          external: {
+            tools: { git: '2.50', node: '24', npm: '11', cargo: '1.90', gh: '2.76' },
+            activeReleaseRuns: 0,
+            conflictingDrafts: 0,
+            latestReleaseTag: null,
+          },
+        },
+        busy: false,
+      },
+    })
+
+    expect(wrapper.text()).toContain('线上 Latest')
+    expect(wrapper.text()).toContain('尚无正式版本')
   })
 })

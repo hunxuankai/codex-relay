@@ -31,6 +31,7 @@ describe('release console typed Tauri service', () => {
     invokeMock.mockResolvedValueOnce({
       success: true,
       data: {
+        repositoryPath: 'D:\\safe-temp\\repository',
         repository: {
           localBranch: 'master',
           defaultBranch: 'main',
@@ -43,6 +44,7 @@ describe('release console typed Tauri service', () => {
           tools: { git: '2.50', node: '24', npm: '11', cargo: '1.90', gh: '2.76' },
           activeReleaseRuns: 0,
           conflictingDrafts: 0,
+          latestReleaseTag: 'v0.4.0',
         },
       },
     })

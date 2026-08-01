@@ -107,6 +107,10 @@ const repositoryName = computed(() => {
           <dd class="mono">{{ inspection.repository.headSha.slice(0, 12) }}</dd>
         </div>
         <div>
+          <dt>线上 Latest</dt>
+          <dd>{{ inspection.external.latestReleaseTag ?? '尚无正式版本' }}</dd>
+        </div>
+        <div>
           <dt>工具链</dt>
           <dd>Git / Node / npm / Cargo / gh 已就绪</dd>
         </div>
@@ -187,7 +191,7 @@ const repositoryName = computed(() => {
 
 .inspection-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.75rem;
   padding: 0.85rem;
   border: 1px solid var(--border-color);

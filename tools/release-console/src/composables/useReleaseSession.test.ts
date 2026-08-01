@@ -27,6 +27,7 @@ function session(id: string, phase: ReleaseSession['phase']): ReleaseSession {
 describe('useReleaseSession', () => {
   it('owns inspection, planning and explicit release actions as readonly state', async () => {
     const inspection: ReleasePreflightResult = {
+      repositoryPath: 'D:\\safe-temp\\repository',
       repository: {
         localBranch: 'master',
         defaultBranch: 'main',
@@ -39,6 +40,7 @@ describe('useReleaseSession', () => {
         tools: { git: '2.50', node: '24', npm: '11', cargo: '1.90', gh: '2.76' },
         activeReleaseRuns: 0,
         conflictingDrafts: 0,
+        latestReleaseTag: 'v0.4.0',
       },
     }
     const plan: ReleasePlanSummary = {

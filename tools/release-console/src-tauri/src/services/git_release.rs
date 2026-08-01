@@ -68,6 +68,11 @@ impl ReleasePreflightService {
             return Err(ReleasePreflightError::ConflictingDraft);
         }
         Ok(ReleasePreflightResult {
+            repository_path: repository_path
+                .canonicalize()
+                .map_err(|_| GitReleaseError::RepositoryInvalid)?
+                .to_string_lossy()
+                .into_owned(),
             repository,
             external,
         })

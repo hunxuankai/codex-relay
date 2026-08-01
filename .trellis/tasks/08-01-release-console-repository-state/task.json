@@ -1,0 +1,31 @@
+{
+  "id": "release-console-repository-state",
+  "name": "release-console-repository-state",
+  "title": "改进发布控制台仓库状态与版本展示",
+  "description": "让发布控制台记住最近一次有效仓库路径，在预检中显示线上 Latest，并明确发布说明不调用 Codex，同时移除首版范围横幅。",
+  "status": "in_progress",
+  "dev_type": "feature",
+  "scope": "release",
+  "package": null,
+  "priority": "P2",
+  "creator": "kai",
+  "assignee": "kai",
+  "createdAt": "2026-08-01",
+  "completedAt": null,
+  "branch": "master",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "tools/release-console/src",
+    "tools/release-console/src-tauri/src",
+    "tools/release-console/src-tauri/tests",
+    ".trellis/spec/release/publishing.md"
+  ],
+  "notes": "",
+  "meta": {}
+}

@@ -37,6 +37,7 @@ impl ReleaseApplicationBackend for FixtureApplication {
             match request {
                 ApplicationRequest::Inspect { .. } => {
                     Ok(ApplicationResponse::Inspection(ReleasePreflightResult {
+                        repository_path: r"D:\safe-temp\repository".into(),
                         repository: RepositoryInspection {
                             local_branch: "master".into(),
                             default_branch: "main".into(),
@@ -55,6 +56,7 @@ impl ReleaseApplicationBackend for FixtureApplication {
                             },
                             active_release_runs: 0,
                             conflicting_drafts: 0,
+                            latest_release_tag: Some("v0.4.0".into()),
                         },
                     }))
                 }
@@ -105,7 +107,13 @@ fn typed_command_adapters_call_the_application_once_and_preserve_events_and_erro
         r"D:\safe-temp\repository".into(),
     ));
     assert!(inspection.success);
-    assert_eq!(inspection.data.unwrap().repository.default_branch, "main");
+    let inspection = inspection.data.unwrap();
+    assert_eq!(inspection.repository_path, r"D:\safe-temp\repository");
+    assert_eq!(inspection.repository.default_branch, "main");
+    assert_eq!(
+        inspection.external.latest_release_tag.as_deref(),
+        Some("v0.4.0")
+    );
 
     let sink = Arc::new(MemoryEventSink::default());
     let started =

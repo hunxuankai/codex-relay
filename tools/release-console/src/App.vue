@@ -8,10 +8,15 @@ import ReleaseResultPanel from './components/release/ReleaseResultPanel.vue'
 import ReleaseStepDetails from './components/release/ReleaseStepDetails.vue'
 import ReleaseTimeline from './components/release/ReleaseTimeline.vue'
 import RepositorySetupPanel from './components/release/RepositorySetupPanel.vue'
+import { useRepositoryPreference } from './composables/useRepositoryPreference'
 import { useReleaseSession } from './composables/useReleaseSession'
 
 const release = useReleaseSession()
-const repositoryPath = shallowRef('')
+const repositoryPreference = useRepositoryPreference()
+const repositoryPath = computed({
+  get: () => repositoryPreference.repositoryPath.value,
+  set: repositoryPreference.update,
+})
 const targetVersion = shallowRef('')
 const notes = shallowRef('')
 const exportPath = shallowRef('')
@@ -43,7 +48,8 @@ const hasActiveSession = computed(() => {
 })
 
 async function inspectRepository() {
-  await release.inspect(repositoryPath.value)
+  const inspection = await release.inspect(repositoryPath.value)
+  if (inspection) repositoryPreference.remember(inspection.repositoryPath)
 }
 
 async function loadSession() {
@@ -145,10 +151,6 @@ async function exportSummary() {
         </template>
       </ElAlert>
 
-      <p class="scope-banner">
-        首版只完成可视化一键发布与在线复核；不执行 Sandbox、真实安装、UAC 或应用内升级。
-      </p>
-
       <div class="release-console-layout">
         <ReleaseTimeline :session="release.session.value" :events="release.events.value" />
 
@@ -234,8 +236,7 @@ async function exportSummary() {
 
 .eyebrow,
 .subtitle,
-.brand-copy h1,
-.scope-banner {
+.brand-copy h1 {
   margin: 0;
 }
 
@@ -265,15 +266,6 @@ async function exportSummary() {
 
 .header-actions :deep(.el-button) {
   margin-left: 0;
-}
-
-.scope-banner {
-  padding: 0.65rem 0.8rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.7rem;
-  background: var(--surface-muted);
-  color: var(--text-muted);
-  font-size: 0.78rem;
 }
 
 .release-console-layout {

@@ -16,8 +16,10 @@ npm run build:release-console
 
 构建后运行 `dist/release-console/CodexRelayReleaseConsole.exe`。日常操作顺序：
 
-1. 选择仓库，确认目标远端为 `hunxuankai/codex-relay`、默认分支为 `main`，并完成只读预检。
-2. 输入严格更高的 SemVer，检查自动生成的简体中文说明和固定六文件计划。
+1. 选择仓库，确认目标远端为 `hunxuankai/codex-relay`、默认分支为 `main`，并完成只读预检；
+   预检通过后控制台会记住规范化本地路径，并显示线上 Latest tag。
+2. 输入严格更高的 SemVer，检查基于 Git 提交与固定模板生成的简体中文说明和固定六文件计划；
+   该生成过程不调用 Codex 或其他外部 AI。
 3. 点击“开始发布”，等待本地门禁、精确提交推送和唯一 GitHub Run 完成。
 4. 核对 Draft Release ID、tag、候选 SHA、说明、NSIS、`.sig`、`latest.json`、大小、SHA-256 与签名关联。
 5. 在控制台的独立确认对话框中公开同一 Release ID，再等待 Latest、tag、manifest、公开资产和清理 Run 复核。
@@ -100,6 +102,98 @@ for _ in 0..900 {
 // 发现至少 2 分钟；远端运行最多监控 4 小时、每 5 秒刷新。
 // commit 前失败：不可取消地清索引 -> 六文件回滚 -> 验证 -> failed。
 // commit 后 push 失败：持久化 Committed，只重试 push。
+```
+
+### 0.2 仓库偏好与 Latest 预检契约
+
+#### 1. 范围/触发条件
+
+修改发布控制台的仓库输入恢复、`ReleasePreflightResult`、GitHub Release 列表解析或仓库摘要展示时，
+必须遵循本节。仓库偏好只解决“如何找到仓库”，不能替代 worktree Git 元数据中的发布会话事实。
+
+#### 2. 签名
+
+前后端预检 DTO 使用 camelCase：
+
+```typescript
+interface ReleasePreflightResult {
+  repositoryPath: string
+  repository: RepositoryInspection
+  external: {
+    tools: ToolchainInspection
+    activeReleaseRuns: number
+    conflictingDrafts: number
+    latestReleaseTag: string | null
+  }
+}
+```
+
+WebView 偏好键和值固定为：
+
+```text
+codex-relay-release-console.repository-preference.v1
+{"version":1,"repositoryPath":"D:\\safe-temp\\repository"}
+```
+
+#### 3. 契约
+
+- `repositoryPath` 必须由 Rust 在 Git 预检前 `canonicalize`，成功响应返回规范化绝对路径。
+- 只有预检成功后，Vue 才能用响应中的 `repositoryPath` 更新输入并保存偏好；未校验的击键不得落盘。
+- 偏好读取、JSON 解析、schema 版本或写入失败时回退为空值或当前会话内存值，不得阻断手动输入。
+- 偏好只保存仓库路径，不保存 GitHub Token、Authorization Header、API Key、发布说明或 session 证据。
+- GitHub Release 列表在 Rust 边界只解析一次：Draft 数量用于冲突门禁；首个
+  `draft=false && prerelease=false` 且 tag 非空的对象投影为 `latestReleaseTag`。
+- 没有正式 Release 时 `latestReleaseTag=null`，UI 显示“尚无正式版本”；GitHub 命令失败或 JSON
+  无效继续返回 `GITHUB_PREFLIGHT_FAILED` / `GITHUB_RESPONSE_INVALID`，不得显示缓存或猜测版本。
+- 发布说明仍由 `ReleaseNotesService` 根据 Git 提交和固定模板确定性生成，不调用 Codex；提交主题
+  保留原语言，维护者可编辑正文，发布前继续执行必需段落、版本和秘密扫描校验。
+
+#### 4. 验证与错误矩阵
+
+| 条件 | 必需结果 |
+|---|---|
+| 首次启动或偏好不存在 | 仓库输入为空，可手动填写 |
+| v1 偏好有效 | 启动时恢复仓库路径，但仍需重新执行只读预检 |
+| 偏好损坏、版本未知或 storage 抛错 | 安全回退，不显示发布失败 |
+| 预检成功且输入为非规范路径 | 输入和偏好改为后端返回的规范化路径 |
+| 预检失败 | 保留当前输入，不覆盖上次成功偏好 |
+| Release 列表含 Draft/prerelease/正式版本 | 跳过前两者，显示首个正式 tag |
+| Release 列表无正式版本 | 显示“尚无正式版本” |
+| GitHub 查询或 JSON 解析失败 | 整体预检失败，显示稳定错误，不伪造 Latest |
+
+#### 5. 良好/基线/错误用例
+
+- 良好：维护者首次填写仓库并预检成功；下次打开路径已恢复，点击检查后显示 `v0.4.0`。
+- 基线：WebView 数据被清除后重新手动选择仓库，不影响 worktree 内已有 session 的真实性。
+- 良好：Release 列表前两项分别为 Draft 和 prerelease，第三项为正式 Release；摘要显示第三项 tag。
+- 错误：输入框每次变化都写 localStorage，把拼写中间态或未验证目录保存为下次默认值。
+- 错误：Vue 自行解析 GitHub JSON，或在查询失败时沿用旧 tag 并把预检标为通过。
+
+#### 6. 必需测试
+
+- `useRepositoryPreference.test.ts`：断言 v1 恢复、损坏/未知版本/空路径回退、显式保存和 storage 异常容错。
+- `App.test.ts`：断言启动恢复、成功预检保存规范化路径、失败预检不覆盖旧偏好，以及范围横幅不再显示。
+- `release_application.rs` 单元测试：断言 Latest 投影跳过 Draft/prerelease，无正式版本返回 `None`。
+- command/Git preflight 测试：断言 `repositoryPath` 规范化、`latestReleaseTag` 透传且 camelCase DTO 类型同步。
+- `RepositorySetupPanel.test.ts`：断言真实 tag 与“尚无正式版本”空态。
+- `ReleasePlanPanel.test.ts`：断言用户可见文案明确“不调用 Codex”。
+
+#### 7. 错误与正确做法
+
+错误：保存未验证输入，并在组件内猜测 Latest。
+
+```typescript
+watch(repositoryPath, value => localStorage.setItem('repository', value))
+const latest = releases[0]?.tag_name
+```
+
+正确：只在 typed 预检成功后保存后端事实，Vue 只展示 DTO。
+
+```typescript
+const inspection = await release.inspect(repositoryPath.value)
+if (inspection) repositoryPreference.remember(inspection.repositoryPath)
+
+const latest = inspection.external.latestReleaseTag ?? '尚无正式版本'
 ```
 
 ## 1. 发布边界

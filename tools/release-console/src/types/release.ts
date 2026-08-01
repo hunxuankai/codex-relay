@@ -49,11 +49,13 @@ export interface RepositoryInspection {
 }
 
 export interface ReleasePreflightResult {
+  repositoryPath: string
   repository: RepositoryInspection
   external: {
     tools: ToolchainInspection
     activeReleaseRuns: number
     conflictingDrafts: number
+    latestReleaseTag: string | null
   }
 }
 
