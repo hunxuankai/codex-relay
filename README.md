@@ -200,7 +200,7 @@ npm run build:release-console
 ```
 
 命令会构建 `CodexRelayReleaseConsole.exe`，再复制到被 Git 忽略的
-`dist/release-console/CodexRelayReleaseConsole.exe`，并输出实际路径、大小、时间和 SHA-256。
+`artifacts/release-console/CodexRelayReleaseConsole.exe`，并输出实际路径、大小、时间和 SHA-256。
 
 日常发布时直接运行该 EXE：
 

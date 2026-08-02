@@ -14,7 +14,7 @@ GitHub Actions 替换成本地发布后端。
 npm run build:release-console
 ```
 
-构建后运行 `dist/release-console/CodexRelayReleaseConsole.exe`。日常操作顺序：
+构建后运行 `artifacts/release-console/CodexRelayReleaseConsole.exe`。日常操作顺序：
 
 1. 选择仓库，确认目标远端为 `hunxuankai/codex-relay`、默认分支为 `main`，并完成只读预检；
    预检通过后控制台会记住规范化本地路径，并显示线上 Latest tag。
@@ -547,6 +547,91 @@ ReleaseOrchestratorError::LocalVerificationFailed {
 }
 
 state_store.fail(session, step_id, error.code())?;
+```
+
+### 0.5 发布控制台交付目录所有权契约
+
+#### 1. 范围/触发条件
+
+修改发布控制台便携 EXE 的默认交付路径、主应用 Vite `outDir`、Tauri `frontendDist`、包装脚本或
+发布控制台构建文档时，必须遵循本节。Windows 会锁定运行中的 EXE；任何可整体清理的构建输出树都
+不能同时承担维护工具的稳定运行目录。
+
+#### 2. 签名
+
+固定构建与交付入口：
+
+```text
+npm run build:release-console
+  → src-tauri/target/release/CodexRelayReleaseConsole.exe
+  → scripts/package-release-console.ps1
+  → artifacts/release-console/CodexRelayReleaseConsole.exe
+```
+
+主应用普通构建边界保持：
+
+```text
+npm run build
+  → tauri build
+  → beforeBuildCommand: npm run build:frontend
+  → frontendDist: dist
+```
+
+包装脚本的 `-SourcePath` 与 `-DestinationDirectory` 仍是可选显式覆盖；默认交付根固定为
+`artifacts/`，并由 `.gitignore` 排除。
+
+#### 3. 契约
+
+- 发布控制台默认交付目录必须位于主应用 Vite `dist` 输出树之外；不得依赖
+  `emptyOutDir=false` 保留运行中的工具。
+- `artifacts/` 只保存仓库本地维护产物，不得进入 Tauri `frontendDist`、resources、正式 bundle、
+  updater 资产或 Git。
+- 包装脚本继续复制真实 Release EXE，并输出实际绝对路径、大小、最后写入时间和 SHA-256；源/目标
+  字节必须一致。
+- README、发布规范、结构测试和脚本默认值必须使用同一个路径。历史任务中的旧路径证据不追溯改写。
+- 路径迁移不得自动删除旧便携副本，也不得结束维护者已经启动的控制台进程。
+
+#### 4. 验证与错误矩阵
+
+| 条件 | 必需结果 |
+|---|---|
+| 控制台从 `artifacts/release-console` 运行，执行 `npm run build:frontend` | Vite 可清理 `dist`，命令退出 0，控制台保持运行 |
+| 同一控制台运行时执行 `npm run build` | 普通主程序与 NSIS 实际生成，控制台保持运行 |
+| 默认交付路径重新落入 `dist` | `src/release-console-structure.test.ts` 失败，禁止进入发布门禁 |
+| 显式传入临时 `DestinationDirectory` | 继续逐字节复制并返回对应临时路径与哈希 |
+| 目标 EXE 已被占用 | 包装脚本保留真实复制失败，不强制结束未知进程 |
+| `artifacts` 二进制出现在 Git 状态 | 视为交付边界失败，提交前停止 |
+
+#### 5. 良好/基线/错误用例
+
+- 良好：维护者从 `artifacts/release-console/CodexRelayReleaseConsole.exe` 启动控制台；本地门禁的
+  `ordinary-build` 完成 Vite、Rust 和 NSIS，控制台全过程存活。
+- 基线：测试向包装脚本显式传入系统临时目录，验证复制和 SHA-256，不依赖默认交付根。
+- 错误：把便携控制台放在 `dist/release-console`，再让 Vite 默认清空 `dist`；Windows 返回
+  `[vite:prepare-out-dir] EBUSY`，普通构建退出 1。
+- 错误：设置 `emptyOutDir=false` 掩盖锁冲突，导致旧哈希前端资产长期残留并可能进入主应用 bundle。
+
+#### 6. 必需测试
+
+- `src/release-console-structure.test.ts`：断言默认路径为 `artifacts/release-console`、不属于 `dist`、
+  `artifacts/` 被 Git 忽略，并通过真实 PowerShell 临时复制核对字节、大小与 SHA-256。
+- `npm run build:release-console`：枚举新交付 EXE，并核对源/目标大小与 SHA-256 一致。
+- Windows 真实回归：使用成对安全 Relay 路径从新交付位置隐藏启动控制台；保持该 PID 运行时依次执行
+  `npm run build:frontend` 与 `npm run build`，断言均退出 0、控制台仍存活，再只关闭本轮 PID。
+- 提交前运行 `npm run check`、`git diff --check` 和 Git 忽略/秘密审计。
+
+#### 7. 错误与正确做法
+
+错误：让可整体重建的主前端目录同时承载运行中的维护工具。
+
+```powershell
+$DestinationDirectory = Join-Path $repositoryRoot 'dist\release-console'
+```
+
+正确：为便携维护产物使用独立、被忽略且不进入正式 bundle 的根目录。
+
+```powershell
+$DestinationDirectory = Join-Path $repositoryRoot 'artifacts\release-console'
 ```
 
 ## 1. 发布边界

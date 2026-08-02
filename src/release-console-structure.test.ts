@@ -13,10 +13,13 @@ const consolePackagePath = `${consoleRoot}/package.json`
 const consoleCargoPath = `${consoleRoot}/src-tauri/Cargo.toml`
 const consoleTauriPath = `${consoleRoot}/src-tauri/tauri.conf.json`
 const consoleCapabilityPath = `${consoleRoot}/src-tauri/capabilities/default.json`
+const packageScriptPath = 'scripts/package-release-console.ps1'
+const packageScript = readFileSync(packageScriptPath, 'utf8')
 const gitignore = readFileSync('.gitignore', 'utf8')
 const readme = readFileSync('README.md', 'utf8')
 const publishingGuide = readFileSync('.trellis/spec/release/publishing.md', 'utf8')
 const updaterGuide = readFileSync('.trellis/spec/release/updater.md', 'utf8')
+const portableDeliveryPath = 'artifacts/release-console/CodexRelayReleaseConsole.exe'
 
 describe('release console project isolation', () => {
   it('registers an independent npm and Cargo workspace with explicit root scripts', () => {
@@ -82,9 +85,20 @@ describe('release console project isolation', () => {
     expect(JSON.stringify(mainTauri)).not.toContain('release-console')
   })
 
+  it('keeps the default portable delivery outside the main frontend output tree', () => {
+    const defaultDirectory = packageScript.match(
+      /\$DestinationDirectory = Join-Path \$repositoryRoot '([^']+)'/,
+    )?.[1]
+
+    const normalizedDirectory = defaultDirectory?.replace(/\\/g, '/')
+
+    expect(normalizedDirectory).toBe('artifacts/release-console')
+    expect(normalizedDirectory).not.toMatch(/^dist(?:\/|$)/)
+    expect(gitignore).toContain('artifacts/')
+  })
+
   it('copies the portable EXE to the ignored delivery directory and reports its hash', () => {
-    const script = 'scripts/package-release-console.ps1'
-    expect(existsSync(script)).toBe(true)
+    expect(existsSync(packageScriptPath)).toBe(true)
     const temporaryRoot = mkdtempSync(join(tmpdir(), 'codex-relay-release-console-package-'))
     try {
       const source = join(temporaryRoot, 'CodexRelayReleaseConsole.exe')
@@ -97,7 +111,7 @@ describe('release console project isolation', () => {
         [
           '-NoProfile',
           '-File',
-          script,
+          packageScriptPath,
           '-SourcePath',
           source,
           '-DestinationDirectory',
@@ -123,7 +137,7 @@ describe('release console project isolation', () => {
   it('documents the console-first release flow and its explicit verification limits', () => {
     for (const document of [readme, publishingGuide]) {
       expect(document).toContain('npm run build:release-console')
-      expect(document).toContain('dist/release-console/CodexRelayReleaseConsole.exe')
+      expect(document).toContain(portableDeliveryPath)
       expect(document).toContain('Sandbox')
       expect(document).toContain('UAC')
     }

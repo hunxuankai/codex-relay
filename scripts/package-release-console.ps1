@@ -12,7 +12,7 @@ if ([string]::IsNullOrWhiteSpace($SourcePath)) {
   $SourcePath = Join-Path $repositoryRoot 'src-tauri\target\release\CodexRelayReleaseConsole.exe'
 }
 if ([string]::IsNullOrWhiteSpace($DestinationDirectory)) {
-  $DestinationDirectory = Join-Path $repositoryRoot 'dist\release-console'
+  $DestinationDirectory = Join-Path $repositoryRoot 'artifacts\release-console'
 }
 
 $source = [System.IO.Path]::GetFullPath($SourcePath)
