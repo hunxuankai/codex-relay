@@ -1,4 +1,5 @@
 import { mount } from '@vue/test-utils'
+import { ElTag } from 'element-plus'
 import { describe, expect, it } from 'vitest'
 import type { ReleaseSession } from '../../types/release'
 import ReleaseTimeline from './ReleaseTimeline.vue'
@@ -131,5 +132,29 @@ describe('ReleaseTimeline', () => {
     expect(wrapper.find('.is-failed').exists()).toBe(false)
     expect(wrapper.findAll('[data-release-step]').every((step) => step.text().includes('未开始')))
       .toBe(true)
+  })
+
+  it('keeps steps after a failure visually neutral', () => {
+    const failedSession: ReleaseSession = {
+      ...session('failed'),
+      failure: {
+        phase: 'localChecks',
+        stepId: 'ordinary-build',
+        code: 'RELEASE_LOCAL_VERIFICATION_FAILED',
+      },
+    }
+    const wrapper = mount(ReleaseTimeline, {
+      props: {
+        session: failedSession,
+        events: [],
+      },
+    })
+    const sourceAudit = wrapper
+      .findAll('[data-release-step]')
+      .find((step) => step.get('strong').text() === '源码审计')
+
+    expect(sourceAudit).toBeDefined()
+    expect(sourceAudit?.text()).toContain('未开始')
+    expect(sourceAudit?.findComponent(ElTag).props('type')).toBe('info')
   })
 })

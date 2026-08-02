@@ -117,7 +117,7 @@ const failedStepIndex = computed(() => {
 function stepState(step: TimelineStep): TimelineStepState {
   const current = props.session?.phase ?? 'idle'
   if (current === 'failed') {
-    const targetIndex = steps.indexOf(step)
+    const targetIndex = steps.findIndex((candidate) => candidate.id === step.id)
     if (failedStepIndex.value < 0) return 'waiting'
     if (targetIndex < failedStepIndex.value) return 'completed'
     if (targetIndex === failedStepIndex.value) return 'failed'
