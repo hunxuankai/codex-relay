@@ -588,6 +588,10 @@ npm run build
   updater 资产或 Git。
 - 包装脚本继续复制真实 Release EXE，并输出实际绝对路径、大小、最后写入时间和 SHA-256；源/目标
   字节必须一致。
+- 结构测试必须显式用 `cmd.exe` 的 `%~sI` 为临时目标目录取得 Windows 8.3 路径表示，并在调用
+  包装脚本前确认该值为绝对路径；不得让空值或相对路径回退到仓库工作目录。
+- 包装证据路径必须先断言为绝对路径，再用 `realpathSync.native` 解析证据路径和预期产物路径，按
+  Windows 大小写不敏感语义比较文件身份。不得直接比较短路径与长路径的原始字符串。
 - README、发布规范、结构测试和脚本默认值必须使用同一个路径。历史任务中的旧路径证据不追溯改写。
 - 路径迁移不得自动删除旧便携副本，也不得结束维护者已经启动的控制台进程。
 
@@ -599,6 +603,8 @@ npm run build
 | 同一控制台运行时执行 `npm run build` | 普通主程序与 NSIS 实际生成，控制台保持运行 |
 | 默认交付路径重新落入 `dist` | `src/release-console-structure.test.ts` 失败，禁止进入发布门禁 |
 | 显式传入临时 `DestinationDirectory` | 继续逐字节复制并返回对应临时路径与哈希 |
+| Node 预期路径为 8.3 短名，PowerShell 证据为同一文件的长名 | 真实路径身份比较通过，继续核对字节、大小和 SHA-256 |
+| 短路径 helper 返回空值/相对路径，或证据路径不存在/指向其他文件 | 在调用脚本前或真实路径解析时失败，不接受相对仓库目标或错误产物 |
 | 目标 EXE 已被占用 | 包装脚本保留真实复制失败，不强制结束未知进程 |
 | `artifacts` 二进制出现在 Git 状态 | 视为交付边界失败，提交前停止 |
 
@@ -607,14 +613,19 @@ npm run build
 - 良好：维护者从 `artifacts/release-console/CodexRelayReleaseConsole.exe` 启动控制台；本地门禁的
   `ordinary-build` 完成 Vite、Rust 和 NSIS，控制台全过程存活。
 - 基线：测试向包装脚本显式传入系统临时目录，验证复制和 SHA-256，不依赖默认交付根。
+- 良好：测试把临时目标目录写成 8.3 短路径，脚本返回长路径；两端 `realpathSync.native` 指向
+  同一文件，绝对路径、字节、大小和 SHA-256 全部通过。
 - 错误：把便携控制台放在 `dist/release-console`，再让 Vite 默认清空 `dist`；Windows 返回
   `[vite:prepare-out-dir] EBUSY`，普通构建退出 1。
+- 错误：用 `expect(evidence.path).toBe(packaged)` 锁死原始路径拼写，使 GitHub Windows runner 的
+  `C:\Users\RUNNER~1` 与 PowerShell 长路径被误报为产物漂移。
 - 错误：设置 `emptyOutDir=false` 掩盖锁冲突，导致旧哈希前端资产长期残留并可能进入主应用 bundle。
 
 #### 6. 必需测试
 
 - `src/release-console-structure.test.ts`：断言默认路径为 `artifacts/release-console`、不属于 `dist`、
-  `artifacts/` 被 Git 忽略，并通过真实 PowerShell 临时复制核对字节、大小与 SHA-256。
+  `artifacts/` 被 Git 忽略；真实 PowerShell 临时复制必须显式使用绝对 8.3 目标路径，先断言证据为
+  绝对路径，再用 `realpathSync.native` 比较现有文件身份，并核对字节、大小与 SHA-256。
 - `npm run build:release-console`：枚举新交付 EXE，并核对源/目标大小与 SHA-256 一致。
 - Windows 真实回归：使用成对安全 Relay 路径从新交付位置隐藏启动控制台；保持该 PID 运行时依次执行
   `npm run build:frontend` 与 `npm run build`，断言均退出 0、控制台仍存活，再只关闭本轮 PID。
@@ -632,6 +643,21 @@ $DestinationDirectory = Join-Path $repositoryRoot 'dist\release-console'
 
 ```powershell
 $DestinationDirectory = Join-Path $repositoryRoot 'artifacts\release-console'
+```
+
+错误：把两个运行时返回的路径字符串当成文件身份。
+
+```typescript
+expect(evidence.path).toBe(packaged)
+```
+
+正确：先拒绝相对输出，再按 Windows 文件系统解析同一现有文件。
+
+```typescript
+expect(isAbsolute(evidence.path)).toBe(true)
+expect(realpathSync.native(evidence.path).toLowerCase()).toBe(
+  realpathSync.native(packaged).toLowerCase(),
+)
 ```
 
 ### 0.6 发布控制台诊断日志与固定日志区契约

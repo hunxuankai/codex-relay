@@ -1,7 +1,14 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 
@@ -20,6 +27,18 @@ const readme = readFileSync('README.md', 'utf8')
 const publishingGuide = readFileSync('.trellis/spec/release/publishing.md', 'utf8')
 const updaterGuide = readFileSync('.trellis/spec/release/updater.md', 'utf8')
 const portableDeliveryPath = 'artifacts/release-console/CodexRelayReleaseConsole.exe'
+
+function getWindowsShortPath(directory: string) {
+  const result = spawnSync(
+    'cmd.exe',
+    ['/d', '/c', 'for %I in (.) do @echo %~sI'],
+    { cwd: directory, encoding: 'utf8' },
+  )
+  expect(result.status, result.stderr).toBe(0)
+  const shortPath = result.stdout.trim()
+  expect(isAbsolute(shortPath)).toBe(true)
+  return shortPath
+}
 
 describe('release console project isolation', () => {
   it('registers an independent npm and Cargo workspace with explicit root scripts', () => {
@@ -101,8 +120,9 @@ describe('release console project isolation', () => {
     expect(existsSync(packageScriptPath)).toBe(true)
     const temporaryRoot = mkdtempSync(join(tmpdir(), 'codex-relay-release-console-package-'))
     try {
+      const temporaryRootAlias = getWindowsShortPath(temporaryRoot)
       const source = join(temporaryRoot, 'CodexRelayReleaseConsole.exe')
-      const destination = join(temporaryRoot, 'dist')
+      const destination = join(temporaryRootAlias, 'dist')
       const bytes = Buffer.from('portable-release-console-fixture')
       writeFileSync(source, bytes)
 
@@ -124,8 +144,11 @@ describe('release console project isolation', () => {
       const evidence = JSON.parse(result.stdout.trim())
       const packaged = join(destination, 'CodexRelayReleaseConsole.exe')
       expect(readFileSync(packaged)).toEqual(bytes)
+      expect(isAbsolute(evidence.path)).toBe(true)
+      expect(realpathSync.native(evidence.path).toLowerCase()).toBe(
+        realpathSync.native(packaged).toLowerCase(),
+      )
       expect(evidence).toMatchObject({
-        path: packaged,
         size: bytes.length,
         sha256: createHash('sha256').update(bytes).digest('hex').toUpperCase(),
       })
