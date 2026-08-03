@@ -7,14 +7,16 @@ use crate::infrastructure::git::GitBackend;
 use crate::infrastructure::local_verification::ProcessLocalVerificationBackend;
 use crate::infrastructure::process::{ProcessInvocation, SafeProcessRunner};
 use crate::models::{
-    ExternalPreflightSnapshot, ReleaseConnectionTestResult, ReleaseEvent, ReleasePhase,
-    ReleasePlanFileSummary, ReleasePlanSummary, ReleasePreflightResult, ReleaseProxySettings,
-    ReleaseSession, SafeRepositoryPushRequest, ToolchainInspection,
+    ExternalPreflightSnapshot, ReleaseConnectionTestResult, ReleaseEvent, ReleaseLogPage,
+    ReleasePhase, ReleasePlanFileSummary, ReleasePlanSummary, ReleasePreflightResult,
+    ReleaseProxySettings, ReleaseSession, ReleaseSessionSnapshot, SafeRepositoryPushRequest,
+    ToolchainInspection,
 };
 use crate::services::git_release::{
     GitReleaseError, GitReleaseService, RepositoryInspectionService, project_release_preflight,
 };
 use crate::services::release_candidate::{ReleaseCandidatePlan, ReleaseCandidateTransaction};
+use crate::services::release_log::{ReleaseLogRecorder, ReleaseLogStore, ReleaseProgressSink};
 use crate::services::release_network::{
     ReleaseConnectionService, ReleaseNetworkProfile, SystemReleaseConnectionProbeBackend,
 };
@@ -39,6 +41,8 @@ use std::time::Duration;
 const TARGET_REPOSITORY: &str = "hunxuankai/codex-relay";
 const RELEASE_WORKFLOW: &str = "release.yml";
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(30);
+const RELEASE_LOG_READ_WARNING: &str =
+    "发布诊断日志暂时无法读取；发布会话仍可继续，但部分日志可能不可恢复。";
 
 #[derive(Clone, Copy)]
 enum PreflightPurpose {
@@ -83,6 +87,12 @@ struct SessionContext {
     git_dir: PathBuf,
     expected_notes: String,
     tools: ResolvedTools,
+}
+
+struct ReleaseFailureDetails<'a> {
+    step_id: &'a str,
+    code: &'a str,
+    message: &'a str,
 }
 
 #[derive(Clone)]
@@ -160,7 +170,14 @@ impl SystemReleaseApplication {
             ApplicationRequest::GetSession { repository_path } => self
                 .get_session(PathBuf::from(repository_path))
                 .await
-                .map(ApplicationResponse::OptionalSession),
+                .map(ApplicationResponse::OptionalSnapshot),
+            ApplicationRequest::GetLogs {
+                session_id,
+                before_sequence,
+            } => self
+                .get_logs(&session_id, before_sequence)
+                .await
+                .map(ApplicationResponse::Logs),
             ApplicationRequest::Resume { session_id, proxy } => self
                 .resume_release(&session_id, proxy, events)
                 .await
@@ -568,11 +585,16 @@ impl SystemReleaseApplication {
                 session: Box::new(session.clone()),
             },
         );
+        let recorder = Arc::new(initialize_release_log_recorder(
+            stored.git_dir.clone(),
+            &session_id,
+            events.clone(),
+        ));
         let application = self.clone();
         let initial = session.clone();
         tauri::async_runtime::spawn(async move {
             application
-                .run_initial_pipeline(initial, stored, profile, cancel, events)
+                .run_initial_pipeline(initial, stored, profile, cancel, events, recorder)
                 .await;
         });
         Ok(session)
@@ -585,6 +607,7 @@ impl SystemReleaseApplication {
         profile: ReleaseNetworkProfile,
         cancel: tokio::sync::watch::Receiver<bool>,
         events: Option<Arc<dyn ReleaseEventSink>>,
+        recorder: Arc<ReleaseLogRecorder>,
     ) {
         let watch_store = ReleaseStateStore::new(stored.git_dir.clone());
         run_with_session_updates(watch_store, events.clone(), async {
@@ -595,15 +618,18 @@ impl SystemReleaseApplication {
                 profile.git_proxy_mode().clone(),
                 cancel.clone(),
             );
-            let verification = ProcessLocalVerificationBackend::new(
+            let verification = ProcessLocalVerificationBackend::with_recorder(
                 stored.tools.npm.clone(),
                 stored.tools.cargo.clone(),
                 environment.clone(),
                 cancel.clone(),
+                Arc::clone(&recorder),
             );
             let push = GitReleasePushBackend::new(git, stored.expected_remote_sha.clone());
             let store = ReleaseStateStore::new(stored.git_dir.clone());
+            let progress: Arc<dyn ReleaseProgressSink> = recorder.clone();
             let result = ReleaseOrchestrator::new()
+                .with_progress(progress.clone())
                 .run_to_pushed(
                     &mut session,
                     &store,
@@ -615,7 +641,13 @@ impl SystemReleaseApplication {
                 )
                 .await;
             if let Err(error) = result {
-                self.finish_with_orchestrator_error(&session.id, &store, events.as_deref(), &error);
+                self.finish_with_orchestrator_error(
+                    &session.id,
+                    &store,
+                    events.as_deref(),
+                    Some(recorder.as_ref()),
+                    &error,
+                );
                 return;
             }
             emit(
@@ -631,8 +663,9 @@ impl SystemReleaseApplication {
                 stored.repository_path.clone(),
                 cancel,
             );
-            let remote = GithubRemoteBackend::new(&gh);
+            let remote = GithubRemoteBackend::new(&gh).with_progress(progress.clone());
             match ReleaseOrchestrator::new()
+                .with_progress(progress)
                 .run_remote_to_draft(
                     &mut session,
                     &store,
@@ -656,6 +689,7 @@ impl SystemReleaseApplication {
                         &session.id,
                         &store,
                         events.as_deref(),
+                        Some(recorder.as_ref()),
                         &error,
                     );
                     return;
@@ -669,7 +703,7 @@ impl SystemReleaseApplication {
     async fn get_session(
         &self,
         repository_path: PathBuf,
-    ) -> Result<Option<ReleaseSession>, ReleaseApplicationError> {
+    ) -> Result<Option<ReleaseSessionSnapshot>, ReleaseApplicationError> {
         let (_, tools, git_dir) = self
             .inspect_repository(repository_path.clone(), PreflightPurpose::Recovery)
             .await?;
@@ -677,7 +711,7 @@ impl SystemReleaseApplication {
         let session = store
             .load()
             .map_err(|_| app_error("RELEASE_STATE_INVALID", "发布会话状态无效。"))?;
-        if let Some(session) = &session {
+        if let Some(session) = session {
             let notes = fs::read_to_string(repository_path.join(".github/release-notes.md"))
                 .map_err(|_| app_error("RELEASE_NOTES_READ_FAILED", "无法读取发布说明。"))?;
             self.inner.sessions.lock().unwrap().insert(
@@ -686,13 +720,31 @@ impl SystemReleaseApplication {
                     repository_path: repository_path
                         .canonicalize()
                         .map_err(|_| app_error("GIT_REPOSITORY_INVALID", "无法读取 Git 仓库。"))?,
-                    git_dir,
+                    git_dir: git_dir.clone(),
                     expected_notes: notes,
                     tools,
                 },
             );
+            let logs = load_release_log_page(git_dir, session.id.clone(), None).await;
+            return Ok(Some(ReleaseSessionSnapshot { session, logs }));
         }
-        Ok(session)
+        Ok(None)
+    }
+
+    async fn get_logs(
+        &self,
+        session_id: &str,
+        before_sequence: Option<u64>,
+    ) -> Result<ReleaseLogPage, ReleaseApplicationError> {
+        let context = self.context(session_id)?;
+        let session_matches = ReleaseStateStore::new(context.git_dir.clone())
+            .load()
+            .map_err(|_| app_error("RELEASE_STATE_INVALID", "发布会话状态无效。"))?
+            .is_some_and(|session| session.id == session_id);
+        if !session_matches {
+            return Err(app_error("RELEASE_SESSION_NOT_FOUND", "未找到发布会话。"));
+        }
+        Ok(load_release_log_page(context.git_dir, session_id.to_string(), before_sequence).await)
     }
 
     async fn resume_release(
@@ -709,6 +761,11 @@ impl SystemReleaseApplication {
             .map_err(|_| app_error("RELEASE_STATE_INVALID", "发布会话状态无效。"))?
             .filter(|session| session.id == session_id)
             .ok_or_else(|| app_error("RELEASE_SESSION_NOT_FOUND", "未找到发布会话。"))?;
+        let recorder = Arc::new(open_release_log_recorder(
+            context.git_dir.clone(),
+            session_id,
+            events.clone(),
+        ));
         if resume_action(session.phase) == ResumeAction::RequiresLocalCancel {
             return Err(app_error(
                 "RELEASE_LOCAL_RESUME_REQUIRES_CANCEL",
@@ -723,7 +780,7 @@ impl SystemReleaseApplication {
         let initial = session.clone();
         tauri::async_runtime::spawn(async move {
             application
-                .run_resume_pipeline(initial, context, profile, cancel, events)
+                .run_resume_pipeline(initial, context, profile, cancel, events, recorder)
                 .await;
         });
         Ok(session)
@@ -736,11 +793,13 @@ impl SystemReleaseApplication {
         profile: ReleaseNetworkProfile,
         cancel: tokio::sync::watch::Receiver<bool>,
         events: Option<Arc<dyn ReleaseEventSink>>,
+        recorder: Arc<ReleaseLogRecorder>,
     ) {
         let watch_store = ReleaseStateStore::new(context.git_dir.clone());
         run_with_session_updates(watch_store, events.clone(), async {
             let environment = profile.environment().to_vec();
             let store = ReleaseStateStore::new(context.git_dir.clone());
+            let progress: Arc<dyn ReleaseProgressSink> = recorder.clone();
             if resume_action(session.phase) == ResumeAction::PushCommitted {
                 let git = GitBackend::new_cancellable_with_proxy(
                     context.tools.git.clone(),
@@ -750,6 +809,7 @@ impl SystemReleaseApplication {
                 );
                 let push = GitReleasePushBackend::for_committed(git);
                 if let Err(error) = ReleaseOrchestrator::new()
+                    .with_progress(progress.clone())
                     .push_committed(
                         &mut session,
                         &store,
@@ -763,6 +823,7 @@ impl SystemReleaseApplication {
                         &session.id,
                         &store,
                         events.as_deref(),
+                        Some(recorder.as_ref()),
                         &error,
                     );
                     return;
@@ -774,9 +835,10 @@ impl SystemReleaseApplication {
                 context.repository_path.clone(),
                 cancel,
             );
-            let remote = GithubRemoteBackend::new(&gh);
+            let remote = GithubRemoteBackend::new(&gh).with_progress(progress.clone());
             let result = match resume_action(session.phase) {
                 ResumeAction::RemoteToDraft => ReleaseOrchestrator::new()
+                    .with_progress(progress.clone())
                     .run_remote_to_draft(
                         &mut session,
                         &store,
@@ -794,12 +856,14 @@ impl SystemReleaseApplication {
                                 &session.id,
                                 &store,
                                 events.as_deref(),
+                                Some(recorder.as_ref()),
                                 "RELEASE_REMOTE_STATE_INVALID",
                             );
                             return;
                         }
                     };
                     ReleaseOrchestrator::new()
+                        .with_progress(progress)
                         .publish_and_finalize(
                             &mut session,
                             &store,
@@ -825,6 +889,7 @@ impl SystemReleaseApplication {
                     &session.id,
                     &store,
                     events.as_deref(),
+                    Some(recorder.as_ref()),
                     &error,
                 ),
             }
@@ -854,6 +919,11 @@ impl SystemReleaseApplication {
                 "当前发布会话尚未通过 Draft 审计。",
             ));
         }
+        let recorder = Arc::new(open_release_log_recorder(
+            context.git_dir.clone(),
+            session_id,
+            events.clone(),
+        ));
         let cancel = self.register_pipeline(session_id)?;
         let application = self.clone();
         let initial = session.clone();
@@ -867,10 +937,12 @@ impl SystemReleaseApplication {
                     context.repository_path.clone(),
                     cancel,
                 );
-                let remote = GithubRemoteBackend::new(&gh);
+                let progress: Arc<dyn ReleaseProgressSink> = recorder.clone();
+                let remote = GithubRemoteBackend::new(&gh).with_progress(progress.clone());
                 let store = ReleaseStateStore::new(context.git_dir.clone());
                 let mut current = initial;
                 match ReleaseOrchestrator::new()
+                    .with_progress(progress)
                     .publish_and_finalize(
                         &mut current,
                         &store,
@@ -899,6 +971,7 @@ impl SystemReleaseApplication {
                         &current.id,
                         &store,
                         events.as_deref(),
+                        Some(recorder.as_ref()),
                         &error,
                     ),
                 }
@@ -1045,15 +1118,19 @@ impl SystemReleaseApplication {
         session_id: &str,
         store: &ReleaseStateStore,
         events: Option<&dyn ReleaseEventSink>,
+        recorder: Option<&ReleaseLogRecorder>,
         code: &str,
     ) {
         self.finish_with_error_details(
             session_id,
             store,
             events,
-            "releasePipeline",
-            code,
-            "发布流程失败，请查看对应阶段证据。",
+            recorder,
+            ReleaseFailureDetails {
+                step_id: "releasePipeline",
+                code,
+                message: "发布流程失败，请查看对应阶段证据。",
+            },
         );
     }
 
@@ -1062,6 +1139,7 @@ impl SystemReleaseApplication {
         session_id: &str,
         store: &ReleaseStateStore,
         events: Option<&dyn ReleaseEventSink>,
+        recorder: Option<&ReleaseLogRecorder>,
         error: &ReleaseOrchestratorError,
     ) {
         let message = error.failure_message();
@@ -1069,9 +1147,12 @@ impl SystemReleaseApplication {
             session_id,
             store,
             events,
-            error.failure_step_id(),
-            error.code(),
-            &message,
+            recorder,
+            ReleaseFailureDetails {
+                step_id: error.failure_step_id(),
+                code: error.code(),
+                message: &message,
+            },
         );
     }
 
@@ -1080,10 +1161,17 @@ impl SystemReleaseApplication {
         session_id: &str,
         store: &ReleaseStateStore,
         events: Option<&dyn ReleaseEventSink>,
-        step_id: &str,
-        code: &str,
-        message: &str,
+        recorder: Option<&ReleaseLogRecorder>,
+        failure: ReleaseFailureDetails<'_>,
     ) {
+        if let Some(recorder) = recorder {
+            recorder.record(
+                failure.step_id,
+                crate::models::ReleaseLogSource::Lifecycle,
+                crate::models::ReleaseLogLevel::Error,
+                format!("{}：{}", failure.code, failure.message),
+            );
+        }
         if let Ok(Some(mut current)) = store.load() {
             let should_emit = if matches!(
                 current.phase,
@@ -1091,7 +1179,9 @@ impl SystemReleaseApplication {
             ) {
                 current.phase == ReleasePhase::Failed
             } else {
-                store.fail(&mut current, step_id, code).is_ok()
+                store
+                    .fail(&mut current, failure.step_id, failure.code)
+                    .is_ok()
             };
             if should_emit {
                 emit(
@@ -1105,9 +1195,9 @@ impl SystemReleaseApplication {
         emit(
             events,
             ReleaseEvent::StepFailed {
-                step_id: step_id.into(),
-                code: code.into(),
-                message: message.into(),
+                step_id: failure.step_id.into(),
+                code: failure.code.into(),
+                message: failure.message.into(),
             },
         );
         self.inner.cancellations.lock().unwrap().remove(session_id);
@@ -1328,6 +1418,69 @@ fn emit(events: Option<&dyn ReleaseEventSink>, event: ReleaseEvent) {
     }
 }
 
+async fn load_release_log_page(
+    git_dir: PathBuf,
+    session_id: String,
+    before_sequence: Option<u64>,
+) -> ReleaseLogPage {
+    tokio::task::spawn_blocking(move || {
+        let store = ReleaseLogStore::new(git_dir);
+        store
+            .load_page(&session_id, before_sequence)
+            .unwrap_or_else(|_| unavailable_log_page())
+    })
+    .await
+    .unwrap_or_else(|_| unavailable_log_page())
+}
+
+fn initialize_release_log_recorder(
+    git_dir: PathBuf,
+    session_id: &str,
+    events: Option<Arc<dyn ReleaseEventSink>>,
+) -> ReleaseLogRecorder {
+    let store = ReleaseLogStore::new(git_dir);
+    if store.initialize(session_id).is_ok() {
+        ReleaseLogRecorder::new(session_id, store, 0, events)
+    } else {
+        ReleaseLogRecorder::volatile(session_id, 0, events)
+    }
+}
+
+fn open_release_log_recorder(
+    git_dir: PathBuf,
+    session_id: &str,
+    events: Option<Arc<dyn ReleaseEventSink>>,
+) -> ReleaseLogRecorder {
+    let store = ReleaseLogStore::new(git_dir);
+    match store.open(session_id) {
+        Ok(opened) => {
+            let recorder = ReleaseLogRecorder::new(session_id, store, opened.last_sequence, events);
+            if let Some(warning) = opened.warning {
+                recorder.record(
+                    "releasePipeline",
+                    crate::models::ReleaseLogSource::Lifecycle,
+                    crate::models::ReleaseLogLevel::Warning,
+                    warning,
+                );
+            }
+            recorder
+        }
+        Err(_) => ReleaseLogRecorder::volatile(session_id, 0, events),
+    }
+}
+
+fn unavailable_log_page() -> ReleaseLogPage {
+    ReleaseLogPage {
+        entries: Vec::new(),
+        next_before_sequence: None,
+        has_earlier: false,
+        total_entries: 0,
+        total_bytes: 0,
+        truncated: false,
+        warning: Some(RELEASE_LOG_READ_WARNING.to_string()),
+    }
+}
+
 async fn watch_session_state(
     store: ReleaseStateStore,
     events: Arc<dyn ReleaseEventSink>,
@@ -1444,6 +1597,8 @@ fn latest_published_release_tag(releases: &[Value]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{ReleaseLogLevel, ReleaseLogSource};
+    use crate::services::release_log::ReleaseLogRecorder;
 
     #[derive(Default)]
     struct TestEventSink {
@@ -1454,6 +1609,629 @@ mod tests {
         fn send(&self, event: ReleaseEvent) -> Result<(), String> {
             self.events.lock().unwrap().push(event);
             Ok(())
+        }
+    }
+
+    struct ClosedEventSink;
+
+    impl ReleaseEventSink for ClosedEventSink {
+        fn send(&self, _event: ReleaseEvent) -> Result<(), String> {
+            Err("release event channel closed".into())
+        }
+    }
+
+    fn missing_tools(directory: &Path) -> ResolvedTools {
+        ResolvedTools {
+            git: directory.join("missing-git.exe"),
+            node: directory.join("missing-node.exe"),
+            npm: directory.join("missing-npm.cmd"),
+            cargo: directory.join("missing-cargo.exe"),
+            gh: directory.join("missing-gh.exe"),
+        }
+    }
+
+    fn direct_proxy() -> ReleaseProxySettings {
+        ReleaseProxySettings {
+            enabled: false,
+            proxy_type: crate::models::ReleaseProxyType::Http,
+            host: String::new(),
+            port: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn starting_release_rotates_old_logs_and_persists_after_the_channel_closes() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository_path = directory.path().join("repository");
+        let git_dir = directory.path().join("git-dir");
+        fs::create_dir_all(&repository_path).unwrap();
+        fs::create_dir_all(&git_dir).unwrap();
+
+        let old_store = ReleaseLogStore::new(git_dir.clone());
+        old_store.initialize("old-session").unwrap();
+        ReleaseLogRecorder::new("old-session", old_store, 0, None).record(
+            "candidate",
+            ReleaseLogSource::Lifecycle,
+            ReleaseLogLevel::Info,
+            "旧会话日志",
+        );
+
+        let application = SystemReleaseApplication::new();
+        let plan_id = "plan-log-rotation".to_string();
+        application.inner.plans.lock().unwrap().insert(
+            plan_id.clone(),
+            StoredPlan {
+                repository_path: repository_path.clone(),
+                git_dir: git_dir.clone(),
+                expected_remote_sha: "a".repeat(40),
+                plan: ReleaseCandidatePlan {
+                    previous_version: "0.4.0".into(),
+                    target_version: "0.5.0".into(),
+                    files: Vec::new(),
+                },
+                summary: ReleasePlanSummary {
+                    id: plan_id.clone(),
+                    repository_path: repository_path.to_string_lossy().into_owned(),
+                    previous_version: "0.4.0".into(),
+                    target_version: "0.5.0".into(),
+                    notes: "测试发布说明".into(),
+                    files: Vec::new(),
+                },
+                tools: missing_tools(directory.path()),
+            },
+        );
+
+        let session = application
+            .start_release(&plan_id, direct_proxy(), Some(Arc::new(ClosedEventSink)))
+            .await
+            .unwrap();
+
+        let mut page = None;
+        for _ in 0..100 {
+            if let Ok(candidate) =
+                ReleaseLogStore::new(git_dir.clone()).load_page(&session.id, None)
+                && !candidate.entries.is_empty()
+            {
+                page = Some(candidate);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let page = page.expect("新会话应在事件通道断开后继续持久化日志");
+        assert!(
+            page.entries
+                .iter()
+                .all(|entry| entry.session_id == session.id)
+        );
+        assert!(
+            page.entries
+                .iter()
+                .all(|entry| !entry.message.contains("旧会话日志"))
+        );
+
+        for _ in 0..100 {
+            if !application
+                .inner
+                .cancellations
+                .lock()
+                .unwrap()
+                .contains_key(&session.id)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let final_page = ReleaseLogStore::new(git_dir.clone())
+            .load_page(&session.id, None)
+            .unwrap();
+        let failure_code = ReleaseStateStore::new(git_dir)
+            .load()
+            .unwrap()
+            .unwrap()
+            .failure
+            .expect("失败管线必须持久化权威失败证据")
+            .code;
+        assert!(final_page.entries.iter().any(|entry| {
+            entry.level == ReleaseLogLevel::Error && entry.message.contains(&failure_code)
+        }));
+        assert!(final_page.entries.iter().all(|entry| {
+            !entry
+                .message
+                .contains(directory.path().to_string_lossy().as_ref())
+        }));
+    }
+
+    #[tokio::test]
+    async fn resuming_release_opens_existing_logs_and_continues_the_sequence() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository_path = directory.path().join("repository");
+        let git_dir = directory.path().join("git-dir");
+        fs::create_dir_all(&repository_path).unwrap();
+        fs::create_dir_all(&git_dir).unwrap();
+        let mut session = ReleaseSession::new(
+            "session-resume-log",
+            repository_path.to_string_lossy(),
+            "0.5.0",
+        );
+        session.phase = ReleasePhase::Committed;
+        session.candidate_sha = Some("a".repeat(40));
+        ReleaseStateStore::new(git_dir.clone())
+            .save(&session)
+            .unwrap();
+        let log_store = ReleaseLogStore::new(git_dir.clone());
+        log_store.initialize(&session.id).unwrap();
+        ReleaseLogRecorder::new(&session.id, log_store, 0, None).record(
+            "candidate",
+            ReleaseLogSource::Lifecycle,
+            ReleaseLogLevel::Info,
+            "此前已完成的发布日志",
+        );
+
+        let application = SystemReleaseApplication::new();
+        application.inner.sessions.lock().unwrap().insert(
+            session.id.clone(),
+            SessionContext {
+                repository_path,
+                git_dir: git_dir.clone(),
+                expected_notes: "测试发布说明".into(),
+                tools: missing_tools(directory.path()),
+            },
+        );
+
+        let resumed = application
+            .resume_release(&session.id, direct_proxy(), Some(Arc::new(ClosedEventSink)))
+            .await
+            .unwrap();
+        assert_eq!(resumed.phase, ReleasePhase::Committed);
+
+        let mut page = None;
+        for _ in 0..100 {
+            let candidate = ReleaseLogStore::new(git_dir.clone())
+                .load_page(&session.id, None)
+                .unwrap();
+            if candidate.entries.len() > 1 {
+                page = Some(candidate);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let page = page.expect("恢复发布应继续追加持久化日志");
+        assert_eq!(page.entries[0].sequence, 1);
+        assert_eq!(page.entries[0].message, "此前已完成的发布日志");
+        assert!(page.entries.windows(2).all(|pair| {
+            pair[1].sequence == pair[0].sequence + 1 && pair[1].session_id == pair[0].session_id
+        }));
+        assert!(
+            page.entries
+                .iter()
+                .skip(1)
+                .any(|entry| entry.step_id == "commitPush")
+        );
+    }
+
+    #[tokio::test]
+    async fn publishing_release_opens_existing_logs_and_continues_the_sequence() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository_path = directory.path().join("repository");
+        let git_dir = directory.path().join("git-dir");
+        fs::create_dir_all(&repository_path).unwrap();
+        fs::create_dir_all(&git_dir).unwrap();
+        let candidate_sha = "b".repeat(40);
+        let draft = crate::models::DraftAuditEvidence {
+            release_id: 42,
+            tag_name: "v0.5.0".into(),
+            target_commit_sha: candidate_sha.clone(),
+            assets: vec![crate::models::DraftAssetEvidence {
+                id: 7,
+                name: "CodexRelay_0.5.0_x64-setup.exe".into(),
+                size: 1_024,
+                sha256: "c".repeat(64),
+            }],
+            manifest_version: "0.5.0".into(),
+            manifest_notes: "测试发布说明".into(),
+            signature: "test-signature-not-real".into(),
+        };
+        let identity = draft.identity();
+        let mut session = ReleaseSession::new(
+            "session-publish-log",
+            repository_path.to_string_lossy(),
+            "0.5.0",
+        );
+        session.phase = ReleasePhase::AwaitingPublishApproval;
+        session.candidate_sha = Some(candidate_sha.clone());
+        session.remote_main_sha = Some(candidate_sha);
+        session.workflow = Some(crate::models::WorkflowDispatch {
+            run_id: 41,
+            url: "https://github.com/hunxuankai/codex-relay/actions/runs/41".into(),
+        });
+        session.draft = Some(draft);
+        ReleaseStateStore::new(git_dir.clone())
+            .save(&session)
+            .unwrap();
+        let log_store = ReleaseLogStore::new(git_dir.clone());
+        log_store.initialize(&session.id).unwrap();
+        ReleaseLogRecorder::new(&session.id, log_store, 0, None).record(
+            "draftAudit",
+            ReleaseLogSource::Lifecycle,
+            ReleaseLogLevel::Info,
+            "此前已完成的 Draft 审计日志",
+        );
+
+        let application = SystemReleaseApplication::new();
+        application.inner.sessions.lock().unwrap().insert(
+            session.id.clone(),
+            SessionContext {
+                repository_path,
+                git_dir: git_dir.clone(),
+                expected_notes: "测试发布说明".into(),
+                tools: missing_tools(directory.path()),
+            },
+        );
+
+        let publishing = application
+            .publish_release(
+                &session.id,
+                identity,
+                direct_proxy(),
+                Some(Arc::new(ClosedEventSink)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(publishing.phase, ReleasePhase::AwaitingPublishApproval);
+
+        let mut page = None;
+        for _ in 0..100 {
+            let candidate = ReleaseLogStore::new(git_dir.clone())
+                .load_page(&session.id, None)
+                .unwrap();
+            if candidate.entries.len() > 1 {
+                page = Some(candidate);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let page = page.expect("公开发布应继续追加持久化日志");
+        assert_eq!(page.entries[0].sequence, 1);
+        assert!(page.entries.windows(2).all(|pair| {
+            pair[1].sequence == pair[0].sequence + 1 && pair[1].session_id == pair[0].session_id
+        }));
+        assert!(
+            page.entries
+                .iter()
+                .skip(1)
+                .any(|entry| entry.step_id == "publishApproval")
+        );
+    }
+
+    #[tokio::test]
+    async fn publish_identity_failure_logs_before_session_and_step_failure_events() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository_path = directory.path().join("repository");
+        let git_dir = directory.path().join("git-dir");
+        fs::create_dir_all(&repository_path).unwrap();
+        fs::create_dir_all(&git_dir).unwrap();
+        let candidate_sha = "d".repeat(40);
+        let draft = crate::models::DraftAuditEvidence {
+            release_id: 42,
+            tag_name: "v0.5.0".into(),
+            target_commit_sha: candidate_sha.clone(),
+            assets: vec![crate::models::DraftAssetEvidence {
+                id: 8,
+                name: "CodexRelay_0.5.0_x64-setup.exe".into(),
+                size: 2_048,
+                sha256: "e".repeat(64),
+            }],
+            manifest_version: "0.5.0".into(),
+            manifest_notes: "测试发布说明".into(),
+            signature: "test-signature-not-real".into(),
+        };
+        let mut mismatched_identity = draft.identity();
+        mismatched_identity.release_id += 1;
+        let mut session = ReleaseSession::new(
+            "session-publish-identity-failure",
+            repository_path.to_string_lossy(),
+            "0.5.0",
+        );
+        session.phase = ReleasePhase::AwaitingPublishApproval;
+        session.candidate_sha = Some(candidate_sha.clone());
+        session.remote_main_sha = Some(candidate_sha);
+        session.workflow = Some(crate::models::WorkflowDispatch {
+            run_id: 43,
+            url: "https://github.com/hunxuankai/codex-relay/actions/runs/43".into(),
+        });
+        session.draft = Some(draft);
+        ReleaseStateStore::new(git_dir.clone())
+            .save(&session)
+            .unwrap();
+        let log_store = ReleaseLogStore::new(git_dir.clone());
+        log_store.initialize(&session.id).unwrap();
+        ReleaseLogRecorder::new(&session.id, log_store, 0, None).record(
+            "draftAudit",
+            ReleaseLogSource::Lifecycle,
+            ReleaseLogLevel::Info,
+            "Draft 审计已完成",
+        );
+
+        let application = SystemReleaseApplication::new();
+        application.inner.sessions.lock().unwrap().insert(
+            session.id.clone(),
+            SessionContext {
+                repository_path,
+                git_dir: git_dir.clone(),
+                expected_notes: "测试发布说明".into(),
+                tools: missing_tools(directory.path()),
+            },
+        );
+        let events = Arc::new(TestEventSink::default());
+
+        application
+            .publish_release(
+                &session.id,
+                mismatched_identity,
+                direct_proxy(),
+                Some(events.clone()),
+            )
+            .await
+            .unwrap();
+
+        for _ in 0..100 {
+            if events.events.lock().unwrap().iter().any(|event| {
+                matches!(
+                    event,
+                    ReleaseEvent::StepFailed { code, .. }
+                        if code == "RELEASE_PUBLISH_IDENTITY_MISMATCH"
+                )
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let emitted = events.events.lock().unwrap();
+        let log_index = emitted
+            .iter()
+            .position(|event| {
+                matches!(
+                    event,
+                    ReleaseEvent::StepLog { entry, .. }
+                        if entry.level == ReleaseLogLevel::Error
+                            && entry.message.contains("RELEASE_PUBLISH_IDENTITY_MISMATCH")
+                )
+            })
+            .expect("身份不匹配应先产生稳定 error 日志");
+        let session_index = emitted
+            .iter()
+            .position(|event| {
+                matches!(
+                    event,
+                    ReleaseEvent::SessionUpdated { session }
+                        if session.phase == ReleasePhase::Failed
+                            && session.failure.as_ref().is_some_and(|failure| {
+                                failure.step_id == "publishApproval"
+                                    && failure.code == "RELEASE_PUBLISH_IDENTITY_MISMATCH"
+                            })
+                )
+            })
+            .expect("身份不匹配应发送权威失败会话");
+        let failed_index = emitted
+            .iter()
+            .position(|event| {
+                matches!(
+                    event,
+                    ReleaseEvent::StepFailed { step_id, code, .. }
+                        if step_id == "publishApproval"
+                            && code == "RELEASE_PUBLISH_IDENTITY_MISMATCH"
+                )
+            })
+            .expect("身份不匹配应最后发送步骤失败事件");
+        assert!(log_index < session_index && session_index < failed_index);
+        drop(emitted);
+
+        let page = ReleaseLogStore::new(git_dir)
+            .load_page(&session.id, None)
+            .unwrap();
+        assert!(page.entries.iter().any(|entry| {
+            entry.level == ReleaseLogLevel::Error
+                && entry.message.contains("RELEASE_PUBLISH_IDENTITY_MISMATCH")
+        }));
+    }
+
+    #[tokio::test]
+    async fn application_log_pages_are_bounded_and_authorized_by_session_context() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository_path = directory.path().join("repository");
+        let git_dir = directory.path().join("git-dir");
+        fs::create_dir_all(&repository_path).unwrap();
+        fs::create_dir_all(&git_dir).unwrap();
+        let session =
+            ReleaseSession::new("session-page", repository_path.to_string_lossy(), "0.5.0");
+        ReleaseStateStore::new(git_dir.clone())
+            .save(&session)
+            .unwrap();
+        let log_store = ReleaseLogStore::new(git_dir.clone());
+        log_store.initialize(&session.id).unwrap();
+        let recorder = ReleaseLogRecorder::new(&session.id, log_store, 0, None);
+        for index in 0..2_001 {
+            recorder.record(
+                "full-project-check",
+                ReleaseLogSource::Stdout,
+                ReleaseLogLevel::Info,
+                format!("诊断记录 {index}"),
+            );
+        }
+
+        let application = SystemReleaseApplication::new();
+        application.inner.sessions.lock().unwrap().insert(
+            session.id.clone(),
+            SessionContext {
+                repository_path,
+                git_dir,
+                expected_notes: "测试发布说明".into(),
+                tools: missing_tools(directory.path()),
+            },
+        );
+
+        let latest = application.get_logs(&session.id, None).await.unwrap();
+        assert_eq!(latest.entries.len(), 2_000);
+        assert_eq!(latest.entries.first().unwrap().sequence, 2);
+        assert_eq!(latest.entries.last().unwrap().sequence, 2_001);
+        assert_eq!(latest.next_before_sequence, Some(2));
+        assert!(latest.has_earlier);
+        assert_eq!(latest.total_entries, 2_001);
+
+        let earlier = application
+            .get_logs(&session.id, latest.next_before_sequence)
+            .await
+            .unwrap();
+        assert_eq!(earlier.entries.len(), 1);
+        assert_eq!(earlier.entries[0].sequence, 1);
+        assert!(!earlier.has_earlier);
+
+        let error = application
+            .get_logs("another-session", None)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "RELEASE_SESSION_CONTEXT_MISSING");
+    }
+
+    #[tokio::test]
+    async fn missing_and_corrupt_logs_return_nonfatal_pages_with_recovery_evidence() {
+        let directory = tempfile::tempdir().unwrap();
+        let git_dir = directory.path().join("git-dir");
+        fs::create_dir_all(&git_dir).unwrap();
+
+        let missing = load_release_log_page(git_dir.clone(), "session-recovery".into(), None).await;
+        assert!(missing.entries.is_empty());
+        assert_eq!(missing.warning, None);
+
+        let store = ReleaseLogStore::new(git_dir.clone());
+        store.initialize("session-recovery").unwrap();
+        ReleaseLogRecorder::new("session-recovery", store, 0, None).record(
+            "candidate",
+            ReleaseLogSource::Lifecycle,
+            ReleaseLogLevel::Info,
+            "有效诊断记录",
+        );
+        let log_path = git_dir
+            .join("codex-relay-release-console")
+            .join("session.log.jsonl");
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&log_path)
+            .unwrap();
+        std::io::Write::write_all(&mut file, b"{invalid-json}\n").unwrap();
+        std::io::Write::flush(&mut file).unwrap();
+        drop(file);
+        let untrusted_bytes = fs::read(&log_path).unwrap();
+
+        let recovered = load_release_log_page(git_dir, "session-recovery".into(), None).await;
+        assert_eq!(recovered.entries.len(), 1);
+        assert_eq!(recovered.entries[0].message, "有效诊断记录");
+        assert!(
+            recovered
+                .warning
+                .as_deref()
+                .is_some_and(|warning| warning.contains("损坏记录"))
+        );
+        assert_eq!(fs::read(log_path).unwrap(), untrusted_bytes);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn log_initialization_failure_warns_without_changing_start_result() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let repository_path = directory.path().join("repository");
+        let git_dir = directory.path().join("git-dir");
+        fs::create_dir_all(&repository_path).unwrap();
+        let log_path = git_dir
+            .join("codex-relay-release-console")
+            .join("session.log.jsonl");
+        fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+        fs::write(&log_path, b"old-session-log\n").unwrap();
+        let _locked_log = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x0000_0001 | 0x0000_0002)
+            .open(&log_path)
+            .unwrap();
+
+        let application = SystemReleaseApplication::new();
+        let plan_id = "plan-log-initialization-failure".to_string();
+        application.inner.plans.lock().unwrap().insert(
+            plan_id.clone(),
+            StoredPlan {
+                repository_path: repository_path.clone(),
+                git_dir: git_dir.clone(),
+                expected_remote_sha: "f".repeat(40),
+                plan: ReleaseCandidatePlan {
+                    previous_version: "0.4.0".into(),
+                    target_version: "0.5.0".into(),
+                    files: Vec::new(),
+                },
+                summary: ReleasePlanSummary {
+                    id: plan_id.clone(),
+                    repository_path: repository_path.to_string_lossy().into_owned(),
+                    previous_version: "0.4.0".into(),
+                    target_version: "0.5.0".into(),
+                    notes: "测试发布说明".into(),
+                    files: Vec::new(),
+                },
+                tools: missing_tools(directory.path()),
+            },
+        );
+        let events = Arc::new(TestEventSink::default());
+
+        let session = application
+            .start_release(&plan_id, direct_proxy(), Some(events.clone()))
+            .await
+            .expect("日志初始化失败不得改变发布启动结果");
+        assert_eq!(session.phase, ReleasePhase::Idle);
+        assert!(events.events.lock().unwrap().iter().any(|event| {
+            matches!(
+                event,
+                ReleaseEvent::StepLog { entry, .. }
+                    if entry.level == ReleaseLogLevel::Warning
+                        && entry.message.contains("重启后可能丢失")
+            )
+        }));
+        let (session_index, warning_index) = {
+            let emitted = events.events.lock().unwrap();
+            let session_index = emitted
+                .iter()
+                .position(|event| {
+                    matches!(
+                        event,
+                        ReleaseEvent::SessionUpdated { session: updated }
+                            if updated.id == session.id && updated.phase == ReleasePhase::Idle
+                    )
+                })
+                .expect("前端必须先收到初始会话事实");
+            let warning_index = emitted
+                .iter()
+                .position(|event| {
+                    matches!(
+                        event,
+                        ReleaseEvent::StepLog { entry, .. }
+                            if entry.level == ReleaseLogLevel::Warning
+                                && entry.message.contains("重启后可能丢失")
+                    )
+                })
+                .expect("日志初始化失败必须显示易失 warning");
+            (session_index, warning_index)
+        };
+        assert!(session_index < warning_index);
+
+        for _ in 0..100 {
+            if !application
+                .inner
+                .cancellations
+                .lock()
+                .unwrap()
+                .contains_key(&session.id)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
 
@@ -1664,6 +2442,7 @@ mod tests {
             &session.id,
             &store,
             Some(&sink),
+            None,
             "RELEASE_PUSH_FAILED",
         );
 
@@ -1696,6 +2475,7 @@ mod tests {
             &session.id,
             &store,
             Some(&sink),
+            None,
             &error,
         );
 
@@ -1745,6 +2525,7 @@ mod tests {
             &session.id,
             &store,
             Some(&sink),
+            None,
             &error,
         );
 
@@ -1833,6 +2614,7 @@ mod tests {
             &session.id,
             &store,
             Some(&sink),
+            None,
             &error,
         );
 

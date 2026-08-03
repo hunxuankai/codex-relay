@@ -17,6 +17,7 @@ pub fn run() {
             commands::prepare_release_plan,
             commands::start_release,
             commands::get_release_session,
+            commands::get_release_logs,
             commands::resume_release,
             commands::cancel_release,
             commands::publish_release,

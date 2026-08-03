@@ -13,10 +13,16 @@ use crate::services::local_verification::{
     LocalVerificationProcessError, LocalVerificationService,
 };
 use crate::services::release_candidate::{ReleaseCandidatePlan, ReleaseCandidateTransaction};
+use crate::services::release_log::{
+    NoopReleaseProgressSink, ReleaseProgressSink, ReleaseRunProgressDecision,
+    ReleaseRunProgressTracker, format_run_progress,
+};
 use crate::services::release_state::{ReleaseStateStore, RepositorySessionLock};
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::time::Instant;
 
 pub trait ReleasePushBackend: Send + Sync {
     fn commit<'a>(
@@ -152,11 +158,20 @@ pub trait ReleaseRemoteBackend: Send + Sync {
 
 pub struct GithubRemoteBackend<'a> {
     backend: &'a dyn GhBackend,
+    progress: Arc<dyn ReleaseProgressSink>,
 }
 
 impl<'a> GithubRemoteBackend<'a> {
     pub fn new(backend: &'a dyn GhBackend) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            progress: Arc::new(NoopReleaseProgressSink),
+        }
+    }
+
+    pub fn with_progress(mut self, progress: Arc<dyn ReleaseProgressSink>) -> Self {
+        self.progress = progress;
+        self
     }
 }
 
@@ -180,11 +195,21 @@ impl ReleaseRemoteBackend for GithubRemoteBackend<'_> {
         candidate_sha: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<WorkflowRunStatus, String>> + Send + 'a>> {
         Box::pin(async move {
+            let started = Instant::now();
+            let mut tracker = ReleaseRunProgressTracker::new();
             for attempt in 0..REMOTE_MONITOR_ATTEMPTS {
                 let run = GithubReleaseService::new()
                     .get_release_run(self.backend, workflow.run_id, candidate_sha)
                     .await
                     .map_err(|error| error.code().to_string())?;
+                let decision = tracker.observe(started.elapsed(), &run);
+                if decision != ReleaseRunProgressDecision::Silent {
+                    self.progress.log(
+                        "remoteRun",
+                        crate::models::ReleaseLogLevel::Info,
+                        &format_run_progress(&run, decision),
+                    );
+                }
                 if run.status == "completed" {
                     return Ok(run);
                 }
@@ -260,6 +285,7 @@ impl ReleaseRemoteBackend for GithubRemoteBackend<'_> {
     ) -> Pin<Box<dyn Future<Output = Result<CleanupRunEvidence, String>> + Send + 'a>> {
         Box::pin(async move {
             GithubReleaseService::new()
+                .with_progress(Arc::clone(&self.progress))
                 .monitor_cleanup(self.backend, published_at)
                 .await
                 .map_err(|error| error.code().to_string())
@@ -319,6 +345,7 @@ impl ReleaseOrchestratorError {
     pub(crate) fn failure_step_id(&self) -> &str {
         match self {
             Self::LocalVerificationFailed { command_id, .. } => command_id,
+            Self::PublishIdentityMismatch => "publishApproval",
             _ => "releasePipeline",
         }
     }
@@ -358,6 +385,7 @@ impl ReleaseOrchestratorError {
 
 pub struct ReleaseOrchestrator {
     local_verification: LocalVerificationService,
+    progress: Arc<dyn ReleaseProgressSink>,
 }
 
 impl Default for ReleaseOrchestrator {
@@ -370,7 +398,13 @@ impl ReleaseOrchestrator {
     pub fn new() -> Self {
         Self {
             local_verification: LocalVerificationService::new(),
+            progress: Arc::new(NoopReleaseProgressSink),
         }
+    }
+
+    pub fn with_progress(mut self, progress: Arc<dyn ReleaseProgressSink>) -> Self {
+        self.progress = progress;
+        self
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -395,15 +429,32 @@ impl ReleaseOrchestrator {
                 .advance(session, phase)
                 .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
         }
-        ReleaseCandidateTransaction::apply(repository_path, git_dir, plan)
-            .map_err(|_| ReleaseOrchestratorError::CandidateApplyFailed)?;
+        let candidate_started = Instant::now();
+        self.progress.started("candidate", "开始应用发布候选文件。");
+        if ReleaseCandidateTransaction::apply(repository_path, git_dir, plan).is_err() {
+            self.progress.log(
+                "candidate",
+                crate::models::ReleaseLogLevel::Error,
+                "发布候选文件应用失败。",
+            );
+            return Err(ReleaseOrchestratorError::CandidateApplyFailed);
+        }
+        self.progress.completed(
+            "candidate",
+            elapsed_millis(candidate_started),
+            "发布候选文件已应用。",
+        );
         state_store
             .advance(session, ReleasePhase::LocalChecks)
             .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
 
         let verification = self
             .local_verification
-            .run(verification_backend, repository_path)
+            .run_with_progress(
+                verification_backend,
+                repository_path,
+                self.progress.as_ref(),
+            )
             .await;
         if let Err(error) = verification {
             if ReleaseCandidateTransaction::rollback_active(repository_path, git_dir).is_err() {
@@ -412,10 +463,20 @@ impl ReleaseOrchestrator {
                     LocalVerificationError::Cancelled => "releasePipeline",
                 };
                 let _ = state_store.fail(session, step_id, "RELEASE_ROLLBACK_INCOMPLETE");
+                self.progress.log(
+                    step_id,
+                    crate::models::ReleaseLogLevel::Error,
+                    "本地发布门禁失败，且候选文件未能完整回滚。",
+                );
                 return Err(ReleaseOrchestratorError::RollbackFailed);
             }
             match error {
                 LocalVerificationError::Cancelled => {
+                    self.progress.log(
+                        "releasePipeline",
+                        crate::models::ReleaseLogLevel::Warning,
+                        "本地发布门禁已取消，候选文件已回滚。",
+                    );
                     state_store
                         .advance(session, ReleasePhase::Cancelled)
                         .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
@@ -425,30 +486,60 @@ impl ReleaseOrchestrator {
                     command_id,
                     failure,
                 } => {
+                    let orchestrator_error = ReleaseOrchestratorError::LocalVerificationFailed {
+                        command_id: command_id.clone(),
+                        failure,
+                    };
+                    self.progress.log(
+                        &command_id,
+                        crate::models::ReleaseLogLevel::Error,
+                        &orchestrator_error.failure_message(),
+                    );
                     state_store
                         .fail(session, &command_id, "RELEASE_LOCAL_VERIFICATION_FAILED")
                         .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
-                    return Err(ReleaseOrchestratorError::LocalVerificationFailed {
-                        command_id,
-                        failure,
-                    });
+                    return Err(orchestrator_error);
                 }
             }
         }
 
-        for phase in [ReleasePhase::LocalBuild, ReleasePhase::SourceAudit] {
-            state_store
-                .advance(session, phase)
-                .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
-        }
+        state_store
+            .advance(session, ReleasePhase::LocalBuild)
+            .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
+        let source_audit_started = Instant::now();
+        self.progress
+            .started("sourceAudit", "开始确认本地发布源审计结果。");
+        state_store
+            .advance(session, ReleasePhase::SourceAudit)
+            .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
+        self.progress.completed(
+            "sourceAudit",
+            elapsed_millis(source_audit_started),
+            "本地发布源审计结果已确认。",
+        );
+        let commit_push_started = Instant::now();
+        self.progress
+            .started("commitPush", "开始创建候选提交并推送固定 main 引用。");
         let candidate_sha = match push_backend.commit(repository_path, plan).await {
-            Ok(candidate_sha) => candidate_sha,
+            Ok(candidate_sha) => {
+                self.progress.log(
+                    "commitPush",
+                    crate::models::ReleaseLogLevel::Info,
+                    &format!("候选提交已创建，SHA {}。", short_sha(&candidate_sha)),
+                );
+                candidate_sha
+            }
             Err(_) => {
                 let index_rollback = push_backend
                     .rollback_uncommitted(repository_path, plan)
                     .await;
                 let source_rollback =
                     ReleaseCandidateTransaction::rollback_active(repository_path, git_dir);
+                self.progress.log(
+                    "commitPush",
+                    crate::models::ReleaseLogLevel::Error,
+                    "候选提交失败，正在保留真实回滚结果。",
+                );
                 let _ = state_store.fail(session, "commitPush", "RELEASE_PUSH_FAILED");
                 if index_rollback.is_err() || source_rollback.is_err() {
                     return Err(ReleaseOrchestratorError::RollbackFailed);
@@ -460,8 +551,15 @@ impl ReleaseOrchestrator {
         state_store
             .advance(session, ReleasePhase::Committed)
             .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
-        self.push_committed_locked(session, state_store, repository_path, git_dir, push_backend)
-            .await
+        self.push_committed_locked(
+            session,
+            state_store,
+            repository_path,
+            git_dir,
+            push_backend,
+            commit_push_started,
+        )
+        .await
     }
 
     pub async fn push_committed(
@@ -474,8 +572,18 @@ impl ReleaseOrchestrator {
     ) -> Result<GitPushOutcome, ReleaseOrchestratorError> {
         let _repository_lock = RepositorySessionLock::acquire(git_dir)
             .map_err(|_| ReleaseOrchestratorError::SessionLockFailed)?;
-        self.push_committed_locked(session, state_store, repository_path, git_dir, push_backend)
-            .await
+        let started = Instant::now();
+        self.progress
+            .started("commitPush", "继续推送已创建的候选提交。");
+        self.push_committed_locked(
+            session,
+            state_store,
+            repository_path,
+            git_dir,
+            push_backend,
+            started,
+        )
+        .await
     }
 
     async fn push_committed_locked(
@@ -485,6 +593,7 @@ impl ReleaseOrchestrator {
         repository_path: &Path,
         git_dir: &Path,
         push_backend: &dyn ReleasePushBackend,
+        started: Instant,
     ) -> Result<GitPushOutcome, ReleaseOrchestratorError> {
         if session.phase != ReleasePhase::Committed {
             return Err(ReleaseOrchestratorError::RemoteStateInvalid);
@@ -493,19 +602,42 @@ impl ReleaseOrchestrator {
             .candidate_sha
             .clone()
             .ok_or(ReleaseOrchestratorError::RemoteStateInvalid)?;
-        let outcome = push_backend
-            .push(repository_path, &candidate_sha)
-            .await
-            .map_err(|_| ReleaseOrchestratorError::PushFailed)?;
+        let outcome = match push_backend.push(repository_path, &candidate_sha).await {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                self.progress.log(
+                    "commitPush",
+                    crate::models::ReleaseLogLevel::Error,
+                    "候选推送失败，已保留 committed 检查点供安全重试。",
+                );
+                return Err(ReleaseOrchestratorError::PushFailed);
+            }
+        };
         if outcome.candidate_sha != candidate_sha || outcome.remote_main_sha != candidate_sha {
+            self.progress.log(
+                "commitPush",
+                crate::models::ReleaseLogLevel::Error,
+                "推送后的远端 main 未匹配候选提交。",
+            );
             return Err(ReleaseOrchestratorError::PushFailed);
         }
         session.remote_main_sha = Some(outcome.remote_main_sha.clone());
         state_store
             .advance(session, ReleasePhase::Pushed)
             .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
-        ReleaseCandidateTransaction::finalize_active(repository_path, git_dir)
-            .map_err(|_| ReleaseOrchestratorError::FinalizeFailed)?;
+        if ReleaseCandidateTransaction::finalize_active(repository_path, git_dir).is_err() {
+            self.progress.log(
+                "commitPush",
+                crate::models::ReleaseLogLevel::Error,
+                "远端推送已验证，但本地回滚标记清理失败。",
+            );
+            return Err(ReleaseOrchestratorError::FinalizeFailed);
+        }
+        self.progress.completed(
+            "commitPush",
+            elapsed_millis(started),
+            &format!("候选提交已推送并验证，SHA {}。", short_sha(&candidate_sha)),
+        );
         Ok(outcome)
     }
 
@@ -571,11 +703,38 @@ impl ReleaseOrchestrator {
                 .clone()
                 .ok_or(ReleaseOrchestratorError::RemoteStateInvalid);
         }
+        let remote_run_started = Instant::now();
+        if matches!(
+            session.phase,
+            ReleasePhase::Pushed | ReleasePhase::WorkflowQueued | ReleasePhase::WorkflowRunning
+        ) {
+            self.progress
+                .started("remoteRun", "开始触发或继续监控 GitHub 发布 Run。");
+        }
         if session.phase == ReleasePhase::Pushed {
-            let workflow = remote
+            let workflow = match remote
                 .dispatch(&session.target_version, &candidate_sha)
                 .await
-                .map_err(|_| ReleaseOrchestratorError::RemoteFailed)?;
+            {
+                Ok(workflow) => workflow,
+                Err(_) => {
+                    self.progress.log(
+                        "remoteRun",
+                        crate::models::ReleaseLogLevel::Error,
+                        "GitHub 发布 Run 触发失败（RELEASE_REMOTE_FAILED）。",
+                    );
+                    return Err(ReleaseOrchestratorError::RemoteFailed);
+                }
+            };
+            self.progress.log(
+                "remoteRun",
+                crate::models::ReleaseLogLevel::Info,
+                &format!(
+                    "Run {} 已触发，SHA {}。",
+                    workflow.run_id,
+                    short_sha(&candidate_sha)
+                ),
+            );
             session.workflow = Some(workflow);
             state_store
                 .advance(session, ReleasePhase::WorkflowQueued)
@@ -591,18 +750,39 @@ impl ReleaseOrchestrator {
                 .workflow
                 .as_ref()
                 .ok_or(ReleaseOrchestratorError::RemoteStateInvalid)?;
-            let run = remote
-                .wait_for_run(workflow, &candidate_sha)
-                .await
-                .map_err(|_| ReleaseOrchestratorError::RemoteFailed)?;
+            let run = match remote.wait_for_run(workflow, &candidate_sha).await {
+                Ok(run) => run,
+                Err(_) => {
+                    self.progress.log(
+                        "remoteRun",
+                        crate::models::ReleaseLogLevel::Error,
+                        "GitHub 发布 Run 监控失败（RELEASE_REMOTE_FAILED）。",
+                    );
+                    return Err(ReleaseOrchestratorError::RemoteFailed);
+                }
+            };
             if run.id != workflow.run_id
                 || run.url != workflow.url
                 || run.head_sha != candidate_sha
                 || run.status != "completed"
                 || run.conclusion.as_deref() != Some("success")
             {
+                self.progress.log(
+                    "remoteRun",
+                    crate::models::ReleaseLogLevel::Error,
+                    "GitHub 发布 Run 身份或成功结论未通过验证。",
+                );
                 return Err(ReleaseOrchestratorError::RemoteFailed);
             }
+            self.progress.completed(
+                "remoteRun",
+                elapsed_millis(remote_run_started),
+                &format!(
+                    "Run {} 已成功完成并验证，SHA {}。",
+                    run.id,
+                    short_sha(&candidate_sha)
+                ),
+            );
             state_store
                 .advance(session, ReleasePhase::AuditingDraft)
                 .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
@@ -610,10 +790,33 @@ impl ReleaseOrchestrator {
         if session.phase != ReleasePhase::AuditingDraft {
             return Err(ReleaseOrchestratorError::RemoteStateInvalid);
         }
-        let draft = remote
+        let draft_audit_started = Instant::now();
+        self.progress
+            .started("draftAudit", "开始审计 GitHub Draft Release。");
+        let draft = match remote
             .audit_draft(&session.target_version, &candidate_sha, expected_notes)
             .await
-            .map_err(|_| ReleaseOrchestratorError::RemoteFailed)?;
+        {
+            Ok(draft) => draft,
+            Err(_) => {
+                self.progress.log(
+                    "draftAudit",
+                    crate::models::ReleaseLogLevel::Error,
+                    "GitHub Draft Release 审计失败（RELEASE_REMOTE_FAILED）。",
+                );
+                return Err(ReleaseOrchestratorError::RemoteFailed);
+            }
+        };
+        self.progress.completed(
+            "draftAudit",
+            elapsed_millis(draft_audit_started),
+            &format!(
+                "Release {} ({}) Draft 审计完成，资产 {} 项。",
+                draft.release_id,
+                draft.tag_name,
+                draft.assets.len()
+            ),
+        );
         session.draft = Some(draft.clone());
         state_store
             .advance(session, ReleasePhase::AwaitingPublishApproval)
@@ -644,6 +847,11 @@ impl ReleaseOrchestrator {
         if &draft.identity() != expected_identity
             || expected_identity.target_commit_sha != candidate_sha
         {
+            self.progress.log(
+                "publishApproval",
+                crate::models::ReleaseLogLevel::Error,
+                "确认的 Draft 身份与会话证据不一致（RELEASE_PUBLISH_IDENTITY_MISMATCH）。",
+            );
             return Err(ReleaseOrchestratorError::PublishIdentityMismatch);
         }
 
@@ -653,13 +861,23 @@ impl ReleaseOrchestrator {
         ) {
             return Ok(());
         }
+        let publish_started = Instant::now();
+        if matches!(
+            session.phase,
+            ReleasePhase::AwaitingPublishApproval | ReleasePhase::Publishing
+        ) {
+            self.progress.started(
+                "publishApproval",
+                "开始复核确认信息并公开同一 Draft Release。",
+            );
+        }
         if session.phase == ReleasePhase::AwaitingPublishApproval {
             state_store
                 .advance(session, ReleasePhase::Publishing)
                 .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
         }
         if session.phase == ReleasePhase::Publishing {
-            let published = remote
+            let published = match remote
                 .publish(
                     &draft,
                     &session.target_version,
@@ -667,21 +885,47 @@ impl ReleaseOrchestrator {
                     expected_notes,
                 )
                 .await
-                .map_err(|_| ReleaseOrchestratorError::RemoteFailed)?;
+            {
+                Ok(published) => published,
+                Err(_) => {
+                    self.progress.log(
+                        "publishApproval",
+                        crate::models::ReleaseLogLevel::Error,
+                        "Draft Release 公开失败（RELEASE_REMOTE_FAILED）。",
+                    );
+                    return Err(ReleaseOrchestratorError::RemoteFailed);
+                }
+            };
             if published.release_id != draft.release_id || published.tag_name != draft.tag_name {
+                self.progress.log(
+                    "publishApproval",
+                    crate::models::ReleaseLogLevel::Error,
+                    "公开后的 Release 身份与已审计 Draft 不一致。",
+                );
                 return Err(ReleaseOrchestratorError::RemoteFailed);
             }
+            self.progress.completed(
+                "publishApproval",
+                elapsed_millis(publish_started),
+                &format!(
+                    "Release {} ({}) 已公开。",
+                    published.release_id, published.tag_name
+                ),
+            );
             session.published = Some(published);
             state_store
                 .advance(session, ReleasePhase::VerifyingPublishedRelease)
                 .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
         }
         if session.phase == ReleasePhase::VerifyingPublishedRelease {
+            let online_verification_started = Instant::now();
+            self.progress
+                .started("onlineVerification", "开始在线复核公开 Release。");
             let published = session
                 .published
                 .as_ref()
                 .ok_or(ReleaseOrchestratorError::RemoteStateInvalid)?;
-            let verified = remote
+            let verified = match remote
                 .verify_published(
                     &draft,
                     published,
@@ -690,10 +934,33 @@ impl ReleaseOrchestrator {
                     expected_notes,
                 )
                 .await
-                .map_err(|_| ReleaseOrchestratorError::RemoteFailed)?;
+            {
+                Ok(verified) => verified,
+                Err(_) => {
+                    self.progress.log(
+                        "onlineVerification",
+                        crate::models::ReleaseLogLevel::Error,
+                        "公开 Release 在线复核失败（RELEASE_REMOTE_FAILED）。",
+                    );
+                    return Err(ReleaseOrchestratorError::RemoteFailed);
+                }
+            };
             if verified != draft {
+                self.progress.log(
+                    "onlineVerification",
+                    crate::models::ReleaseLogLevel::Error,
+                    "公开 Release 在线证据与 Draft 审计结果不一致。",
+                );
                 return Err(ReleaseOrchestratorError::RemoteFailed);
             }
+            self.progress.completed(
+                "onlineVerification",
+                elapsed_millis(online_verification_started),
+                &format!(
+                    "Release {} ({}) 在线复核完成。",
+                    published.release_id, published.tag_name
+                ),
+            );
             state_store
                 .advance(session, ReleasePhase::MonitoringCleanup)
                 .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
@@ -706,9 +973,32 @@ impl ReleaseOrchestrator {
             .as_ref()
             .map(|published| published.published_at.clone())
             .ok_or(ReleaseOrchestratorError::RemoteStateInvalid)?;
+        let cleanup_started = Instant::now();
+        self.progress
+            .started("cleanup", "开始监控历史 Release cleanup Run。");
         match remote.monitor_cleanup(&published_at).await {
             Ok(cleanup) => {
                 let succeeded = cleanup.succeeded;
+                if !succeeded {
+                    self.progress.log(
+                        "cleanup",
+                        crate::models::ReleaseLogLevel::Warning,
+                        &format!(
+                            "cleanup Run {} 已结束，conclusion={}；已公开 Release 保持有效。",
+                            cleanup.run_id,
+                            cleanup.conclusion.as_deref().unwrap_or("unknown")
+                        ),
+                    );
+                }
+                self.progress.completed(
+                    "cleanup",
+                    elapsed_millis(cleanup_started),
+                    &format!(
+                        "cleanup Run {} 监控完成，conclusion={}。",
+                        cleanup.run_id,
+                        cleanup.conclusion.as_deref().unwrap_or("unknown")
+                    ),
+                );
                 session.cleanup = Some(cleanup);
                 session.cleanup_warning = None;
                 state_store
@@ -723,6 +1013,16 @@ impl ReleaseOrchestrator {
                     .map_err(|_| ReleaseOrchestratorError::StateFailed)?;
             }
             Err(_) => {
+                self.progress.log(
+                    "cleanup",
+                    crate::models::ReleaseLogLevel::Warning,
+                    "cleanup Run 监控失败（GITHUB_CLEANUP_MONITOR_FAILED）；已公开 Release 保持有效。",
+                );
+                self.progress.completed(
+                    "cleanup",
+                    elapsed_millis(cleanup_started),
+                    "cleanup Run 监控已结束，但未能确认清理结果。",
+                );
                 session.cleanup = None;
                 session.cleanup_warning = Some("GITHUB_CLEANUP_MONITOR_FAILED".into());
                 state_store
@@ -731,5 +1031,105 @@ impl ReleaseOrchestrator {
             }
         }
         Ok(())
+    }
+}
+
+fn elapsed_millis(started: Instant) -> u64 {
+    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+fn short_sha(sha: &str) -> String {
+    sha.chars().take(8).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GithubRemoteBackend, ReleaseRemoteBackend};
+    use crate::infrastructure::gh::{GhBackend, GhRequest, GhResponse};
+    use crate::models::{ReleaseLogLevel, WorkflowDispatch};
+    use crate::services::release_log::{ReleaseLogRecorder, ReleaseLogStore, ReleaseProgressSink};
+    use std::future::Future;
+    use std::path::Path;
+    use std::pin::Pin;
+    use std::sync::Arc;
+
+    struct CompletedRunBackend;
+
+    impl GhBackend for CompletedRunBackend {
+        fn execute<'a>(
+            &'a self,
+            _request: GhRequest,
+        ) -> Pin<Box<dyn Future<Output = Result<GhResponse, String>> + Send + 'a>> {
+            Box::pin(async {
+                Ok(GhResponse {
+                    stdout: r#"{
+  "databaseId": 42,
+  "status": "completed",
+  "conclusion": "success",
+  "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "url": "https://github.com/hunxuankai/codex-relay/actions/runs/42",
+  "jobs": [{
+    "name": "发布 Windows 更新",
+    "status": "completed",
+    "conclusion": "success",
+    "startedAt": "2026-08-03T10:00:00Z",
+    "completedAt": "2026-08-03T10:01:00Z",
+    "steps": [{
+      "name": "运行检查",
+      "number": 3,
+      "status": "completed",
+      "conclusion": "success",
+      "startedAt": "2026-08-03T10:00:10Z",
+      "completedAt": "2026-08-03T10:00:50Z"
+    }]
+  }]
+}"#
+                    .as_bytes()
+                    .to_vec(),
+                })
+            })
+        }
+
+        fn download_asset<'a>(
+            &'a self,
+            _asset_id: u64,
+            _destination: &'a Path,
+        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+            Box::pin(async { Err("download not expected".into()) })
+        }
+    }
+
+    #[test]
+    fn github_remote_backend_logs_the_first_completed_run_projection() {
+        let git_dir = tempfile::tempdir().unwrap();
+        let store = ReleaseLogStore::new(git_dir.path().to_path_buf());
+        store.initialize("session-a").unwrap();
+        let recorder = Arc::new(ReleaseLogRecorder::new("session-a", store, 0, None));
+        let backend = CompletedRunBackend;
+        let remote = GithubRemoteBackend::new(&backend)
+            .with_progress(recorder.clone() as Arc<dyn ReleaseProgressSink>);
+        let workflow = WorkflowDispatch {
+            run_id: 42,
+            url: "https://github.com/hunxuankai/codex-relay/actions/runs/42".into(),
+        };
+
+        let run = tauri::async_runtime::block_on(
+            remote.wait_for_run(&workflow, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        )
+        .unwrap();
+
+        assert_eq!(run.status, "completed");
+        let page = ReleaseLogStore::new(git_dir.path().to_path_buf())
+            .load_page("session-a", None)
+            .unwrap();
+        assert_eq!(page.entries.len(), 1);
+        let entry = &page.entries[0];
+        assert_eq!(entry.step_id, "remoteRun");
+        assert_eq!(entry.level, ReleaseLogLevel::Info);
+        assert!(entry.message.contains("Run 42"));
+        assert!(entry.message.contains("Job 发布 Windows 更新"));
+        assert!(entry.message.contains("Step #3 运行检查"));
+        assert!(!entry.message.contains("https://"));
+        assert!(!entry.message.contains("aaaaaaaaaaaaaaaa"));
     }
 }

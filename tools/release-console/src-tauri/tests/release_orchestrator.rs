@@ -1,7 +1,7 @@
 use codex_relay_release_console_lib::models::{
     CleanupRunEvidence, DraftAssetEvidence, DraftAuditEvidence, DraftIdentity,
-    PublishedReleaseEvidence, ReleaseFailureEvidence, ReleasePhase, ReleaseSession,
-    WorkflowDispatch, WorkflowRunStatus,
+    PublishedReleaseEvidence, ReleaseFailureEvidence, ReleaseLogLevel, ReleaseLogSource,
+    ReleasePhase, ReleaseSession, WorkflowDispatch, WorkflowRunStatus,
 };
 use codex_relay_release_console_lib::services::git_release::GitPushOutcome;
 use codex_relay_release_console_lib::services::local_verification::{
@@ -11,6 +11,9 @@ use codex_relay_release_console_lib::services::local_verification::{
 use codex_relay_release_console_lib::services::release_candidate::{
     ReleaseCandidatePlan, ReleaseCandidateTransaction,
 };
+use codex_relay_release_console_lib::services::release_log::{
+    ReleaseLogRecorder, ReleaseLogStore, ReleaseProgressSink,
+};
 use codex_relay_release_console_lib::services::release_orchestrator::{
     ReleaseOrchestrator, ReleaseOrchestratorError, ReleasePushBackend, ReleaseRemoteBackend,
 };
@@ -19,6 +22,7 @@ use std::fs;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
@@ -95,6 +99,38 @@ impl LocalVerificationBackend for FailingVerificationBackend {
                 + 'a,
         >,
     > {
+        Box::pin(async move {
+            Ok(LocalCommandEvidence {
+                id: command.id.clone(),
+                exit_code: 1,
+                duration_millis: 10,
+            })
+        })
+    }
+}
+
+struct LoggingFailingVerificationBackend {
+    recorder: Arc<ReleaseLogRecorder>,
+}
+
+impl LocalVerificationBackend for LoggingFailingVerificationBackend {
+    fn run<'a>(
+        &'a self,
+        _repository_path: &'a Path,
+        command: &'a LocalVerificationCommand,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<LocalCommandEvidence, LocalVerificationBackendError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        self.recorder.record(
+            command.id.clone(),
+            ReleaseLogSource::Stderr,
+            ReleaseLogLevel::Info,
+            "compiler failure tail",
+        );
         Box::pin(async move {
             Ok(LocalCommandEvidence {
                 id: command.id.clone(),
@@ -466,6 +502,82 @@ fn local_failure_before_commit_rolls_back_candidate_and_persists_failed_phase() 
 }
 
 #[test]
+fn local_failure_logs_output_tail_before_stable_failure_and_stops_later_steps() {
+    let repository = TempRepository::new();
+    let git_dir = repository.root.join(".git");
+    let state_store = ReleaseStateStore::new(git_dir.clone());
+    let plan =
+        ReleaseCandidateTransaction::plan(&repository.root, "0.5.0", VALID_RELEASE_NOTES).unwrap();
+    let mut session = ReleaseSession::new(
+        "session-test-log-order",
+        repository.root.to_string_lossy(),
+        "0.5.0",
+    );
+    let log_store = ReleaseLogStore::new(git_dir.clone());
+    log_store.initialize(&session.id).unwrap();
+    let recorder = Arc::new(ReleaseLogRecorder::new(
+        session.id.clone(),
+        log_store,
+        0,
+        None,
+    ));
+    let verification = LoggingFailingVerificationBackend {
+        recorder: Arc::clone(&recorder),
+    };
+    let push = UnexpectedPushBackend {
+        called: AtomicBool::new(false),
+    };
+    let orchestrator =
+        ReleaseOrchestrator::new().with_progress(recorder.clone() as Arc<dyn ReleaseProgressSink>);
+
+    let error = tauri::async_runtime::block_on(orchestrator.run_to_pushed(
+        &mut session,
+        &state_store,
+        &repository.root,
+        &git_dir,
+        &plan,
+        &verification,
+        &push,
+    ))
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ReleaseOrchestratorError::LocalVerificationFailed {
+            failure: LocalVerificationFailure::ExitCode(1),
+            ..
+        }
+    ));
+    let entries = ReleaseLogStore::new(git_dir)
+        .load_page(&session.id, None)
+        .unwrap()
+        .entries;
+    let tail = entries
+        .iter()
+        .position(|entry| entry.message == "compiler failure tail")
+        .expect("process tail should be retained");
+    let failure = entries
+        .iter()
+        .position(|entry| {
+            entry.step_id == "release-structure-tests"
+                && entry.level == ReleaseLogLevel::Error
+                && entry.message.contains("退出码 1")
+        })
+        .expect("stable local failure should be logged");
+    assert!(tail < failure);
+    assert!(!entries.iter().any(|entry| {
+        matches!(
+            entry.step_id.as_str(),
+            "release-console-rust-tests"
+                | "full-project-check"
+                | "ordinary-build"
+                | "sourceAudit"
+                | "commitPush"
+        )
+    }));
+}
+
+#[test]
 fn local_process_failure_rolls_back_candidate_and_preserves_safe_classification() {
     let repository = TempRepository::new();
     let git_dir = repository.root.join(".git");
@@ -606,6 +718,69 @@ fn pushed_session_keeps_candidate_bytes_and_removes_rollback_marker() {
             .exists()
     );
     assert_eq!(store.load().unwrap().unwrap(), session);
+}
+
+#[test]
+fn successful_local_pipeline_logs_each_fixed_step_through_commit_and_push() {
+    let repository = TempRepository::new();
+    let git_dir = repository.root.join(".git");
+    let state_store = ReleaseStateStore::new(git_dir.clone());
+    let plan =
+        ReleaseCandidateTransaction::plan(&repository.root, "0.5.0", VALID_RELEASE_NOTES).unwrap();
+    let mut session = ReleaseSession::new(
+        "session-test-success-logs",
+        repository.root.to_string_lossy(),
+        "0.5.0",
+    );
+    let log_store = ReleaseLogStore::new(git_dir.clone());
+    log_store.initialize(&session.id).unwrap();
+    let recorder = Arc::new(ReleaseLogRecorder::new(
+        session.id.clone(),
+        log_store,
+        0,
+        None,
+    ));
+    let orchestrator =
+        ReleaseOrchestrator::new().with_progress(recorder.clone() as Arc<dyn ReleaseProgressSink>);
+
+    tauri::async_runtime::block_on(orchestrator.run_to_pushed(
+        &mut session,
+        &state_store,
+        &repository.root,
+        &git_dir,
+        &plan,
+        &SuccessfulVerificationBackend,
+        &SuccessfulPushBackend,
+    ))
+    .unwrap();
+
+    let entries = ReleaseLogStore::new(git_dir)
+        .load_page(&session.id, None)
+        .unwrap()
+        .entries;
+    for step_id in [
+        "candidate",
+        "release-structure-tests",
+        "release-console-rust-tests",
+        "full-project-check",
+        "ordinary-build",
+        "sourceAudit",
+        "commitPush",
+    ] {
+        assert!(
+            entries
+                .iter()
+                .filter(|entry| entry.step_id == step_id)
+                .count()
+                >= 2,
+            "missing start/completion evidence for {step_id}"
+        );
+    }
+    assert!(entries.iter().any(|entry| {
+        entry.step_id == "commitPush"
+            && entry.message.contains("aaaaaaaa")
+            && !entry.message.contains("aaaaaaaaaaaaaaaa")
+    }));
 }
 
 #[test]
@@ -789,8 +964,18 @@ fn remote_pipeline_persists_run_and_draft_then_stops_for_publish_approval() {
         publish_calls: AtomicU64::new(0),
         cleanup_succeeds: true,
     };
+    let log_store = ReleaseLogStore::new(git_dir.clone());
+    log_store.initialize(&session.id).unwrap();
+    let recorder = Arc::new(ReleaseLogRecorder::new(
+        session.id.clone(),
+        log_store,
+        0,
+        None,
+    ));
+    let orchestrator =
+        ReleaseOrchestrator::new().with_progress(recorder.clone() as Arc<dyn ReleaseProgressSink>);
 
-    let draft = tauri::async_runtime::block_on(ReleaseOrchestrator::new().run_remote_to_draft(
+    let draft = tauri::async_runtime::block_on(orchestrator.run_remote_to_draft(
         &mut session,
         &store,
         &git_dir,
@@ -805,6 +990,29 @@ fn remote_pipeline_persists_run_and_draft_then_stops_for_publish_approval() {
     assert_eq!(session.draft.as_ref(), Some(&draft));
     assert_eq!(remote.dispatch_calls.load(Ordering::SeqCst), 1);
     assert_eq!(store.load().unwrap().unwrap(), session);
+    let entries = ReleaseLogStore::new(git_dir)
+        .load_page(&session.id, None)
+        .unwrap()
+        .entries;
+    for step_id in ["remoteRun", "draftAudit"] {
+        assert!(
+            entries
+                .iter()
+                .filter(|entry| entry.step_id == step_id)
+                .count()
+                >= 2,
+            "missing start/completion evidence for {step_id}"
+        );
+    }
+    let public_text = entries
+        .iter()
+        .map(|entry| entry.message.as_str())
+        .collect::<String>();
+    assert!(public_text.contains("Run 123"));
+    assert!(public_text.contains("SHA aaaaaaaa"));
+    assert!(public_text.contains("Release 42"));
+    assert!(public_text.contains("v0.5.0"));
+    assert!(!public_text.contains("aaaaaaaaaaaaaaaa"));
 }
 
 #[test]
@@ -836,8 +1044,18 @@ fn cleanup_failure_finishes_with_warnings_without_losing_published_evidence() {
         publish_calls: AtomicU64::new(0),
         cleanup_succeeds: false,
     };
+    let log_store = ReleaseLogStore::new(git_dir.clone());
+    log_store.initialize(&session.id).unwrap();
+    let recorder = Arc::new(ReleaseLogRecorder::new(
+        session.id.clone(),
+        log_store,
+        0,
+        None,
+    ));
+    let orchestrator =
+        ReleaseOrchestrator::new().with_progress(recorder.clone() as Arc<dyn ReleaseProgressSink>);
 
-    tauri::async_runtime::block_on(ReleaseOrchestrator::new().publish_and_finalize(
+    tauri::async_runtime::block_on(orchestrator.publish_and_finalize(
         &mut session,
         &store,
         &git_dir,
@@ -852,6 +1070,25 @@ fn cleanup_failure_finishes_with_warnings_without_losing_published_evidence() {
     assert!(!session.cleanup.as_ref().unwrap().succeeded);
     assert_eq!(remote.publish_calls.load(Ordering::SeqCst), 1);
     assert_eq!(store.load().unwrap().unwrap(), session);
+    let entries = ReleaseLogStore::new(git_dir)
+        .load_page(&session.id, None)
+        .unwrap()
+        .entries;
+    for step_id in ["publishApproval", "onlineVerification", "cleanup"] {
+        assert!(
+            entries
+                .iter()
+                .filter(|entry| entry.step_id == step_id)
+                .count()
+                >= 2,
+            "missing lifecycle evidence for {step_id}"
+        );
+    }
+    assert!(entries.iter().any(|entry| {
+        entry.step_id == "cleanup"
+            && entry.level == ReleaseLogLevel::Warning
+            && entry.message.contains("failure")
+    }));
 }
 
 #[test]

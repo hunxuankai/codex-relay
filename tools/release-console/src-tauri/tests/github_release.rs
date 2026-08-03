@@ -4,14 +4,17 @@ use codex_relay_release_console_lib::infrastructure::gh::{
 use codex_relay_release_console_lib::services::github_release::{
     DraftAuditService, GithubReleaseService, PublishedReleaseEvidence,
 };
+use codex_relay_release_console_lib::services::release_log::{
+    ReleaseLogRecorder, ReleaseLogStore, ReleaseProgressSink,
+};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 struct FixtureGhBackend {
     requests: Mutex<Vec<GhRequest>>,
@@ -1282,4 +1285,34 @@ fn cleanup_success_and_failure_remain_separate_from_published_release_success() 
         assert_eq!(cleanup.succeeded, expected_success);
         assert_eq!(cleanup.conclusion.as_deref(), Some(conclusion));
     }
+}
+
+#[test]
+fn cleanup_monitor_logs_the_first_completed_run_projection() {
+    let backend = CleanupFixtureGhBackend {
+        conclusion: "success",
+        requests: Mutex::new(Vec::new()),
+    };
+    let git_dir = tempfile::tempdir().unwrap();
+    let store = ReleaseLogStore::new(git_dir.path().to_path_buf());
+    store.initialize("session-a").unwrap();
+    let recorder = Arc::new(ReleaseLogRecorder::new("session-a", store, 0, None));
+    let service =
+        GithubReleaseService::new().with_progress(recorder.clone() as Arc<dyn ReleaseProgressSink>);
+
+    let cleanup =
+        tauri::async_runtime::block_on(service.monitor_cleanup(&backend, "2026-07-31T11:00:00Z"))
+            .unwrap();
+
+    assert_eq!(cleanup.run_id, 900);
+    let page = ReleaseLogStore::new(git_dir.path().to_path_buf())
+        .load_page("session-a", None)
+        .unwrap();
+    assert_eq!(page.entries.len(), 1);
+    assert_eq!(page.entries[0].step_id, "cleanup");
+    assert!(page.entries[0].message.contains("Run 900"));
+    assert!(page.entries[0].message.contains("status=completed"));
+    assert!(page.entries[0].message.contains("conclusion=success"));
+    assert!(!page.entries[0].message.contains("https://"));
+    assert!(!page.entries[0].message.contains("aaaaaaaaaaaaaaaa"));
 }

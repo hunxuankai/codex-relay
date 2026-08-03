@@ -3,12 +3,18 @@ pub use crate::models::{
     CleanupRunEvidence, DraftAssetEvidence, DraftAuditEvidence, PublishedReleaseEvidence,
     WorkflowDispatch, WorkflowJobStatus, WorkflowRunStatus, WorkflowStepStatus,
 };
+use crate::services::release_log::{
+    NoopReleaseProgressSink, ReleaseProgressSink, ReleaseRunProgressDecision,
+    ReleaseRunProgressTracker, format_run_progress,
+};
 use chrono::{DateTime, SecondsFormat, Timelike, Utc};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufReader, Read};
+use std::sync::Arc;
+use std::time::Instant;
 
 const TARGET_REPOSITORY: &str = "hunxuankai/codex-relay";
 const RELEASE_WORKFLOW: &str = "release.yml";
@@ -322,12 +328,26 @@ impl DraftAuditService {
     }
 }
 
-#[derive(Default)]
-pub struct GithubReleaseService;
+pub struct GithubReleaseService {
+    progress: Arc<dyn ReleaseProgressSink>,
+}
+
+impl Default for GithubReleaseService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl GithubReleaseService {
     pub fn new() -> Self {
-        Self
+        Self {
+            progress: Arc::new(NoopReleaseProgressSink),
+        }
+    }
+
+    pub fn with_progress(mut self, progress: Arc<dyn ReleaseProgressSink>) -> Self {
+        self.progress = progress;
+        self
     }
 
     pub async fn dispatch_release(
@@ -620,6 +640,8 @@ impl GithubReleaseService {
         let (run_id, discovered_url) =
             cleanup_run.ok_or(GithubReleaseError::CleanupRunNotUnique)?;
 
+        let monitor_started = Instant::now();
+        let mut tracker = ReleaseRunProgressTracker::new();
         for attempt in 0..REMOTE_MONITOR_ATTEMPTS {
             let response = backend
                 .execute(GhRequest {
@@ -640,6 +662,14 @@ impl GithubReleaseService {
             let status = workflow_status_from_raw(raw);
             if status.id != run_id || status.url != discovered_url {
                 return Err(GithubReleaseError::CleanupRunNotUnique);
+            }
+            let decision = tracker.observe(monitor_started.elapsed(), &status);
+            if decision != ReleaseRunProgressDecision::Silent {
+                self.progress.log(
+                    "cleanup",
+                    crate::models::ReleaseLogLevel::Info,
+                    &format_run_progress(&status, decision),
+                );
             }
             if status.status == "completed" {
                 return Ok(CleanupRunEvidence {

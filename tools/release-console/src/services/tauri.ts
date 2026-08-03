@@ -7,9 +7,11 @@ import type {
   CommandResult,
   DraftIdentity,
   ReleaseEvent,
+  ReleaseLogPage,
   ReleasePlanSummary,
   ReleasePreflightResult,
   ReleaseSession,
+  ReleaseSessionSnapshot,
   SafeRepositoryPushRequest,
 } from '../types/release'
 
@@ -41,7 +43,8 @@ export interface ReleaseConsoleClient {
     proxy: ReleaseProxySettings,
     onEvent: (event: ReleaseEvent) => void,
   ): Promise<ReleaseSession>
-  getReleaseSession(repositoryPath: string): Promise<ReleaseSession | null>
+  getReleaseSession(repositoryPath: string): Promise<ReleaseSessionSnapshot | null>
+  getReleaseLogs(sessionId: string, beforeSequence: number | null): Promise<ReleaseLogPage>
   resumeRelease(
     sessionId: string,
     proxy: ReleaseProxySettings,
@@ -117,7 +120,14 @@ export const releaseConsoleTauri: ReleaseConsoleClient = {
   },
 
   getReleaseSession(repositoryPath: string) {
-    return invokeCommand<ReleaseSession | null>('get_release_session', { repositoryPath })
+    return invokeCommand<ReleaseSessionSnapshot | null>('get_release_session', { repositoryPath })
+  },
+
+  getReleaseLogs(sessionId: string, beforeSequence: number | null) {
+    return invokeCommand<ReleaseLogPage>('get_release_logs', {
+      sessionId,
+      beforeSequence,
+    })
   },
 
   resumeRelease(

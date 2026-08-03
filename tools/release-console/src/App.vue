@@ -5,6 +5,7 @@ import DraftAuditPanel from './components/release/DraftAuditPanel.vue'
 import PublishConfirmDialog from './components/release/PublishConfirmDialog.vue'
 import ProxySettingsPanel from './components/release/ProxySettingsPanel.vue'
 import ReleasePlanPanel from './components/release/ReleasePlanPanel.vue'
+import ReleaseLogPanel from './components/release/ReleaseLogPanel.vue'
 import ReleaseRecoveryPanel from './components/release/ReleaseRecoveryPanel.vue'
 import ReleaseResultPanel from './components/release/ReleaseResultPanel.vue'
 import ReleaseStepDetails from './components/release/ReleaseStepDetails.vue'
@@ -230,7 +231,6 @@ async function exportSummary() {
 
           <ReleaseStepDetails
             :session="release.session.value"
-            :events="release.events.value"
           />
 
           <DraftAuditPanel
@@ -249,6 +249,18 @@ async function exportSummary() {
           />
         </section>
       </div>
+
+      <ReleaseLogPanel
+        :log-page="release.logPage.value"
+        :log-view-mode="release.logViewMode.value"
+        :unread-log-count="release.unreadLogCount.value"
+        :log-request-pending="release.logRequestPending.value"
+        :log-error="release.logError.value"
+        :failure="release.session.value?.failure ?? null"
+        @load-earlier="release.loadEarlierLogs"
+        @refresh-log-page="release.refreshLogPage"
+        @return-to-latest="release.returnToLatestLogs"
+      />
 
       <PublishConfirmDialog
         v-if="draftIdentity"
@@ -277,12 +289,12 @@ async function exportSummary() {
 <style scoped>
 .app-shell {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  height: 100vh;
+  grid-template-rows: auto minmax(0, 1fr) clamp(180px, 30vh, 280px);
+  height: 100dvh;
   min-height: 0;
   overflow: hidden;
-  gap: 1rem;
-  padding: 1.25rem;
+  gap: 0.75rem;
+  padding: 1rem 1rem 0;
 }
 
 .app-header,
@@ -311,12 +323,12 @@ async function exportSummary() {
   color: var(--accent-color);
   font-size: 0.75rem;
   font-weight: 800;
-  letter-spacing: 0.12em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
 .brand-copy h1 {
-  font-size: clamp(1.65rem, 3vw, 2.35rem);
+  font-size: 1.85rem;
   line-height: 1.1;
 }
 
@@ -374,17 +386,20 @@ async function exportSummary() {
 
 @media (max-width: 820px) {
   .app-shell {
-    grid-template-rows: auto;
-    height: auto;
-    min-height: 100vh;
-    overflow: visible;
-    padding: 0.75rem;
+    grid-template-rows: auto minmax(0, 1fr) clamp(180px, 30vh, 280px);
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0.75rem 0.75rem 0;
   }
 
   .release-console-layout {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
-    overflow: visible;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
   }
 
   .release-timeline-panel,

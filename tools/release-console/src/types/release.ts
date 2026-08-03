@@ -174,6 +174,32 @@ export interface ReleaseFailureEvidence {
   code: string
 }
 
+export type ReleaseLogSource = 'lifecycle' | 'stdout' | 'stderr'
+
+export type ReleaseLogLevel = 'info' | 'warning' | 'error'
+
+export type ReleaseLogViewMode = 'latest' | 'history'
+
+export interface ReleaseLogEntry {
+  sessionId: string
+  sequence: number
+  timestamp: string
+  stepId: string
+  source: ReleaseLogSource
+  level: ReleaseLogLevel
+  message: string
+}
+
+export interface ReleaseLogPage {
+  entries: readonly ReleaseLogEntry[]
+  nextBeforeSequence: number | null
+  hasEarlier: boolean
+  totalEntries: number
+  totalBytes: number
+  truncated: boolean
+  warning: string | null
+}
+
 export interface ReleaseSession {
   id: string
   repositoryPath: string
@@ -189,10 +215,15 @@ export interface ReleaseSession {
   failure: ReleaseFailureEvidence | null
 }
 
+export interface ReleaseSessionSnapshot {
+  session: ReleaseSession
+  logs: ReleaseLogPage
+}
+
 export type ReleaseEvent =
   | { kind: 'sessionUpdated'; session: ReleaseSession }
   | { kind: 'stepStarted'; stepId: string; startedAt: string }
-  | { kind: 'stepLog'; stepId: string; message: string }
+  | { kind: 'stepLog'; entry: ReleaseLogEntry; page?: ReleaseLogPage }
   | { kind: 'stepCompleted'; stepId: string; completedAt: string; durationMillis: number }
   | { kind: 'stepFailed'; stepId: string; code: string; message: string }
   | { kind: 'draftReady'; draft: DraftAuditEvidence }

@@ -1,6 +1,7 @@
 use crate::models::{
-    DraftIdentity, ReleaseConnectionTestResult, ReleaseEvent, ReleasePlanSummary,
-    ReleasePreflightResult, ReleaseProxySettings, ReleaseSession, SafeRepositoryPushRequest,
+    DraftIdentity, ReleaseConnectionTestResult, ReleaseEvent, ReleaseLogPage, ReleasePlanSummary,
+    ReleasePreflightResult, ReleaseProxySettings, ReleaseSession, ReleaseSessionSnapshot,
+    SafeRepositoryPushRequest,
 };
 use std::future::Future;
 use std::pin::Pin;
@@ -31,6 +32,10 @@ pub enum ApplicationRequest {
     GetSession {
         repository_path: String,
     },
+    GetLogs {
+        session_id: String,
+        before_sequence: Option<u64>,
+    },
     Resume {
         session_id: String,
         proxy: ReleaseProxySettings,
@@ -55,7 +60,8 @@ pub enum ApplicationResponse {
     Inspection(ReleasePreflightResult),
     Plan(ReleasePlanSummary),
     Session(ReleaseSession),
-    OptionalSession(Option<ReleaseSession>),
+    OptionalSnapshot(Option<ReleaseSessionSnapshot>),
+    Logs(ReleaseLogPage),
     SummaryPath(String),
 }
 

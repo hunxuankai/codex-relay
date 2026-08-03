@@ -1,19 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { ElCard, ElTag } from 'element-plus'
-import type { ReleaseEvent, ReleaseSession } from '../../types/release'
+import type { ReleaseSession } from '../../types/release'
 
-const props = defineProps<{
+defineProps<{
   session: ReleaseSession | null
-  events: readonly ReleaseEvent[]
 }>()
-
-const logs = computed(() =>
-  props.events.filter(
-    (event): event is Extract<ReleaseEvent, { kind: 'stepLog' | 'stepFailed' }> =>
-      event.kind === 'stepLog' || event.kind === 'stepFailed',
-  ),
-)
 </script>
 
 <template>
@@ -21,7 +12,7 @@ const logs = computed(() =>
     <template #header>
       <div class="details-heading">
         <div>
-          <p class="section-kicker">实时证据</p>
+          <p class="section-kicker">会话证据</p>
           <h2>当前会话</h2>
         </div>
         <ElTag v-if="session" effect="plain">{{ session.phase }}</ElTag>
@@ -34,13 +25,7 @@ const logs = computed(() =>
         <div><dt>候选</dt><dd class="mono">{{ session.candidateSha?.slice(0, 12) ?? '尚未提交' }}</dd></div>
         <div><dt>Run</dt><dd>{{ session.workflow?.runId ?? '尚未触发' }}</dd></div>
       </dl>
-      <div class="log-view" tabindex="0" aria-label="脱敏发布日志">
-        <p v-if="logs.length === 0">尚无脱敏日志；阶段变化会显示在左侧时间线。</p>
-        <p v-for="(event, index) in logs" :key="`${event.stepId}-${index}`">
-          <strong>[{{ event.stepId }}]</strong>
-          {{ event.kind === 'stepLog' ? event.message : `${event.code}：${event.message}` }}
-        </p>
-      </div>
+      <p v-else class="session-empty">尚未开始发布会话。</p>
     </div>
   </ElCard>
 </template>
@@ -62,7 +47,7 @@ const logs = computed(() =>
 .session-facts,
 .session-facts dt,
 .session-facts dd,
-.log-view p {
+.session-empty {
   margin: 0;
 }
 
@@ -70,7 +55,7 @@ const logs = computed(() =>
   color: var(--accent-color);
   font-size: 0.75rem;
   font-weight: 800;
-  letter-spacing: 0.1em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -110,19 +95,9 @@ const logs = computed(() =>
   font-family: var(--font-mono);
 }
 
-.log-view {
-  display: grid;
-  max-height: 12rem;
-  gap: 0.35rem;
-  overflow: auto;
-  padding: 0.8rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.7rem;
-  background: var(--log-background);
-  color: var(--log-text);
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  line-height: 1.5;
+.session-empty {
+  color: var(--text-muted);
+  font-size: 0.78rem;
 }
 
 @media (max-width: 760px) {

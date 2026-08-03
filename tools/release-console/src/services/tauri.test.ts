@@ -151,13 +151,77 @@ describe('release console typed Tauri service', () => {
     ])
   })
 
+  it('unwraps the session snapshot and requests bounded log pages with camelCase cursors', async () => {
+    const { releaseConsoleTauri } = await import('./tauri')
+    const session = {
+      id: 'session-logs',
+      repositoryPath: 'D:\\safe-temp\\repository',
+      targetVersion: '0.5.0',
+      phase: 'failed' as const,
+      candidateSha: null,
+      remoteMainSha: null,
+      workflow: null,
+      draft: null,
+      published: null,
+      cleanup: null,
+      cleanupWarning: null,
+      failure: {
+        phase: 'localChecks' as const,
+        stepId: 'full-project-check',
+        code: 'RELEASE_LOCAL_VERIFICATION_FAILED',
+      },
+    }
+    const entry = {
+      sessionId: session.id,
+      sequence: 42,
+      timestamp: '2026-08-03T12:00:00.000Z',
+      stepId: 'full-project-check',
+      source: 'stderr' as const,
+      level: 'error' as const,
+      message: '测试失败上下文',
+    }
+    const page = {
+      entries: [entry],
+      nextBeforeSequence: 42,
+      hasEarlier: true,
+      totalEntries: 42,
+      totalBytes: 4_096,
+      truncated: false,
+      warning: null,
+    }
+    invokeMock
+      .mockResolvedValueOnce({ success: true, data: { session, logs: page } })
+      .mockResolvedValueOnce({ success: true, data: page })
+
+    const snapshot = await releaseConsoleTauri.getReleaseSession(session.repositoryPath)
+    const earlier = await releaseConsoleTauri.getReleaseLogs(session.id, 42)
+
+    expect(snapshot).toEqual({ session, logs: page })
+    expect(earlier.entries[0]).toEqual(entry)
+    expect(invokeMock.mock.calls).toEqual([
+      ['get_release_session', { repositoryPath: session.repositoryPath }],
+      ['get_release_logs', { sessionId: session.id, beforeSequence: 42 }],
+    ])
+  })
+
   it('forwards typed channel events and preserves stable backend errors', async () => {
     const { releaseConsoleTauri } = await import('./tauri')
     const events: unknown[] = []
     const proxy = { enabled: false, proxyType: 'http' as const, host: '', port: null }
     invokeMock.mockImplementationOnce(async (_command: string, args: Record<string, unknown>) => {
       const channel = args.onEvent as MockChannel<unknown>
-      channel.emit({ kind: 'stepStarted', stepId: 'remoteRun', startedAt: '2026-07-31T10:00:00Z' })
+      channel.emit({
+        kind: 'stepLog',
+        entry: {
+          sessionId: 'session-1',
+          sequence: 7,
+          timestamp: '2026-07-31T10:00:00.000Z',
+          stepId: 'remoteRun',
+          source: 'lifecycle',
+          level: 'info',
+          message: 'Run 42 正在执行。',
+        },
+      })
       return {
         success: true,
         data: {
@@ -180,7 +244,18 @@ describe('release console typed Tauri service', () => {
     await releaseConsoleTauri.startRelease('plan-1', proxy, (event) => events.push(event))
 
     expect(events).toEqual([
-      { kind: 'stepStarted', stepId: 'remoteRun', startedAt: '2026-07-31T10:00:00Z' },
+      {
+        kind: 'stepLog',
+        entry: {
+          sessionId: 'session-1',
+          sequence: 7,
+          timestamp: '2026-07-31T10:00:00.000Z',
+          stepId: 'remoteRun',
+          source: 'lifecycle',
+          level: 'info',
+          message: 'Run 42 正在执行。',
+        },
+      },
     ])
     expect(channels).toHaveLength(1)
     expect(invokeMock).toHaveBeenCalledWith('start_release', {

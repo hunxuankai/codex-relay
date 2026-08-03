@@ -1,3 +1,4 @@
+use crate::services::release_log::{NoopReleaseProgressSink, ReleaseProgressSink};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -228,8 +229,19 @@ impl LocalVerificationService {
         backend: &dyn LocalVerificationBackend,
         repository_path: &Path,
     ) -> Result<Vec<LocalCommandEvidence>, LocalVerificationError> {
+        self.run_with_progress(backend, repository_path, &NoopReleaseProgressSink)
+            .await
+    }
+
+    pub async fn run_with_progress(
+        &self,
+        backend: &dyn LocalVerificationBackend,
+        repository_path: &Path,
+        progress: &dyn ReleaseProgressSink,
+    ) -> Result<Vec<LocalCommandEvidence>, LocalVerificationError> {
         let mut evidence = Vec::with_capacity(self.commands.len());
         for command in &self.commands {
+            progress.started(&command.id, "开始执行本地发布门禁命令。");
             let item = match backend.run(repository_path, command).await {
                 Ok(item) => item,
                 Err(LocalVerificationBackendError::Cancelled) => {
@@ -248,6 +260,14 @@ impl LocalVerificationService {
                     failure: LocalVerificationFailure::ExitCode(item.exit_code),
                 });
             }
+            progress.completed(
+                &command.id,
+                item.duration_millis,
+                &format!(
+                    "本地发布门禁命令完成，退出码 {}，耗时 {} ms。",
+                    item.exit_code, item.duration_millis
+                ),
+            );
             evidence.push(item);
         }
         Ok(evidence)

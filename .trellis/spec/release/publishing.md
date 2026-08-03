@@ -634,6 +634,126 @@ $DestinationDirectory = Join-Path $repositoryRoot 'dist\release-console'
 $DestinationDirectory = Join-Path $repositoryRoot 'artifacts\release-console'
 ```
 
+### 0.6 发布控制台诊断日志与固定日志区契约
+
+#### 1. 范围/触发条件
+
+修改发布控制台的本地门禁输出、发布阶段进度、日志文件、分页 command、实时事件、会话恢复或底部
+日志区时，必须遵循本节。诊断日志用于解释发布失败，但不得改变发布、取消、回滚、Push、Draft、
+公开、在线复核或 cleanup 的成功/失败事实。
+
+#### 2. 签名
+
+Rust 与 TypeScript DTO 使用 camelCase，同一条记录由 recorder 分配唯一递增 sequence：
+
+```text
+ReleaseLogEntry {
+  sessionId, sequence, timestamp, stepId,
+  source: lifecycle | stdout | stderr,
+  level: info | warning | error,
+  message
+}
+
+ReleaseLogPage {
+  entries, nextBeforeSequence, hasEarlier,
+  totalEntries, totalBytes, truncated, warning
+}
+
+ReleaseEvent::StepLog {
+  entry,
+  page?: ReleaseLogPage
+}
+
+get_release_session(repositoryPath)
+  -> CommandResult<ReleaseSessionSnapshot | null>
+get_release_logs(sessionId, beforeSequence)
+  -> CommandResult<ReleaseLogPage>
+
+ReleaseLogStore::append(entry)
+  -> Result<Option<ReleaseLogPage>, ReleaseLogError>
+```
+
+`page` 只在本次 append 触发持久化压缩时存在，且是按生产分页大小构造的权威最新页；普通实时事件
+只携带单条 entry。生产 policy 固定为单会话 `50 MiB`、`100,000` 条、单条 `1 MiB`、流块
+`64 KiB`、页面 `2,000` 条。
+
+#### 3. 契约
+
+- 日志只保存到实际 Git 元数据目录的
+  `<git-dir>/codex-relay-release-console/session.log.jsonl`；每行包含 schema version、session ID 和
+  sequence。新会话原子轮换旧文件，只保留当前会话。
+- `initialize` 负责新会话轮换；`open` 负责恢复 sequence，并可原子修复不完整尾部或损坏后缀；
+  `load_page` 只读有效前缀，不能在实时 append 期间借用 `open` 改写文件。
+- 本地 npm/Cargo 门禁可实时记录经过 Rust 权威边界处理的 stdout/stderr；Git、`gh` 和 GitHub
+  轮询只记录结构化操作、稳定 code、状态变化、Run/Job/Step 和每 5 分钟心跳，不倾倒原始命令输出
+  或机器 JSON。
+- 达到总字节或条数上限时，store 原子压缩到约 80% 水位，优先保留 lifecycle、warning、error 和
+  最新输出，并用被淘汰记录的 sequence 写入“早期普通输出已截断”marker。store 不分配 recorder 的
+  下一个 sequence。
+- recorder 把压缩后的最新页附到对应 `stepLog`；Vue 立即采用该页，不能根据实时递增计数猜测哪些
+  记录已被淘汰。用户查看历史页时保留当前条目，只同步总量、字节、截断 warning 和未读状态。
+- WebView 任意时刻只渲染一页；`stepLog` 及其可选压缩页只进入有界日志 reducer，不进入通用低频
+  `events` 数组。旧 channel、旧仓库和旧分页响应必须由 generation/sequence 门禁丢弃。
+- 日志 I/O 或 event channel 失败不改变发布结果。持久化失败后切换为当前窗口易失日志，并最多显示
+  一次“重启后可能丢失”warning。
+- 步骤失败的顺序固定为：刷新 stdout/stderr 尾部 -> 持久化稳定 code 与安全消息 -> 原子保存权威
+  failure -> `sessionUpdated` -> `stepFailed`。后续未执行步骤不得生成伪日志。
+- `App.vue` 使用标题、可滚动发布工作区、底部日志区三行 `100dvh` 布局；桌面日志高度为
+  `clamp(180px, 30vh, 280px)`，窄窗口只让上方区域改为单列滚动，日志区不得覆盖操作或造成页面
+  横向溢出。
+
+#### 4. 验证与错误矩阵
+
+| 条件 | 必需结果 |
+|---|---|
+| 新会话开始 | 原子轮换旧 JSONL，sequence 从 1 开始，旧 session 记录不可见 |
+| 恢复同一会话 | 从有效前缀恢复最后 sequence、计数、字节和截断状态，继续递增 |
+| 达到 50 MiB 或 100,000 条 | 文件不越界；保留高优先级和最新输出；实时事件立即携带有 marker 的有界最新页 |
+| 单条序列化超过 1 MiB | 在 UTF-8 边界截断正文，再写入明确 lifecycle warning；store 最终防线仍拒绝越界 |
+| 末行不完整或中间损坏 | 分页保留可信前缀并返回 warning；只有 `open` 可修复后缀以便继续 append |
+| session ID 或 sequence 不匹配 | 拒绝读取/追加，不把其他会话记录混入当前页 |
+| 日志轮换、读取或写入失败 | 发布事实不变；当前窗口显示安全 warning，必要时进入易失模式 |
+| channel 已断开 | 后台继续落盘；重启后可从同一会话恢复 |
+| 查看历史页时有新日志或压缩 | 历史条目不被替换；未读、总量和截断提示更新，返回最新后显示权威最新页 |
+
+#### 5. 良好/基线/错误用例
+
+- 良好：`full-project-check` 尚未结束时，底部区域已显示安全 stdout；命令非零后先显示尾部，再显示
+  `RELEASE_LOCAL_VERIFICATION_FAILED` 和真实退出码。
+- 良好：第 100,001 条触发压缩，当前窗口无需手动更新就显示截断 warning，最新 error 仍在页内，
+  通用事件数组大小不随日志增长。
+- 基线：旧 session 没有 JSONL 时恢复为空页；发布流程和旧 `session.json` schema 继续可用。
+- 错误：把完整日志嵌入 `session.json`，在每次 IPC 传 50 MiB，或仅在重启读取时才显示截断状态。
+- 错误：日志 append 失败后把成功发布改成 failed，或在发布失败时因日志失败而报告成功。
+
+#### 6. 必需测试
+
+- Store 临时目录集成测试：轮换、恢复、分页、损坏有效前缀、session/sequence 隔离、三类上限、
+  marker sequence 和文件实际字节上限。
+- Recorder/event 测试：sequence、单条 UTF-8 截断、持久化失败一次 warning，以及压缩事件的可选
+  page 为最多 2,000 条且包含 marker 与最新 error。
+- 本地进程测试：完成前实时输出、双流尾部 flush、非零/取消/超时语义和安全上下文。
+- Application/command 测试：snapshot、游标分页、channel 断开仍落盘、失败事件顺序和 camelCase。
+- Vue 测试：最新页替换、历史阅读、100,000 条有界 reducer、旧响应失效、复制与键盘滚动；并在
+  900x620、600x760、浅色和深色下观察固定布局与横向溢出。
+- 完成前使用成对安全 Relay 覆盖运行 `npm run check`，并实际运行 `npm run build:release-console`。
+
+#### 7. 错误与正确做法
+
+错误：store 压缩后只返回 `()`，让前端继续递增旧页面，直到人工刷新才知道记录已淘汰。
+
+```rust
+store.append(entry)?;
+emit(ReleaseEvent::StepLog { entry });
+```
+
+正确：压缩是 store 的权威事实，只在该低频事件附带同一分页规则构造的最新页。
+
+```rust
+let page = store.append(entry.clone())?;
+emit(ReleaseEvent::StepLog { entry, page });
+```
+
 ## 1. 发布边界
 
 - 默认发布源是 GitHub 默认分支 `main`，工作流为 `.github/workflows/release.yml`。

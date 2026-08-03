@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -272,6 +273,68 @@ pub struct CleanupRunEvidence {
     pub jobs: Vec<WorkflowJobStatus>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReleaseLogSource {
+    Lifecycle,
+    Stdout,
+    Stderr,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReleaseLogLevel {
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseLogEntry {
+    pub session_id: String,
+    pub sequence: u64,
+    pub timestamp: String,
+    pub step_id: String,
+    pub source: ReleaseLogSource,
+    pub level: ReleaseLogLevel,
+    pub message: String,
+}
+
+impl fmt::Debug for ReleaseLogEntry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ReleaseLogEntry")
+            .field("session_id", &self.session_id)
+            .field("sequence", &self.sequence)
+            .field("timestamp", &self.timestamp)
+            .field("step_id", &self.step_id)
+            .field("source", &self.source)
+            .field("level", &self.level)
+            .field("message_length", &self.message.len())
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseLogPage {
+    pub entries: Vec<ReleaseLogEntry>,
+    pub next_before_sequence: Option<u64>,
+    pub has_earlier: bool,
+    pub total_entries: u64,
+    pub total_bytes: u64,
+    pub truncated: bool,
+    pub warning: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseSessionSnapshot {
+    pub session: ReleaseSession,
+    pub logs: ReleaseLogPage,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(
     tag = "kind",
@@ -287,8 +350,9 @@ pub enum ReleaseEvent {
         started_at: String,
     },
     StepLog {
-        step_id: String,
-        message: String,
+        entry: ReleaseLogEntry,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        page: Option<ReleaseLogPage>,
     },
     StepCompleted {
         step_id: String,

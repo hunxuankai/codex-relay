@@ -2,8 +2,9 @@ use crate::app_state::{
     AppState, ApplicationRequest, ApplicationResponse, ReleaseApplicationError, ReleaseEventSink,
 };
 use crate::models::{
-    CommandResult, DraftIdentity, ReleaseConnectionTestResult, ReleaseEvent, ReleasePlanSummary,
-    ReleasePreflightResult, ReleaseProxySettings, ReleaseSession, SafeRepositoryPushRequest,
+    CommandResult, DraftIdentity, ReleaseConnectionTestResult, ReleaseEvent, ReleaseLogPage,
+    ReleasePlanSummary, ReleasePreflightResult, ReleaseProxySettings, ReleaseSession,
+    ReleaseSessionSnapshot, SafeRepositoryPushRequest,
 };
 use std::sync::Arc;
 use tauri::ipc::Channel;
@@ -117,12 +118,33 @@ pub async fn start_release_inner(
 pub async fn get_release_session_inner(
     state: &AppState,
     repository_path: String,
-) -> CommandResult<Option<ReleaseSession>> {
+) -> CommandResult<Option<ReleaseSessionSnapshot>> {
     match state
         .execute(ApplicationRequest::GetSession { repository_path }, None)
         .await
     {
-        Ok(ApplicationResponse::OptionalSession(value)) => CommandResult::success(value),
+        Ok(ApplicationResponse::OptionalSnapshot(value)) => CommandResult::success(value),
+        Ok(_) => unexpected(),
+        Err(error) => failure(error),
+    }
+}
+
+pub async fn get_release_logs_inner(
+    state: &AppState,
+    session_id: String,
+    before_sequence: Option<u64>,
+) -> CommandResult<ReleaseLogPage> {
+    match state
+        .execute(
+            ApplicationRequest::GetLogs {
+                session_id,
+                before_sequence,
+            },
+            None,
+        )
+        .await
+    {
+        Ok(ApplicationResponse::Logs(value)) => CommandResult::success(value),
         Ok(_) => unexpected(),
         Err(error) => failure(error),
     }
@@ -257,8 +279,17 @@ pub async fn start_release(
 pub async fn get_release_session(
     state: tauri::State<'_, AppState>,
     repository_path: String,
-) -> Result<CommandResult<Option<ReleaseSession>>, ()> {
+) -> Result<CommandResult<Option<ReleaseSessionSnapshot>>, ()> {
     Ok(get_release_session_inner(&state, repository_path).await)
+}
+
+#[tauri::command]
+pub async fn get_release_logs(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    before_sequence: Option<u64>,
+) -> Result<CommandResult<ReleaseLogPage>, ()> {
+    Ok(get_release_logs_inner(&state, session_id, before_sequence).await)
 }
 
 #[tauri::command]

@@ -23,6 +23,25 @@ pub fn redact(input: &str) -> String {
         .into_owned()
 }
 
+pub fn redaction_safe_split_index(input: &str, preferred: usize) -> usize {
+    let preferred = preferred.min(input.len());
+    let mut split = preferred;
+    for pattern in [
+        json_secret_regex(),
+        assignment_secret_regex(),
+        github_token_regex(),
+        bearer_regex(),
+        query_secret_regex(),
+    ] {
+        for matched in pattern.find_iter(input) {
+            if matched.start() < preferred && matched.end() > preferred {
+                split = split.min(matched.start());
+            }
+        }
+    }
+    split
+}
+
 pub fn format_error_for_log(error: &AppError) -> String {
     let internal_detail = error.internal_detail();
     let safe_detail = if internal_detail.contains('{')
@@ -47,7 +66,7 @@ fn json_secret_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
         Regex::new(
-            r#"(?i)("(?:OPENAI_API_KEY|apiKey|Authorization|GH_TOKEN|GITHUB_TOKEN|TAURI_SIGNING_PRIVATE_KEY|TAURI_SIGNING_PRIVATE_KEY_PASSWORD|token|api[_-]?key|key)"\s*:\s*")([^"]*)(")"#,
+            r#"(?i)("(?:OPENAI_API_KEY|apiKey|Authorization|GH_TOKEN|GITHUB_TOKEN|TAURI_SIGNING_PRIVATE_KEY|TAURI_SIGNING_PRIVATE_KEY_PASSWORD|token|api[_-]?key|key)"\s*:\s*")([^"]*)("|$)"#,
         )
         .expect("valid JSON secret regex")
     })
@@ -116,5 +135,17 @@ mod tests {
         assert!(redacted.contains("TAURI_SIGNING_PRIVATE_KEY=[REDACTED]"));
         assert!(redacted.contains("TAURI_SIGNING_PRIVATE_KEY_PASSWORD=[REDACTED]"));
         assert!(redacted.contains("Authorization=[REDACTED]"));
+    }
+
+    #[test]
+    fn streaming_split_waits_until_sensitive_values_are_complete() {
+        let bearer = format!("Authorization: Bearer {}", "a".repeat(512));
+        assert_eq!(redaction_safe_split_index(&bearer, 64), 0);
+
+        let json = format!(r#"prefix {{"token":"{}"#, "b".repeat(512));
+        assert_eq!(redaction_safe_split_index(&json, 80), 8);
+
+        let plain = "ordinary diagnostic context".repeat(16);
+        assert_eq!(redaction_safe_split_index(&plain, 64), 64);
     }
 }

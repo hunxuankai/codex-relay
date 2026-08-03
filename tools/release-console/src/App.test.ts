@@ -30,6 +30,7 @@ vi.mock('element-plus', async () => {
 import App from './App.vue'
 import appSource from './App.vue?raw'
 import ProxySettingsPanel from './components/release/ProxySettingsPanel.vue'
+import ReleaseLogPanel from './components/release/ReleaseLogPanel.vue'
 import ReleaseRecoveryPanel from './components/release/ReleaseRecoveryPanel.vue'
 import RepositorySyncConfirmDialog from './components/release/RepositorySyncConfirmDialog.vue'
 import { REPOSITORY_PREFERENCE_KEY } from './composables/useRepositoryPreference'
@@ -117,6 +118,7 @@ describe('release console shell', () => {
     expect(wrapper.text()).toContain('阶段时间线')
     expect(wrapper.text()).not.toContain('加载活动会话')
     expect(wrapper.get('.release-console-layout')).toBeTruthy()
+    expect(wrapper.findComponent(ReleaseLogPanel).exists()).toBe(true)
     expect(wrapper.text()).not.toContain('首版只完成可视化一键发布与在线复核')
   })
 
@@ -129,7 +131,7 @@ describe('release console shell', () => {
 
   it('keeps the release progress panel fixed while the desktop workspace scrolls independently', () => {
     expect(appSource).toMatch(
-      /\.app-shell\s*\{[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\);[\s\S]*?height:\s*100vh;[\s\S]*?overflow:\s*hidden;/,
+      /\.app-shell\s*\{[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\) clamp\(180px, 30vh, 280px\);[\s\S]*?height:\s*100dvh;[\s\S]*?overflow:\s*hidden;/,
     )
     expect(appSource).toMatch(
       /\.release-console-layout\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?overflow:\s*hidden;/,
@@ -141,8 +143,81 @@ describe('release console shell', () => {
       /\.workspace\s*\{[\s\S]*?grid-auto-rows:\s*max-content;/,
     )
     expect(appSource).toMatch(
-      /@media \(max-width: 820px\)[\s\S]*?\.app-shell\s*\{[\s\S]*?height:\s*auto;[\s\S]*?overflow:\s*visible;/,
+      /@media \(max-width: 820px\)[\s\S]*?\.release-console-layout\s*\{[\s\S]*?overflow-y:\s*auto;/,
     )
+  })
+
+  it('passes log state to the bottom panel and forwards all paging actions', async () => {
+    const repositoryPath = 'D:\\safe-temp\\repository'
+    const failed = {
+      id: 'session-logs',
+      repositoryPath,
+      targetVersion: '0.5.0',
+      phase: 'failed',
+      candidateSha: null,
+      remoteMainSha: null,
+      workflow: null,
+      draft: null,
+      published: null,
+      cleanup: null,
+      cleanupWarning: null,
+      failure: {
+        phase: 'localChecks',
+        stepId: 'full-project-check',
+        code: 'RELEASE_LOCAL_VERIFICATION_FAILED',
+      },
+    }
+    const logEntry = {
+      sessionId: failed.id,
+      sequence: 42,
+      timestamp: '2026-08-03T12:00:00.000Z',
+      stepId: 'full-project-check',
+      source: 'stderr',
+      level: 'error',
+      message: '测试失败上下文',
+    }
+    const latest = {
+      entries: [logEntry],
+      nextBeforeSequence: 42,
+      hasEarlier: true,
+      totalEntries: 42,
+      totalBytes: 4_096,
+      truncated: false,
+      warning: null,
+    }
+    const history = {
+      ...latest,
+      entries: [{ ...logEntry, sequence: 1 }],
+      nextBeforeSequence: null,
+      hasEarlier: false,
+    }
+    window.localStorage.setItem(
+      REPOSITORY_PREFERENCE_KEY,
+      JSON.stringify({ version: 1, repositoryPath }),
+    )
+    invokeMock
+      .mockResolvedValueOnce({ success: true, data: { session: failed, logs: latest } })
+      .mockResolvedValueOnce({ success: true, data: history })
+      .mockResolvedValueOnce({ success: true, data: history })
+      .mockResolvedValueOnce({ success: true, data: latest })
+    const wrapper = mount(App)
+    await flushPromises()
+    const panel = wrapper.getComponent(ReleaseLogPanel)
+
+    expect(panel.props('logPage')).toEqual(latest)
+    expect(panel.props('failure')).toEqual(failed.failure)
+    panel.vm.$emit('load-earlier')
+    await flushPromises()
+    panel.vm.$emit('refresh-log-page')
+    await flushPromises()
+    panel.vm.$emit('return-to-latest')
+    await flushPromises()
+
+    expect(invokeMock.mock.calls.filter(([command]) => command === 'get_release_logs')).toEqual([
+      ['get_release_logs', { sessionId: failed.id, beforeSequence: 42 }],
+      ['get_release_logs', { sessionId: failed.id, beforeSequence: 42 }],
+      ['get_release_logs', { sessionId: failed.id, beforeSequence: null }],
+    ])
   })
 
   it('shows ordinary release command failures as temporary Element Plus messages', async () => {
@@ -449,7 +524,21 @@ describe('release console shell', () => {
       JSON.stringify({ version: 1, settings: proxy }),
     )
     invokeMock
-      .mockResolvedValueOnce({ success: true, data: committed })
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          session: committed,
+          logs: {
+            entries: [],
+            nextBeforeSequence: null,
+            hasEarlier: false,
+            totalEntries: 0,
+            totalBytes: 0,
+            truncated: false,
+            warning: null,
+          },
+        },
+      })
       .mockResolvedValueOnce({
         success: true,
         data: { ...committed, phase: 'workflowRunning' },

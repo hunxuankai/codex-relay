@@ -547,6 +547,7 @@ dependencies = [
  "chrono",
  "codex-relay-core",
  "fs2",
+ "regex",
  "semver",
  "serde",
  "serde_json",

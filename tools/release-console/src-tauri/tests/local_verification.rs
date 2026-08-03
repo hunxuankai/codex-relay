@@ -5,13 +5,14 @@ use codex_relay_release_console_lib::services::local_verification::{
     LocalVerificationBackendError, LocalVerificationCommand, LocalVerificationError,
     LocalVerificationFailure, LocalVerificationProcessError, LocalVerificationService,
 };
+use codex_relay_release_console_lib::services::release_log::{ReleaseLogRecorder, ReleaseLogStore};
 use std::ffi::OsString;
 use std::fs;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -296,6 +297,75 @@ fn process_backend_builds_direct_invocation_with_filtered_environment_and_no_she
     assert!(!debug.contains("test-private-key-not-real"));
     assert!(!debug.contains("test-token-not-real"));
     assert!(!debug.contains("unsafe-codex-home"));
+}
+
+#[test]
+fn process_backend_persists_safe_output_before_the_command_completes() {
+    tauri::async_runtime::block_on(async {
+        let repository = tempfile::tempdir().unwrap();
+        let git_dir = tempfile::tempdir().unwrap();
+        let store = ReleaseLogStore::new(git_dir.path().to_path_buf());
+        store.initialize("session-a").unwrap();
+        let recorder = Arc::new(ReleaseLogRecorder::new("session-a", store, 0, None));
+        let (_cancel_sender, cancel) = tokio::sync::watch::channel(false);
+        let powershell = find_on_path("powershell.exe");
+        let backend = ProcessLocalVerificationBackend::with_recorder(
+            powershell.clone(),
+            powershell,
+            filter_release_environment(std::env::vars_os()),
+            cancel,
+            recorder,
+        );
+        let command = LocalVerificationCommand {
+            id: "release-console-rust-tests".into(),
+            executable: LocalExecutable::Npm,
+            args: vec![
+                "-NoLogo".into(),
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-Command".into(),
+                concat!(
+                    "[Console]::Out.Write(\"first`n\"); ",
+                    "[Console]::Out.Flush(); ",
+                    "Start-Sleep -Milliseconds 750; ",
+                    "[Console]::Out.Write(\"second-tail\")",
+                )
+                .into(),
+            ],
+        };
+        let reader = ReleaseLogStore::new(git_dir.path().to_path_buf());
+        let run = backend.run(repository.path(), &command);
+        tokio::pin!(run);
+        let deadline = tokio::time::sleep(std::time::Duration::from_secs(10));
+        tokio::pin!(deadline);
+
+        loop {
+            tokio::select! {
+                result = &mut run => panic!("command completed before the first streamed log: {result:?}"),
+                _ = tokio::time::sleep(std::time::Duration::from_millis(20)) => {
+                    let page = reader.load_page("session-a", None).unwrap();
+                    if page.entries.iter().any(|entry| entry.message == "first\n") {
+                        break;
+                    }
+                }
+                _ = &mut deadline => panic!("first streamed log did not arrive before the deadline"),
+            }
+        }
+
+        let evidence = tokio::time::timeout(std::time::Duration::from_secs(10), &mut run)
+            .await
+            .expect("command should complete after the delayed output")
+            .unwrap();
+        assert_eq!(evidence.exit_code, 0);
+        let page = reader.load_page("session-a", None).unwrap();
+        assert_eq!(
+            page.entries
+                .iter()
+                .map(|entry| entry.message.as_str())
+                .collect::<String>(),
+            "first\nsecond-tail"
+        );
+    });
 }
 
 struct FirstCommandProcessBackend {

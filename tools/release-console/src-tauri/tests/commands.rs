@@ -3,13 +3,14 @@ use codex_relay_release_console_lib::app_state::{
     ReleaseApplicationError, ReleaseEventSink,
 };
 use codex_relay_release_console_lib::commands::{
-    inspect_release_repository_inner, push_release_repository_inner, start_release_inner,
-    test_release_connection_inner,
+    get_release_logs_inner, get_release_session_inner, inspect_release_repository_inner,
+    push_release_repository_inner, start_release_inner, test_release_connection_inner,
 };
 use codex_relay_release_console_lib::models::{
     ConnectionProbeResult, ExternalPreflightSnapshot, ReleaseConnectionTestResult, ReleaseEvent,
-    ReleasePhase, ReleasePreflightResult, ReleaseProxySettings, ReleaseProxyType, ReleaseSession,
-    RepositoryInspection, RepositorySyncInspection, RepositorySyncStatus,
+    ReleaseLogEntry, ReleaseLogLevel, ReleaseLogPage, ReleaseLogSource, ReleasePhase,
+    ReleasePreflightResult, ReleaseProxySettings, ReleaseProxyType, ReleaseSession,
+    ReleaseSessionSnapshot, RepositoryInspection, RepositorySyncInspection, RepositorySyncStatus,
     SafeRepositoryPushRequest, ToolchainInspection,
 };
 use std::future::Future;
@@ -56,6 +57,26 @@ fn fixture_inspection() -> ReleasePreflightResult {
     }
 }
 
+fn fixture_log_page() -> ReleaseLogPage {
+    ReleaseLogPage {
+        entries: vec![ReleaseLogEntry {
+            session_id: "session-1".into(),
+            sequence: 42,
+            timestamp: "2026-08-03T12:00:00.000Z".into(),
+            step_id: "full-project-check".into(),
+            source: ReleaseLogSource::Stderr,
+            level: ReleaseLogLevel::Error,
+            message: "测试失败上下文".into(),
+        }],
+        next_before_sequence: Some(42),
+        has_earlier: true,
+        total_entries: 42,
+        total_bytes: 4_096,
+        truncated: false,
+        warning: None,
+    }
+}
+
 impl ReleaseApplicationBackend for FixtureApplication {
     fn execute<'a>(
         &'a self,
@@ -92,6 +113,19 @@ impl ReleaseApplicationBackend for FixtureApplication {
                     }
                     Ok(ApplicationResponse::Session(session))
                 }
+                ApplicationRequest::GetSession { .. } => Ok(ApplicationResponse::OptionalSnapshot(
+                    Some(ReleaseSessionSnapshot {
+                        session: ReleaseSession::new(
+                            "session-1",
+                            r"D:\safe-temp\repository",
+                            "0.5.0",
+                        ),
+                        logs: fixture_log_page(),
+                    }),
+                )),
+                ApplicationRequest::GetLogs { .. } => {
+                    Ok(ApplicationResponse::Logs(fixture_log_page()))
+                }
                 ApplicationRequest::TestConnection { .. } => Ok(
                     ApplicationResponse::ConnectionTest(ReleaseConnectionTestResult {
                         git: ConnectionProbeResult {
@@ -115,6 +149,45 @@ impl ReleaseApplicationBackend for FixtureApplication {
             }
         })
     }
+}
+
+#[test]
+fn session_and_log_commands_make_one_exact_application_request_each() {
+    let backend = Arc::new(FixtureApplication {
+        requests: Mutex::new(Vec::new()),
+        fail: false,
+    });
+    let state = AppState::new(backend.clone());
+
+    let snapshot = tauri::async_runtime::block_on(get_release_session_inner(
+        &state,
+        r"D:\safe-temp\repository".into(),
+    ));
+    assert!(snapshot.success);
+    let snapshot = snapshot.data.unwrap().unwrap();
+    assert_eq!(snapshot.session.id, "session-1");
+    assert_eq!(snapshot.logs.entries[0].sequence, 42);
+
+    let page = tauri::async_runtime::block_on(get_release_logs_inner(
+        &state,
+        "session-1".into(),
+        Some(42),
+    ));
+    assert!(page.success);
+    assert_eq!(page.data.unwrap().total_entries, 42);
+
+    assert_eq!(
+        backend.requests.lock().unwrap().as_slice(),
+        [
+            ApplicationRequest::GetSession {
+                repository_path: r"D:\safe-temp\repository".into(),
+            },
+            ApplicationRequest::GetLogs {
+                session_id: "session-1".into(),
+                before_sequence: Some(42),
+            },
+        ]
+    );
 }
 
 #[test]

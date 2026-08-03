@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type {
   DraftIdentity,
   ReleaseEvent,
+  ReleaseLogEntry,
+  ReleaseLogPage,
   ReleasePlanSummary,
   ReleasePreflightResult,
   ReleaseSession,
@@ -27,7 +29,430 @@ function session(id: string, phase: ReleaseSession['phase']): ReleaseSession {
   }
 }
 
+function logEntry(sequence: number, sessionId = 'session-logs'): ReleaseLogEntry {
+  return {
+    sessionId,
+    sequence,
+    timestamp: `2026-08-03T12:00:${String(sequence % 60).padStart(2, '0')}.000Z`,
+    stepId: 'full-project-check',
+    source: 'stdout',
+    level: 'info',
+    message: `诊断记录 ${sequence}`,
+  }
+}
+
+function logPage(entries: readonly ReleaseLogEntry[]): ReleaseLogPage {
+  return {
+    entries,
+    nextBeforeSequence: null,
+    hasEarlier: false,
+    totalEntries: entries.length,
+    totalBytes: entries.length * 128,
+    truncated: false,
+    warning: null,
+  }
+}
+
 describe('useReleaseSession', () => {
+  it('loads the latest log page and keeps realtime step logs bounded and out of events', async () => {
+    let resumeEvent: ((event: ReleaseEvent) => void) | undefined
+    const persisted = session('session-logs', 'workflowRunning')
+    const client = {
+      inspectRepository: vi.fn(),
+      pushRepository: vi.fn(),
+      preparePlan: vi.fn(),
+      startRelease: vi.fn(),
+      getReleaseSession: vi.fn().mockResolvedValue({
+        session: persisted,
+        logs: logPage([logEntry(1)]),
+      }),
+      getReleaseLogs: vi.fn(),
+      resumeRelease: vi.fn(
+        async (
+          _sessionId: string,
+          _proxy: typeof directProxy,
+          onEvent: (event: ReleaseEvent) => void,
+        ) => {
+          resumeEvent = onEvent
+          return persisted
+        },
+      ),
+      cancelRelease: vi.fn(),
+      publishRelease: vi.fn(),
+      exportSummary: vi.fn(),
+    }
+    const release = useReleaseSession({ client })
+
+    await release.load(persisted.repositoryPath)
+    await release.resume(persisted.id, directProxy)
+    resumeEvent?.({ kind: 'stepLog', entry: logEntry(1) })
+    for (let sequence = 2; sequence <= 100_000; sequence += 1) {
+      resumeEvent?.({ kind: 'stepLog', entry: logEntry(sequence) })
+    }
+
+    expect(release.session.value).toEqual(persisted)
+    expect(release.logPage.value.entries).toHaveLength(2_000)
+    expect(release.logPage.value.entries[0]?.sequence).toBe(98_001)
+    expect(
+      release.logPage.value.entries[release.logPage.value.entries.length - 1]?.sequence,
+    ).toBe(100_000)
+    expect(release.logPage.value.totalEntries).toBe(100_000)
+    expect(release.events.value).toEqual([])
+  })
+
+  it('applies an authoritative compacted page from the realtime log event', async () => {
+    let resumeEvent: ((event: ReleaseEvent) => void) | undefined
+    const persisted = session('session-logs', 'workflowRunning')
+    const marker: ReleaseLogEntry = {
+      ...logEntry(2),
+      source: 'lifecycle',
+      level: 'warning',
+      message: '早期普通输出已截断',
+    }
+    const failure: ReleaseLogEntry = {
+      ...logEntry(4),
+      source: 'stderr',
+      level: 'error',
+      message: 'latest failure',
+    }
+    const compacted: ReleaseLogPage = {
+      ...logPage([marker, failure]),
+      totalBytes: 512,
+      truncated: true,
+      warning: marker.message,
+    }
+    const client = {
+      inspectRepository: vi.fn(),
+      pushRepository: vi.fn(),
+      preparePlan: vi.fn(),
+      startRelease: vi.fn(),
+      getReleaseSession: vi.fn().mockResolvedValue({
+        session: persisted,
+        logs: logPage([logEntry(1), logEntry(2), logEntry(3)]),
+      }),
+      getReleaseLogs: vi.fn(),
+      resumeRelease: vi.fn(
+        async (
+          _sessionId: string,
+          _proxy: typeof directProxy,
+          onEvent: (event: ReleaseEvent) => void,
+        ) => {
+          resumeEvent = onEvent
+          return persisted
+        },
+      ),
+      cancelRelease: vi.fn(),
+      publishRelease: vi.fn(),
+      exportSummary: vi.fn(),
+    }
+    const release = useReleaseSession({ client })
+
+    await release.load(persisted.repositoryPath)
+    await release.resume(persisted.id, directProxy)
+    resumeEvent?.({ kind: 'stepLog', entry: failure, page: compacted })
+
+    expect(release.logPage.value).toEqual(compacted)
+    expect(release.events.value).toEqual([])
+  })
+
+  it('keeps history stable while realtime logs arrive and returns to the latest page', async () => {
+    let resumeEvent: ((event: ReleaseEvent) => void) | undefined
+    const persisted = session('session-logs', 'workflowRunning')
+    const latest: ReleaseLogPage = {
+      ...logPage([logEntry(2_001), logEntry(2_002)]),
+      nextBeforeSequence: 2_001,
+      hasEarlier: true,
+      totalEntries: 2_002,
+    }
+    const history: ReleaseLogPage = {
+      ...logPage([logEntry(1), logEntry(2)]),
+      totalEntries: 2_002,
+      truncated: true,
+      warning: '早期普通输出已截断。',
+    }
+    const refreshedLatest: ReleaseLogPage = {
+      ...logPage([logEntry(2_001), logEntry(2_002), logEntry(2_003)]),
+      nextBeforeSequence: 2_001,
+      hasEarlier: true,
+      totalEntries: 1_600,
+      totalBytes: 256_000,
+      truncated: true,
+      warning: '早期普通输出已截断。',
+    }
+    const getReleaseLogs = vi
+      .fn()
+      .mockResolvedValueOnce(history)
+      .mockResolvedValueOnce(refreshedLatest)
+    const client = {
+      inspectRepository: vi.fn(),
+      pushRepository: vi.fn(),
+      preparePlan: vi.fn(),
+      startRelease: vi.fn(),
+      getReleaseSession: vi.fn().mockResolvedValue({ session: persisted, logs: latest }),
+      getReleaseLogs,
+      resumeRelease: vi.fn(
+        async (
+          _sessionId: string,
+          _proxy: typeof directProxy,
+          onEvent: (event: ReleaseEvent) => void,
+        ) => {
+          resumeEvent = onEvent
+          return persisted
+        },
+      ),
+      cancelRelease: vi.fn(),
+      publishRelease: vi.fn(),
+      exportSummary: vi.fn(),
+    }
+    const release = useReleaseSession({ client })
+
+    await release.load(persisted.repositoryPath)
+    await release.resume(persisted.id, directProxy)
+    await release.loadEarlierLogs()
+    expect(release.logViewMode.value).toBe('history')
+    expect(release.logPage.value).toEqual(history)
+
+    resumeEvent?.({
+      kind: 'stepLog',
+      entry: logEntry(2_003),
+      page: refreshedLatest,
+    })
+    expect(release.logPage.value.entries).toEqual(history.entries)
+    expect(release.logPage.value.totalEntries).toBe(1_600)
+    expect(release.logPage.value.totalBytes).toBe(256_000)
+    expect(release.logPage.value.truncated).toBe(true)
+    expect(release.logPage.value.warning).toBe('早期普通输出已截断。')
+    expect(release.unreadLogCount.value).toBe(1)
+
+    await release.returnToLatestLogs()
+    expect(release.logViewMode.value).toBe('latest')
+    expect(release.logPage.value).toEqual(refreshedLatest)
+    expect(release.unreadLogCount.value).toBe(0)
+    expect(release.logRequestPending.value).toBe(false)
+    expect(release.logError.value).toBeNull()
+    expect(getReleaseLogs.mock.calls).toEqual([
+      [persisted.id, 2_001],
+      [persisted.id, null],
+    ])
+  })
+
+  it('drops stale pagination responses and channel logs after loading another repository', async () => {
+    let resumeEvent: ((event: ReleaseEvent) => void) | undefined
+    let resolveOldPage: ((page: ReleaseLogPage) => void) | undefined
+    const first = {
+      ...session('session-first', 'workflowRunning'),
+      repositoryPath: 'D:\\safe-temp\\repository-first',
+    }
+    const second = {
+      ...session('session-second', 'failed'),
+      repositoryPath: 'D:\\safe-temp\\repository-second',
+    }
+    const firstPage: ReleaseLogPage = {
+      ...logPage([logEntry(100, first.id)]),
+      hasEarlier: true,
+      nextBeforeSequence: 100,
+      totalEntries: 100,
+    }
+    const secondPage = logPage([logEntry(1, second.id)])
+    const oldPagePromise = new Promise<ReleaseLogPage>((resolve) => {
+      resolveOldPage = resolve
+    })
+    const client = {
+      inspectRepository: vi.fn(),
+      pushRepository: vi.fn(),
+      preparePlan: vi.fn(),
+      startRelease: vi.fn(),
+      getReleaseSession: vi
+        .fn()
+        .mockResolvedValueOnce({ session: first, logs: firstPage })
+        .mockResolvedValueOnce({ session: second, logs: secondPage }),
+      getReleaseLogs: vi.fn().mockReturnValue(oldPagePromise),
+      resumeRelease: vi.fn(
+        async (
+          _sessionId: string,
+          _proxy: typeof directProxy,
+          onEvent: (event: ReleaseEvent) => void,
+        ) => {
+          resumeEvent = onEvent
+          return first
+        },
+      ),
+      cancelRelease: vi.fn(),
+      publishRelease: vi.fn(),
+      exportSummary: vi.fn(),
+    }
+    const release = useReleaseSession({ client })
+
+    await release.load(first.repositoryPath)
+    await release.resume(first.id, directProxy)
+    const oldRequest = release.loadEarlierLogs()
+    await release.load(second.repositoryPath)
+    resumeEvent?.({ kind: 'stepLog', entry: logEntry(101, first.id) })
+    resolveOldPage?.(logPage([logEntry(1, first.id)]))
+    await oldRequest
+
+    expect(release.session.value).toEqual(second)
+    expect(release.logPage.value).toEqual(secondPage)
+    expect(release.logViewMode.value).toBe('latest')
+    expect(release.unreadLogCount.value).toBe(0)
+    expect(release.logRequestPending.value).toBe(false)
+  })
+
+  it('refreshes the current history cursor and keeps the page when log loading fails', async () => {
+    const persisted = session('session-history-error', 'failed')
+    const latest: ReleaseLogPage = {
+      ...logPage([logEntry(100, persisted.id)]),
+      hasEarlier: true,
+      nextBeforeSequence: 100,
+      totalEntries: 100,
+    }
+    const history = logPage([logEntry(1, persisted.id)])
+    const getReleaseLogs = vi
+      .fn()
+      .mockResolvedValueOnce(history)
+      .mockRejectedValueOnce({
+        code: 'RELEASE_LOG_READ_FAILED',
+        message: '发布日志暂时无法读取。',
+      })
+    const client = {
+      inspectRepository: vi.fn(),
+      pushRepository: vi.fn(),
+      preparePlan: vi.fn(),
+      startRelease: vi.fn(),
+      getReleaseSession: vi.fn().mockResolvedValue({ session: persisted, logs: latest }),
+      getReleaseLogs,
+      resumeRelease: vi.fn(),
+      cancelRelease: vi.fn(),
+      publishRelease: vi.fn(),
+      exportSummary: vi.fn(),
+    }
+    const release = useReleaseSession({ client })
+
+    await release.load(persisted.repositoryPath)
+    await release.loadEarlierLogs()
+    await release.refreshLogPage()
+
+    expect(getReleaseLogs.mock.calls).toEqual([
+      [persisted.id, 100],
+      [persisted.id, 100],
+    ])
+    expect(release.logPage.value).toEqual(history)
+    expect(release.logViewMode.value).toBe('history')
+    expect(release.logRequestPending.value).toBe(false)
+    expect(release.logError.value).toEqual({
+      code: 'RELEASE_LOG_READ_FAILED',
+      message: '发布日志暂时无法读取。',
+    })
+    expect(release.error.value).toBeNull()
+  })
+
+  it('does not let a latest-page response overwrite realtime entries received in flight', async () => {
+    let resumeEvent: ((event: ReleaseEvent) => void) | undefined
+    let resolvePage: ((page: ReleaseLogPage) => void) | undefined
+    const persisted = session('session-inflight-log', 'workflowRunning')
+    const initial = logPage([logEntry(100, persisted.id)])
+    const response = new Promise<ReleaseLogPage>((resolve) => {
+      resolvePage = resolve
+    })
+    const client = {
+      inspectRepository: vi.fn(),
+      pushRepository: vi.fn(),
+      preparePlan: vi.fn(),
+      startRelease: vi.fn(),
+      getReleaseSession: vi.fn().mockResolvedValue({ session: persisted, logs: initial }),
+      getReleaseLogs: vi.fn().mockReturnValue(response),
+      resumeRelease: vi.fn(
+        async (
+          _sessionId: string,
+          _proxy: typeof directProxy,
+          onEvent: (event: ReleaseEvent) => void,
+        ) => {
+          resumeEvent = onEvent
+          return persisted
+        },
+      ),
+      cancelRelease: vi.fn(),
+      publishRelease: vi.fn(),
+      exportSummary: vi.fn(),
+    }
+    const release = useReleaseSession({ client })
+
+    await release.load(persisted.repositoryPath)
+    await release.resume(persisted.id, directProxy)
+    const refresh = release.refreshLogPage()
+    resumeEvent?.({ kind: 'stepLog', entry: logEntry(101, persisted.id) })
+    resolvePage?.(initial)
+    await refresh
+
+    expect(release.logPage.value.entries.map((item) => item.sequence)).toEqual([100, 101])
+    expect(release.logPage.value.totalEntries).toBe(2)
+  })
+
+  it('discards an in-flight page after realtime compaction replaces the sequence space', async () => {
+    let resumeEvent: ((event: ReleaseEvent) => void) | undefined
+    let resolvePage: ((page: ReleaseLogPage) => void) | undefined
+    const persisted = session('session-inflight-compaction', 'workflowRunning')
+    const initial: ReleaseLogPage = {
+      ...logPage([logEntry(100, persisted.id)]),
+      totalEntries: 100,
+      totalBytes: 10_000,
+    }
+    const marker: ReleaseLogEntry = {
+      ...logEntry(90, persisted.id),
+      source: 'lifecycle',
+      level: 'warning',
+      message: '早期普通输出已截断',
+    }
+    const failure: ReleaseLogEntry = {
+      ...logEntry(101, persisted.id),
+      source: 'stderr',
+      level: 'error',
+      message: 'latest failure',
+    }
+    const compacted: ReleaseLogPage = {
+      ...logPage([marker, failure]),
+      totalEntries: 80,
+      totalBytes: 8_000,
+      truncated: true,
+      warning: marker.message,
+    }
+    const response = new Promise<ReleaseLogPage>((resolve) => {
+      resolvePage = resolve
+    })
+    const client = {
+      inspectRepository: vi.fn(),
+      pushRepository: vi.fn(),
+      preparePlan: vi.fn(),
+      startRelease: vi.fn(),
+      getReleaseSession: vi.fn().mockResolvedValue({ session: persisted, logs: initial }),
+      getReleaseLogs: vi.fn().mockReturnValue(response),
+      resumeRelease: vi.fn(
+        async (
+          _sessionId: string,
+          _proxy: typeof directProxy,
+          onEvent: (event: ReleaseEvent) => void,
+        ) => {
+          resumeEvent = onEvent
+          return persisted
+        },
+      ),
+      cancelRelease: vi.fn(),
+      publishRelease: vi.fn(),
+      exportSummary: vi.fn(),
+    }
+    const release = useReleaseSession({ client })
+
+    await release.load(persisted.repositoryPath)
+    await release.resume(persisted.id, directProxy)
+    const refresh = release.refreshLogPage()
+    resumeEvent?.({ kind: 'stepLog', entry: failure, page: compacted })
+    resolvePage?.(initial)
+    await refresh
+
+    expect(release.logPage.value).toEqual(compacted)
+    expect(release.logRequestPending.value).toBe(false)
+  })
+
   it('owns inspection, planning and explicit release actions as readonly state', async () => {
     const inspection: ReleasePreflightResult = {
       repositoryPath: 'D:\\safe-temp\\repository',
@@ -69,6 +494,7 @@ describe('useReleaseSession', () => {
       preparePlan: vi.fn().mockResolvedValue(plan),
       startRelease: vi.fn().mockResolvedValue(session('session-1', 'workflowRunning')),
       getReleaseSession: vi.fn(),
+      getReleaseLogs: vi.fn(),
       resumeRelease: vi.fn(),
       cancelRelease: vi.fn(),
       publishRelease: vi.fn(),
@@ -120,6 +546,7 @@ describe('useReleaseSession', () => {
         },
       ),
       getReleaseSession: vi.fn(),
+      getReleaseLogs: vi.fn(),
       resumeRelease: vi.fn(
         async (
           _sessionId: string,
@@ -180,7 +607,11 @@ describe('useReleaseSession', () => {
           return session('session-1', 'localChecks')
         },
       ),
-      getReleaseSession: vi.fn().mockResolvedValue(persisted),
+      getReleaseSession: vi.fn().mockResolvedValue({
+        session: persisted,
+        logs: logPage([]),
+      }),
+      getReleaseLogs: vi.fn(),
       resumeRelease: vi.fn(),
       cancelRelease: vi.fn(),
       publishRelease: vi.fn(),
@@ -215,6 +646,7 @@ describe('useReleaseSession', () => {
       preparePlan: vi.fn(),
       startRelease: vi.fn(),
       getReleaseSession: vi.fn(),
+      getReleaseLogs: vi.fn(),
       resumeRelease: vi.fn(),
       cancelRelease: vi.fn(),
       publishRelease,
@@ -283,6 +715,7 @@ describe('useReleaseSession', () => {
       preparePlan: vi.fn(),
       startRelease: vi.fn(),
       getReleaseSession: vi.fn(),
+      getReleaseLogs: vi.fn(),
       resumeRelease: vi.fn(),
       cancelRelease: vi.fn(),
       publishRelease: vi.fn(),
@@ -349,6 +782,7 @@ describe('useReleaseSession', () => {
       preparePlan: vi.fn(),
       startRelease: vi.fn(),
       getReleaseSession: vi.fn(),
+      getReleaseLogs: vi.fn(),
       resumeRelease: vi.fn(),
       cancelRelease: vi.fn(),
       publishRelease: vi.fn(),

@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import type { ReleaseSession } from '../../types/release'
 import ReleaseStepDetails from './ReleaseStepDetails.vue'
+import detailsSource from './ReleaseStepDetails.vue?raw'
 
 const session: ReleaseSession = {
   id: 'session-1',
@@ -19,29 +20,17 @@ const session: ReleaseSession = {
 }
 
 describe('ReleaseStepDetails', () => {
-  it('shows session evidence and only the safe log and failure events', () => {
+  it('shows session facts without owning the diagnostic log view', () => {
     const wrapper = mount(ReleaseStepDetails, {
       props: {
         session,
-        events: [
-          { kind: 'sessionUpdated', session },
-          { kind: 'stepLog', stepId: 'fullChecks', message: '检查输出已脱敏' },
-          {
-            kind: 'stepFailed',
-            stepId: 'commitPush',
-            code: 'RELEASE_PUSH_FAILED',
-            message: '推送失败，可从已提交检查点继续。',
-          },
-        ],
       },
     })
 
     expect(wrapper.text()).toContain('session-1')
     expect(wrapper.text()).toContain('aaaaaaaaaaaa')
-    expect(wrapper.text()).toContain('[fullChecks] 检查输出已脱敏')
-    expect(wrapper.text()).toContain(
-      '[commitPush] RELEASE_PUSH_FAILED：推送失败，可从已提交检查点继续。',
-    )
-    expect(wrapper.get('[aria-label="脱敏发布日志"]').attributes('tabindex')).toBe('0')
+    expect(wrapper.find('[aria-label="脱敏发布日志"]').exists()).toBe(false)
+    expect(detailsSource).not.toContain('stepLog')
+    expect(detailsSource).not.toContain('log-view')
   })
 })
