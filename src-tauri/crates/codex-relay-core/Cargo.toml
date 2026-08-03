@@ -1,6 +1,6 @@
 [package]
 name = "codex-relay-core"
-version = "0.4.0"
+version = "0.5.0"
 description = "Platform-independent Codex Relay provider and configuration logic"
 authors = ["Codex Relay contributors"]
 edition = "2024"
