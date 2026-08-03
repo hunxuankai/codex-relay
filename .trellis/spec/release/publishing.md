@@ -216,6 +216,116 @@ const drive = path.match(/^\\\\\?\\([A-Za-z]:\\.*)$/)
 return drive?.[1] ?? path
 ```
 
+### 0.2.1 已预升版本的失败重试契约
+
+#### 1. 范围/触发条件
+
+修改发布控制台的 Latest 版本门禁、发布说明提交区间、六文件候选计划、候选提交或 Push 时遵循本节。
+典型场景是候选版本提交已进入远端 main，但 GitHub Run 在 Draft 生成前失败；修复提交完成后，仓库
+版本已经等于目标版本，而正式 Latest 仍是上一版本。
+
+#### 2. 签名
+
+现有 command 与 DTO 不增加前端版本参数。权威转换和候选边界固定为：
+
+```rust
+release_baseline_version(
+    latest_release_tag: Option<&str>,
+    repository_version: &str,
+) -> Result<String, ReleaseApplicationError>
+
+ReleaseCandidateTransaction::plan_for_published_version(
+    repository_root: &Path,
+    published_version: &str,
+    target_version: &str,
+    release_notes: &str,
+) -> Result<ReleaseCandidatePlan, ReleaseCandidateError>
+
+ReleaseCandidatePlan::has_changes(&self) -> bool
+
+GitReleaseService::commit_candidate(
+    backend: &GitBackend,
+    repository_path: &Path,
+    plan: &ReleaseCandidatePlan,
+    expected_remote_sha: &str,
+) -> Result<String, GitReleaseError>
+```
+
+#### 3. 契约
+
+- 有正式 Release 时，`latestReleaseTag` 必须是 `v<SemVer>`；去掉固定小写 `v` 后的版本同时用于
+  `ReleasePlanSummary.previousVersion`、发布说明中的更新起点和 `v<版本>..HEAD` 提交区间。Vue 只
+  展示 DTO，不解析 tag 或重建版本门禁。
+- 没有正式 Release 时，继续以 `package.json.version` 作为首次发布基准。
+- 目标版本必须严格高于正式公开版本；仓库版本可以低于或等于目标版本，但不得高于目标版本。
+- 候选计划始终读取并记录固定六文件的原字节、目标字节和指纹。仓库版本已经等于目标时，版本文件
+  允许 `before == after`，不得为绕过门禁回退仓库版本或虚增目标版本。
+- Git 允许变化集合只能是计划中 `before != after` 的文件。提交前必须确认当前字节全部等于计划目标、
+  工作区变化精确等于允许集合、暂存区和未跟踪集合为空，并重新确认本地 HEAD 与远端 main 都等于
+  计划时的同步 SHA。
+- 允许集合非空时只暂存这些文件并创建候选提交；集合为空时不运行 `git add` / `git commit`，复用
+  已同步 HEAD 作为候选 SHA。两条路径共用 `Committed` 检查点、固定 main RefSpec、远端 SHA 验证和
+  六文件事务 finalize。
+- Push 前远端只允许位于候选 SHA（已同步重试或先前 Push 已实际成功）或候选父提交（新候选待 Push）；
+  其他 SHA 返回远端移动错误。日志分别陈述“已创建候选提交”或“复用已同步 HEAD”，完成时统一陈述
+  候选 SHA 与远端 main 已验证一致。
+
+#### 4. 验证与错误矩阵
+
+| 条件 | 必需结果 |
+|---|---|
+| Latest=`v0.4.0`、仓库=`0.5.0`、目标=`0.5.0` | 计划成功，`previousVersion=0.4.0`，允许零变化 |
+| 没有正式 Release、仓库=`0.1.0`、目标=`0.2.0` | 继续使用仓库版本作为首次发布基准 |
+| Latest 缺少固定 `v` 或不是 SemVer | `RELEASE_LATEST_VERSION_INVALID`，不创建计划 |
+| 目标等于或低于正式公开版本 | `RELEASE_VERSION_NOT_HIGHER`，优先于仓库方向错误 |
+| 仓库版本高于目标版本 | `RELEASE_REPOSITORY_VERSION_AHEAD`，不写候选文件 |
+| 只有发布说明变化 | 只暂存并提交 `.github/release-notes.md`，六文件事务仍完整 |
+| 六文件均无变化且两端 SHA 未移动 | 不创建空提交，复用当前 HEAD 并验证远端 |
+| 计划后本地 HEAD、远端或非计划工作区状态变化 | `GIT_HEAD_MOVED` / `GIT_REMOTE_MOVED` / `GIT_PLANNED_FILES_MISMATCH`，不暂存 |
+
+#### 5. 良好/基线/错误用例
+
+- 良好：`v0.5.0` 候选 Run 失败后，在同一版本上提交测试修复；控制台以线上 `v0.4.0` 生成说明，
+  六文件无变化时直接使用修复后的已同步 HEAD。
+- 良好：版本文件已是目标，但新说明包含修复提交；控制台只提交说明文件，再按精确 SHA Push。
+- 基线：仓库和 Latest 都是 `0.4.0`，目标 `0.5.0`；继续生成并提交全部六个变化文件。
+- 错误：把 `package.json.version` 同时当成公开版本，导致线上仍是 `v0.4.0` 时拒绝目标 `0.5.0`。
+- 错误：为消除空提交失败而使用 `--allow-empty`，或把全部六文件当成必须有 Git diff 的集合。
+
+#### 6. 必需测试
+
+- `release_application.rs::release_baseline_uses_latest_semver_and_preserves_first_release_fallback`：断言
+  Latest 规范化、首次发布回退和非法 tag 稳定错误。
+- `tests/release_candidate.rs`：断言已预升计划仍含六文件并可应用、公开门禁错误优先级，以及仓库
+  高于目标时原字节不变。
+- `tests/git_release.rs`：断言部分变化只提交真实文件、零变化不增加 commit、HEAD 移动在暂存前拒绝，
+  且远端最终精确等于候选 SHA。
+- `tests/release_orchestrator.rs`：断言零变化日志包含“复用已同步 HEAD”，不包含“候选提交已创建”，
+  并保留远端一致性完成证据。
+
+#### 7. 错误与正确做法
+
+错误：用仓库版本代替公开基准，并要求六文件全部出现在 Git diff 中。
+
+```rust
+let previous = read_package_version(repository)?;
+if target <= previous { return Err(TargetVersionNotHigher); }
+let expected = plan.files.iter().map(|file| &file.relative_path).collect();
+```
+
+正确：公开版本只在 Rust 预检边界规范化，候选事务仍拥有六文件，Git 只处理真实差异。
+
+```rust
+let published = release_baseline_version(latest_tag, &repository_version)?;
+let plan = ReleaseCandidateTransaction::plan_for_published_version(
+    repository,
+    &published,
+    target,
+    notes,
+)?;
+let changed = plan.files.iter().filter(|file| file.before != file.after);
+```
+
 ### 0.3 发布控制台代理、仓库同步与自动恢复契约
 
 #### 1. 范围/触发条件

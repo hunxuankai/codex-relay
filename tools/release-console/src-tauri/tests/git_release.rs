@@ -158,6 +158,32 @@ fn write_release_fixture(repository: &Path) {
     fs::write(repository.join(".github/release-notes.md"), "旧发布说明\n").unwrap();
 }
 
+fn push_initial_release_candidate(
+    backend: &GitBackend,
+    repository: &Path,
+    remote: &Path,
+) -> String {
+    let inspection = tauri::async_runtime::block_on(
+        RepositoryInspectionService::new("main", remote.to_path_buf()).inspect(backend, repository),
+    )
+    .unwrap();
+    let plan = ReleaseCandidateTransaction::plan(repository, "0.5.0", VALID_RELEASE_NOTES).unwrap();
+    let git_dir = repository.join(".git");
+    ReleaseCandidateTransaction::apply(repository, &git_dir, &plan).unwrap();
+    let service = GitReleaseService::new("main");
+    let candidate_sha = tauri::async_runtime::block_on(service.commit_candidate(
+        backend,
+        repository,
+        &plan,
+        &inspection.remote_main_sha,
+    ))
+    .unwrap();
+    tauri::async_runtime::block_on(service.push_candidate(backend, repository, &candidate_sha))
+        .unwrap();
+    ReleaseCandidateTransaction::finalize_active(repository, &git_dir).unwrap();
+    candidate_sha
+}
+
 #[test]
 fn inspection_accepts_clean_synced_repository_even_when_local_branch_is_master() {
     let workspace = TempGitWorkspace::new();
@@ -425,6 +451,135 @@ fn exact_release_files_are_committed_and_pushed_to_remote_main() {
         .collect::<Vec<_>>();
     expected.sort();
     assert_eq!(changed, expected);
+}
+
+#[test]
+fn prebumped_candidate_commits_only_planned_files_that_changed() {
+    let workspace = TempGitWorkspace::new();
+    let git = git_executable();
+    let (repository, remote) = create_synced_repository(&workspace, &git);
+    let backend = GitBackend::new(git.clone(), filter_release_environment(std::env::vars_os()));
+    let inspection_service = RepositoryInspectionService::new("main", remote.clone());
+    let service = GitReleaseService::new("main");
+    push_initial_release_candidate(&backend, &repository, &remote);
+
+    fs::write(
+        repository.join(".github/release-notes.md"),
+        VALID_RELEASE_NOTES.replace("修复发布流程", "保留旧候选说明"),
+    )
+    .unwrap();
+    run_git(
+        &git,
+        &repository,
+        &["add", "--", ".github/release-notes.md"],
+    );
+    run_git(
+        &git,
+        &repository,
+        &["commit", "-m", "fix(release): 修复失败候选"],
+    );
+    run_git(&git, &repository, &["push", "origin", "HEAD:main"]);
+
+    let retry_inspection =
+        tauri::async_runtime::block_on(inspection_service.inspect(&backend, &repository)).unwrap();
+    let retry = ReleaseCandidateTransaction::plan_for_published_version(
+        &repository,
+        "0.4.0",
+        "0.5.0",
+        VALID_RELEASE_NOTES,
+    )
+    .unwrap();
+    assert_eq!(
+        retry
+            .files
+            .iter()
+            .filter(|file| file.before != file.after)
+            .map(|file| file.relative_path.as_str())
+            .collect::<Vec<_>>(),
+        vec![".github/release-notes.md"]
+    );
+    ReleaseCandidateTransaction::apply(&repository, &repository.join(".git"), &retry).unwrap();
+
+    let retry_sha = tauri::async_runtime::block_on(service.commit_candidate(
+        &backend,
+        &repository,
+        &retry,
+        &retry_inspection.remote_main_sha,
+    ))
+    .unwrap();
+
+    assert_ne!(retry_sha, retry_inspection.head_sha);
+    assert_eq!(
+        run_git(
+            &git,
+            &repository,
+            &[
+                "diff-tree",
+                "--no-commit-id",
+                "--name-only",
+                "-r",
+                &retry_sha,
+            ],
+        ),
+        ".github/release-notes.md"
+    );
+}
+
+#[test]
+fn prebumped_candidate_without_file_changes_reuses_synced_head() {
+    let workspace = TempGitWorkspace::new();
+    let git = git_executable();
+    let (repository, remote) = create_synced_repository(&workspace, &git);
+    let backend = GitBackend::new(git.clone(), filter_release_environment(std::env::vars_os()));
+    let inspection_service = RepositoryInspectionService::new("main", remote.clone());
+    let service = GitReleaseService::new("main");
+    push_initial_release_candidate(&backend, &repository, &remote);
+
+    fs::write(repository.join("README.md"), "initial\nrelease fix\n").unwrap();
+    run_git(&git, &repository, &["add", "--", "README.md"]);
+    run_git(
+        &git,
+        &repository,
+        &["commit", "-m", "fix(release): 修复失败候选"],
+    );
+    run_git(&git, &repository, &["push", "origin", "HEAD:main"]);
+    let fixed_head = run_git(&git, &repository, &["rev-parse", "HEAD"]);
+
+    let retry_inspection =
+        tauri::async_runtime::block_on(inspection_service.inspect(&backend, &repository)).unwrap();
+    let retry = ReleaseCandidateTransaction::plan_for_published_version(
+        &repository,
+        "0.4.0",
+        "0.5.0",
+        VALID_RELEASE_NOTES,
+    )
+    .unwrap();
+    assert!(retry.files.iter().all(|file| file.before == file.after));
+    ReleaseCandidateTransaction::apply(&repository, &repository.join(".git"), &retry).unwrap();
+    let commit_count_before = run_git(&git, &repository, &["rev-list", "--count", "HEAD"]);
+
+    let candidate_sha = tauri::async_runtime::block_on(service.commit_candidate(
+        &backend,
+        &repository,
+        &retry,
+        &retry_inspection.remote_main_sha,
+    ))
+    .unwrap();
+
+    assert_eq!(candidate_sha, fixed_head);
+    assert_eq!(
+        run_git(&git, &repository, &["rev-list", "--count", "HEAD"]),
+        commit_count_before
+    );
+    let outcome = tauri::async_runtime::block_on(service.push_candidate(
+        &backend,
+        &repository,
+        &candidate_sha,
+    ))
+    .unwrap();
+    assert_eq!(outcome.candidate_sha, fixed_head);
+    assert_eq!(outcome.remote_main_sha, fixed_head);
+    ReleaseCandidateTransaction::finalize_active(&repository, &repository.join(".git")).unwrap();
 }
 
 #[test]
@@ -730,6 +885,43 @@ fn commit_refuses_planned_file_content_drift_before_staging() {
     assert_eq!(
         run_git(&git, &repository, &["rev-parse", "HEAD"]),
         inspection.head_sha
+    );
+}
+
+#[test]
+fn commit_refuses_head_movement_after_candidate_plan() {
+    let workspace = TempGitWorkspace::new();
+    let git = git_executable();
+    let (repository, remote) = create_synced_repository(&workspace, &git);
+    let backend = GitBackend::new(git.clone(), filter_release_environment(std::env::vars_os()));
+    let inspection_service = RepositoryInspectionService::new("main", remote.clone());
+    let inspection =
+        tauri::async_runtime::block_on(inspection_service.inspect(&backend, &repository)).unwrap();
+    let plan =
+        ReleaseCandidateTransaction::plan(&repository, "0.5.0", VALID_RELEASE_NOTES).unwrap();
+
+    fs::write(repository.join("README.md"), "initial\nexternal commit\n").unwrap();
+    run_git(&git, &repository, &["add", "--", "README.md"]);
+    run_git(
+        &git,
+        &repository,
+        &["commit", "-m", "fix: move head after plan"],
+    );
+    ReleaseCandidateTransaction::apply(&repository, &repository.join(".git"), &plan).unwrap();
+
+    let error = tauri::async_runtime::block_on(GitReleaseService::new("main").commit_candidate(
+        &backend,
+        &repository,
+        &plan,
+        &inspection.remote_main_sha,
+    ))
+    .unwrap_err();
+
+    assert!(matches!(error, GitReleaseError::HeadMoved));
+    assert!(run_git(&git, &repository, &["diff", "--cached", "--name-only"]).is_empty());
+    assert_eq!(
+        run_git(&git, &remote, &["rev-parse", "refs/heads/main"]),
+        inspection.remote_main_sha
     );
 }
 

@@ -220,6 +220,7 @@ impl GitReleaseService {
         let expected_files = plan
             .files
             .iter()
+            .filter(|file| file.before != file.after)
             .map(|file| file.relative_path.clone())
             .collect::<BTreeSet<_>>();
         let changed_files = git_name_set(
@@ -253,9 +254,21 @@ impl GitReleaseService {
             return Err(GitReleaseError::PlannedFilesMismatch);
         }
 
+        let current_head = backend
+            .run(repository_path, &["rev-parse", "HEAD"])
+            .await?
+            .stdout
+            .trim()
+            .to_string();
+        if current_head != expected_remote_sha {
+            return Err(GitReleaseError::HeadMoved);
+        }
         if remote_head(backend, repository_path, &self.default_branch).await? != expected_remote_sha
         {
             return Err(GitReleaseError::RemoteMoved);
+        }
+        if expected_files.is_empty() {
+            return Ok(current_head);
         }
 
         let mut add_arguments = vec!["add".to_string(), "--".to_string()];
@@ -367,6 +380,14 @@ impl GitReleaseService {
             return Err(GitReleaseError::CommitFailed);
         }
 
+        let remote_before = remote_head(backend, repository_path, &self.default_branch).await?;
+        if remote_before == candidate_sha {
+            return Ok(GitPushOutcome {
+                candidate_sha: candidate_sha.to_string(),
+                remote_main_sha: remote_before,
+            });
+        }
+
         let candidate_parent_ref = format!("{candidate_sha}^");
         let candidate_parent = backend
             .run(repository_path, &["rev-parse", &candidate_parent_ref])
@@ -375,7 +396,7 @@ impl GitReleaseService {
             .trim()
             .to_string();
 
-        if remote_head(backend, repository_path, &self.default_branch).await? != candidate_parent {
+        if remote_before != candidate_parent {
             return Err(GitReleaseError::RemoteMoved);
         }
         let push_ref = format!("HEAD:refs/heads/{}", self.default_branch);

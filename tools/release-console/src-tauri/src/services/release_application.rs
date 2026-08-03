@@ -27,6 +27,7 @@ use crate::services::release_orchestrator::{
 use crate::services::release_state::{ReleaseStateError, ReleaseStateStore, RepositorySessionLock};
 use chrono::Utc;
 use codex_relay_core::infrastructure::atomic_file::atomic_write;
+use semver::Version;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -477,7 +478,11 @@ impl SystemReleaseApplication {
         let repository_path = repository_path
             .canonicalize()
             .map_err(|_| app_error("GIT_REPOSITORY_INVALID", "无法读取 Git 仓库。"))?;
-        let previous_version = read_package_version(&repository_path)?;
+        let repository_version = read_package_version(&repository_path)?;
+        let previous_version = release_baseline_version(
+            inspection.external.latest_release_tag.as_deref(),
+            &repository_version,
+        )?;
         let notes = match notes {
             Some(notes) => notes,
             None => {
@@ -492,8 +497,13 @@ impl SystemReleaseApplication {
                     .body
             }
         };
-        let plan = ReleaseCandidateTransaction::plan(&repository_path, target_version, &notes)
-            .map_err(|error| app_error(error.code(), error.to_string()))?;
+        let plan = ReleaseCandidateTransaction::plan_for_published_version(
+            &repository_path,
+            &previous_version,
+            target_version,
+            &notes,
+        )
+        .map_err(|error| app_error(error.code(), error.to_string()))?;
         let id = format!(
             "plan-{:016x}",
             self.inner.next_id.fetch_add(1, Ordering::Relaxed)
@@ -1322,6 +1332,21 @@ fn read_package_version(repository_path: &Path) -> Result<String, ReleaseApplica
         .and_then(Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| app_error("RELEASE_VERSION_INVALID", "当前版本号无效。"))
+}
+
+fn release_baseline_version(
+    latest_release_tag: Option<&str>,
+    repository_version: &str,
+) -> Result<String, ReleaseApplicationError> {
+    let Some(tag) = latest_release_tag else {
+        return Ok(repository_version.to_string());
+    };
+    let version = tag
+        .strip_prefix('v')
+        .filter(|version| !version.is_empty())
+        .and_then(|version| Version::parse(version).ok())
+        .ok_or_else(|| app_error("RELEASE_LATEST_VERSION_INVALID", "线上 Latest 版本无效。"))?;
+    Ok(version.to_string())
 }
 
 fn git_error(error: GitReleaseError) -> ReleaseApplicationError {
@@ -2261,6 +2286,21 @@ mod tests {
         );
         assert_eq!(latest_published_release_tag(&releases[..2]), None);
         assert_eq!(latest_published_release_tag(&[]), None);
+    }
+
+    #[test]
+    fn release_baseline_uses_latest_semver_and_preserves_first_release_fallback() {
+        assert_eq!(
+            release_baseline_version(Some("v0.4.0"), "0.5.0").unwrap(),
+            "0.4.0"
+        );
+        assert_eq!(release_baseline_version(None, "0.1.0").unwrap(), "0.1.0");
+
+        for invalid in ["0.4.0", "V0.4.0", "vnot-semver", "v"] {
+            let error = release_baseline_version(Some(invalid), "0.5.0").unwrap_err();
+            assert_eq!(error.code, "RELEASE_LATEST_VERSION_INVALID");
+            assert_eq!(error.message, "线上 Latest 版本无效。");
+        }
     }
 
     #[test]

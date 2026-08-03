@@ -205,6 +205,99 @@ fn plan_updates_six_release_files_without_writing_and_preserves_unknown_content(
 }
 
 #[test]
+fn published_baseline_allows_plan_when_repository_already_matches_target() {
+    let repository = create_repository_fixture();
+    let git_dir = repository.path().join(".git");
+    let initial =
+        ReleaseCandidateTransaction::plan(repository.path(), "0.5.0", VALID_RELEASE_NOTES).unwrap();
+    ReleaseCandidateTransaction::apply(repository.path(), &git_dir, &initial).unwrap();
+    ReleaseCandidateTransaction::finalize_active(repository.path(), &git_dir).unwrap();
+
+    let retry = ReleaseCandidateTransaction::plan_for_published_version(
+        repository.path(),
+        "0.4.0",
+        "0.5.0",
+        VALID_RELEASE_NOTES,
+    )
+    .unwrap();
+
+    assert_eq!(retry.previous_version, "0.4.0");
+    assert_eq!(retry.target_version, "0.5.0");
+    assert_eq!(retry.files.len(), 6);
+    assert!(retry.files.iter().all(|file| file.before == file.after));
+
+    ReleaseCandidateTransaction::apply(repository.path(), &git_dir, &retry).unwrap();
+    let marker: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            git_dir
+                .join("codex-relay-release-console")
+                .join("candidate-transaction.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(marker["previousVersion"], "0.4.0");
+    assert_eq!(marker["targetVersion"], "0.5.0");
+    assert_eq!(marker["files"].as_array().unwrap().len(), 6);
+}
+
+#[test]
+fn published_plan_rejects_repository_version_ahead_of_target_without_writing() {
+    let repository = create_repository_fixture();
+    repository.write(
+        "package.json",
+        r#"{
+  "name": "codex-relay",
+  "version": "0.6.0",
+  "private": true,
+  "releaseConsoleUnknown": { "keep": true }
+}
+"#,
+    );
+    let originals = [
+        "package.json",
+        "package-lock.json",
+        "src-tauri/Cargo.toml",
+        "src-tauri/crates/codex-relay-core/Cargo.toml",
+        "src-tauri/Cargo.lock",
+        ".github/release-notes.md",
+    ]
+    .map(|path| (path, repository.read(path)));
+
+    let error = ReleaseCandidateTransaction::plan_for_published_version(
+        repository.path(),
+        "0.4.0",
+        "0.5.0",
+        VALID_RELEASE_NOTES,
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code(), "RELEASE_REPOSITORY_VERSION_AHEAD");
+    for (path, before) in originals {
+        assert_eq!(repository.read(path), before);
+    }
+}
+
+#[test]
+fn published_version_gate_precedes_repository_direction_error() {
+    let repository = create_repository_fixture();
+    repository.write(
+        "package.json",
+        "{\n  \"name\": \"codex-relay\",\n  \"version\": \"0.6.0\"\n}\n",
+    );
+
+    let error = ReleaseCandidateTransaction::plan_for_published_version(
+        repository.path(),
+        "0.5.0",
+        "0.5.0",
+        VALID_RELEASE_NOTES,
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code(), "RELEASE_VERSION_NOT_HIGHER");
+}
+
+#[test]
 fn apply_rejects_fingerprint_conflict_before_writing_or_creating_marker() {
     let repository = create_repository_fixture();
     let notes = VALID_RELEASE_NOTES;

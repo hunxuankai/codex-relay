@@ -2,6 +2,7 @@ use super::release_notes::{ReleaseNotesError, ReleaseNotesService};
 use codex_relay_core::error::AppError;
 use codex_relay_core::infrastructure::atomic_file::atomic_write;
 use codex_relay_core::infrastructure::file_fingerprint::FileFingerprint;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
@@ -77,6 +78,10 @@ impl ReleaseCandidatePlan {
             .iter()
             .find(|file| file.relative_path == relative_path)
     }
+
+    pub fn has_changes(&self) -> bool {
+        self.files.iter().any(|file| file.before != file.after)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -93,6 +98,8 @@ pub enum ReleaseCandidateError {
     PackageIdentityMismatch,
     #[error("Cargo.lock 中的本地包数量不正确")]
     CargoLockPackageMismatch,
+    #[error("仓库版本高于目标版本")]
+    RepositoryVersionAhead,
     #[error("发布候选文件已被外部修改")]
     SourceConflict,
     #[error("已有未完成的发布候选事务")]
@@ -122,6 +129,7 @@ impl ReleaseCandidateError {
             Self::MissingRequiredField => "RELEASE_FILE_REQUIRED_FIELD_MISSING",
             Self::PackageIdentityMismatch => "RELEASE_PACKAGE_IDENTITY_MISMATCH",
             Self::CargoLockPackageMismatch => "RELEASE_CARGO_LOCK_PACKAGE_MISMATCH",
+            Self::RepositoryVersionAhead => "RELEASE_REPOSITORY_VERSION_AHEAD",
             Self::SourceConflict => "RELEASE_SOURCE_CONFLICT",
             Self::ActiveTransactionExists => "RELEASE_TRANSACTION_ALREADY_ACTIVE",
             Self::StateWriteFailed => "RELEASE_STATE_WRITE_FAILED",
@@ -167,35 +175,20 @@ impl ReleaseCandidateTransaction {
             .collect::<Result<Vec<_>, _>>()?;
 
         let previous_version = package_version(&originals[0].1)?;
-        ReleaseNotesService::validate(&previous_version, target_version, release_notes)?;
+        build_plan(originals, &previous_version, target_version, release_notes)
+    }
 
-        let after = [
-            update_package_json(&originals[0].1, target_version)?,
-            update_package_lock(&originals[1].1, target_version)?,
-            update_manifest(&originals[2].1, "codex-relay", target_version)?,
-            update_manifest(&originals[3].1, "codex-relay-core", target_version)?,
-            update_cargo_lock(&originals[4].1, target_version)?,
-            release_notes.as_bytes().to_vec(),
-        ];
-
-        let files = originals
-            .into_iter()
-            .zip(after)
-            .map(
-                |((relative_path, before, expected_fingerprint), after)| ReleaseFilePlan {
-                    relative_path: relative_path.to_string(),
-                    before,
-                    after,
-                    expected_fingerprint,
-                },
-            )
-            .collect();
-
-        Ok(ReleaseCandidatePlan {
-            previous_version,
-            target_version: target_version.to_string(),
-            files,
-        })
+    pub fn plan_for_published_version(
+        repository_root: &Path,
+        published_version: &str,
+        target_version: &str,
+        release_notes: &str,
+    ) -> Result<ReleaseCandidatePlan, ReleaseCandidateError> {
+        let originals = RELEASE_FILE_PATHS
+            .iter()
+            .map(|relative_path| read_release_file(repository_root, relative_path))
+            .collect::<Result<Vec<_>, _>>()?;
+        build_plan(originals, published_version, target_version, release_notes)
     }
 
     pub fn apply(
@@ -329,6 +322,53 @@ impl ReleaseCandidateTransaction {
         }
         cleanup_recovery_state(git_dir).map_err(|_| ReleaseCandidateError::StateWriteFailed)
     }
+}
+
+fn build_plan(
+    originals: Vec<(&str, Vec<u8>, FileFingerprint)>,
+    previous_version: &str,
+    target_version: &str,
+    release_notes: &str,
+) -> Result<ReleaseCandidatePlan, ReleaseCandidateError> {
+    let previous =
+        Version::parse(previous_version).map_err(|_| ReleaseNotesError::InvalidVersion)?;
+    let target = Version::parse(target_version).map_err(|_| ReleaseNotesError::InvalidVersion)?;
+    if target <= previous {
+        return Err(ReleaseNotesError::TargetVersionNotHigher.into());
+    }
+    let repository_version = package_version(&originals[0].1)?;
+    let repository_version =
+        Version::parse(&repository_version).map_err(|_| ReleaseNotesError::InvalidVersion)?;
+    if repository_version > target {
+        return Err(ReleaseCandidateError::RepositoryVersionAhead);
+    }
+    ReleaseNotesService::validate(previous_version, target_version, release_notes)?;
+    let after = [
+        update_package_json(&originals[0].1, target_version)?,
+        update_package_lock(&originals[1].1, target_version)?,
+        update_manifest(&originals[2].1, "codex-relay", target_version)?,
+        update_manifest(&originals[3].1, "codex-relay-core", target_version)?,
+        update_cargo_lock(&originals[4].1, target_version)?,
+        release_notes.as_bytes().to_vec(),
+    ];
+    let files = originals
+        .into_iter()
+        .zip(after)
+        .map(
+            |((relative_path, before, expected_fingerprint), after)| ReleaseFilePlan {
+                relative_path: relative_path.to_string(),
+                before,
+                after,
+                expected_fingerprint,
+            },
+        )
+        .collect();
+
+    Ok(ReleaseCandidatePlan {
+        previous_version: previous_version.to_string(),
+        target_version: target_version.to_string(),
+        files,
+    })
 }
 
 fn ensure_source_unchanged(

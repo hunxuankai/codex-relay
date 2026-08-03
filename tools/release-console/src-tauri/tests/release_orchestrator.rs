@@ -784,6 +784,66 @@ fn successful_local_pipeline_logs_each_fixed_step_through_commit_and_push() {
 }
 
 #[test]
+fn unchanged_candidate_logs_synced_head_reuse_instead_of_commit_creation() {
+    let repository = TempRepository::new();
+    let git_dir = repository.root.join(".git");
+    let initial =
+        ReleaseCandidateTransaction::plan(&repository.root, "0.5.0", VALID_RELEASE_NOTES).unwrap();
+    ReleaseCandidateTransaction::apply(&repository.root, &git_dir, &initial).unwrap();
+    ReleaseCandidateTransaction::finalize_active(&repository.root, &git_dir).unwrap();
+    let retry = ReleaseCandidateTransaction::plan_for_published_version(
+        &repository.root,
+        "0.4.0",
+        "0.5.0",
+        VALID_RELEASE_NOTES,
+    )
+    .unwrap();
+    assert!(retry.files.iter().all(|file| file.before == file.after));
+
+    let state_store = ReleaseStateStore::new(git_dir.clone());
+    let mut session = ReleaseSession::new(
+        "session-test-reused-head-logs",
+        repository.root.to_string_lossy(),
+        "0.5.0",
+    );
+    let log_store = ReleaseLogStore::new(git_dir.clone());
+    log_store.initialize(&session.id).unwrap();
+    let recorder = Arc::new(ReleaseLogRecorder::new(
+        session.id.clone(),
+        log_store,
+        0,
+        None,
+    ));
+    let orchestrator =
+        ReleaseOrchestrator::new().with_progress(recorder.clone() as Arc<dyn ReleaseProgressSink>);
+
+    tauri::async_runtime::block_on(orchestrator.run_to_pushed(
+        &mut session,
+        &state_store,
+        &repository.root,
+        &git_dir,
+        &retry,
+        &SuccessfulVerificationBackend,
+        &SuccessfulPushBackend,
+    ))
+    .unwrap();
+
+    let entries = ReleaseLogStore::new(git_dir)
+        .load_page(&session.id, None)
+        .unwrap()
+        .entries;
+    assert!(entries.iter().any(|entry| {
+        entry.step_id == "commitPush" && entry.message.contains("复用已同步 HEAD")
+    }));
+    assert!(!entries.iter().any(|entry| {
+        entry.step_id == "commitPush" && entry.message.contains("候选提交已创建")
+    }));
+    assert!(entries.iter().any(|entry| {
+        entry.step_id == "commitPush" && entry.message.contains("与远端 main 已验证一致")
+    }));
+}
+
+#[test]
 fn push_failure_persists_the_committed_checkpoint_for_retry() {
     let repository = TempRepository::new();
     let git_dir = repository.root.join(".git");

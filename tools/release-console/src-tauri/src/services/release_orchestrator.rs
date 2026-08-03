@@ -518,14 +518,28 @@ impl ReleaseOrchestrator {
             "本地发布源审计结果已确认。",
         );
         let commit_push_started = Instant::now();
-        self.progress
-            .started("commitPush", "开始创建候选提交并推送固定 main 引用。");
+        let has_candidate_changes = plan.has_changes();
+        self.progress.started(
+            "commitPush",
+            if has_candidate_changes {
+                "开始创建候选提交并确认固定 main 引用。"
+            } else {
+                "候选文件已是目标状态，开始复用已同步 HEAD 并确认固定 main 引用。"
+            },
+        );
         let candidate_sha = match push_backend.commit(repository_path, plan).await {
             Ok(candidate_sha) => {
                 self.progress.log(
                     "commitPush",
                     crate::models::ReleaseLogLevel::Info,
-                    &format!("候选提交已创建，SHA {}。", short_sha(&candidate_sha)),
+                    &if has_candidate_changes {
+                        format!("候选提交已创建，SHA {}。", short_sha(&candidate_sha))
+                    } else {
+                        format!(
+                            "候选文件无变化，复用已同步 HEAD，SHA {}。",
+                            short_sha(&candidate_sha)
+                        )
+                    },
                 );
                 candidate_sha
             }
@@ -574,7 +588,7 @@ impl ReleaseOrchestrator {
             .map_err(|_| ReleaseOrchestratorError::SessionLockFailed)?;
         let started = Instant::now();
         self.progress
-            .started("commitPush", "继续推送已创建的候选提交。");
+            .started("commitPush", "继续确认已记录候选提交与远端 main。");
         self.push_committed_locked(
             session,
             state_store,
@@ -629,14 +643,17 @@ impl ReleaseOrchestrator {
             self.progress.log(
                 "commitPush",
                 crate::models::ReleaseLogLevel::Error,
-                "远端推送已验证，但本地回滚标记清理失败。",
+                "远端 main 已验证，但本地回滚标记清理失败。",
             );
             return Err(ReleaseOrchestratorError::FinalizeFailed);
         }
         self.progress.completed(
             "commitPush",
             elapsed_millis(started),
-            &format!("候选提交已推送并验证，SHA {}。", short_sha(&candidate_sha)),
+            &format!(
+                "候选提交与远端 main 已验证一致，SHA {}。",
+                short_sha(&candidate_sha)
+            ),
         );
         Ok(outcome)
     }
