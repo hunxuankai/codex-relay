@@ -22,6 +22,12 @@
 - 修复提交 `86c0d92` 的新 Run `30873762688` 已证明 core 249 项全部通过、原流式测试通过；
   随后唯一失败转移到 `tools/release-console/src-tauri/tests/local_verification.rs:357`，同样是
   延迟输出测试的 10 秒固定完成等待。
+- 修复提交 `ebf0d69` 的 Run `30880121507` 已完整成功，Step #7 与 Step #8 均为 success，并生成
+  Draft Release `364638762`；目标提交、说明和三个 updater 资产的实际大小与 SHA-256 已核对。
+- GitHub 在 Draft 阶段尚未创建 `refs/tags/v0.5.0`，真实 tag API 返回 404；现有控制台却在 Draft
+  审计中无条件查询 tag，因此即使 workflow 成功仍会返回 `GITHUB_BACKEND_FAILED`。
+- Windows Actions/GitHub 把 LF 且带末尾换行的候选说明保存为 CRLF 且无末尾换行；正文语义不变，
+  但现有原始字符串比较会返回 `GITHUB_DRAFT_AUDIT_FAILED`。
 - 上一轮 Run `30833079285` 的 Windows 8.3 路径缺陷已经由 `cfe932c` 修复；该用例在本轮
   已通过，本次是独立的后续失败。
 
@@ -35,6 +41,10 @@
   `LOCAL_COMMAND_TIMEOUT`（2 小时）命令。
 - 测试必须继续证明首段 stdout 在进程完成前可见、最终 stdout 为完整的 `firstsecond`、
   stderr 为空且退出码为 0。
+- Draft 审计必须用已严格比对的 `target_commitish` 绑定候选 SHA，不得在正式公开前要求 Git tag ref；
+  公开后的在线复核仍必须验证 tag ref 类型和 SHA。
+- Release 正文与 `latest.json.notes` 只允许 CRLF/LF 和 workflow 末尾 `TrimEnd()` 差异；任何正文、
+  段落、版本或内部空白漂移仍必须拒绝。
 - 所有测试文件和协调标记只使用系统临时目录，不读取、写入或删除真实 `.codex` 与
   `%LOCALAPPDATA%\CodexRelay`，不记录认证信息或密钥。
 - 修复后必须先通过专项重复运行和成对安全 Relay 覆盖下的本地完整 `npm run check`，再提交、
@@ -50,13 +60,16 @@
 - [x] AC8：release-console `local_verification` 流式日志测试在条件协调和自截止下专项连续 3 次通过，
   并继续断言首段日志先于完成、完整尾部和退出码。
 - [ ] AC4：本次相关改动精确提交并普通 push 后，远端跟踪分支与本地 `HEAD` 一致。
-- [ ] AC5：新候选 SHA 的 GitHub 发布 Run 完整成功，Step #7 与 Step #8 均为 success。
-- [ ] AC6：生成的 `v0.5.0` Release 保持 Draft，目标提交和三类 updater 资产审计通过；未执行公开、
+- [ ] AC5：最终候选 SHA 的 GitHub 发布 Run 完整成功，Step #7 与 Step #8 均为 success。
+- [ ] AC6：最终生成的 `v0.5.0` Release 保持 Draft，目标提交和三类 updater 资产审计通过；未执行公开、
   安装、升级或卸载时不声称这些行为成功。
 - [x] AC7：差异与秘密扫描确认没有真实密钥、认证文件或真实 Codex/Relay 用户数据进入改动和证据。
+- [x] AC9：Draft tag 404 与 GitHub 行尾规范化均有先红后绿回归；修复后的生产 `SystemGhBackend`
+  已对真实 Draft 完成 Release ID、候选 SHA、三个资产和 manifest/签名关联审计。
 
 ## 范围外事项
 
-- 自动公开 `v0.5.0`、清理历史 Release 或推送 Tag。
+- 自动公开 `v0.5.0`、清理历史 Release 或推送 Tag；为最终唯一候选 Run 重建本轮未公开 Draft 时，
+  只允许在精确核对 Release ID、tag、候选 SHA 和 `draft=true` 后处理该 Draft，不触及其他 Release。
 - 修改发布控制台远端监控、GitHub workflow、Tauri 签名、安装、升级、卸载或数据保留行为。
 - 用重跑相同失败提交、增加 workflow retry 或放宽产品错误断言掩盖测试缺陷。

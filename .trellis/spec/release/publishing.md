@@ -326,6 +326,103 @@ let plan = ReleaseCandidateTransaction::plan_for_published_version(
 let changed = plan.files.iter().filter(|file| file.before != file.after);
 ```
 
+### 0.2.2 Draft 审计的 GitHub 状态时点与文本规范化契约
+
+#### 1. 范围/触发条件
+
+修改发布控制台的 Draft/公开 Release 审计、候选 SHA 绑定、Git tag 查询、Release 说明或
+`latest.json.notes` 比较时遵循本节。GitHub Draft 的 `tag_name` 只是预定名称，正式公开前不保证
+`refs/tags/<tag>` 已创建；Windows Actions 的多行输出还可能把 LF 与末尾换行规范化为 CRLF 且无
+末尾换行。
+
+#### 2. 签名
+
+```rust
+DraftAuditService::audit(
+    backend: &dyn GhBackend,
+    target_version: &str,
+    candidate_sha: &str,
+    expected_notes: &str,
+) -> Result<DraftAuditEvidence, GithubReleaseError>
+
+DraftAuditService::audit_published(
+    backend: &dyn GhBackend,
+    release_id: u64,
+    target_version: &str,
+    candidate_sha: &str,
+    expected_notes: &str,
+) -> Result<DraftAuditEvidence, GithubReleaseError>
+
+release_notes_equal(left: &str, right: &str) -> bool
+```
+
+#### 3. 契约
+
+- Draft 审计必须从唯一的 `draft=true` Release 读取 `target_commitish`，并要求它与 40 位候选 SHA
+  完全相等；此时不得调用 `GetTag`，因为 GitHub 可能正常返回 404。
+- 公开后的 `audit_published` 必须查询 `refs/tags/v<version>`，要求对象类型为 `commit` 且 SHA 与候选
+  完全相等；不能仅沿用 Draft 的 `target_commitish` 代替在线 tag 复核。
+- Release 正文与 `latest.json.notes` 分别和候选说明比较。比较边界只把 CRLF/孤立 CR 统一为 LF，
+  再对两侧执行与 workflow `TrimEnd()` 对齐的末尾空白裁剪；正文字符、内部空白、段落和版本不得改写。
+- Draft/公开两种审计继续逐项验证 Release ID、tag 名称、标题、Draft/prerelease 状态、三个且仅三个
+  资产、实际大小、GitHub digest、SHA-256、平台 URL 和签名关联。
+- `DraftAuditEvidence.target_commit_sha` 在 Draft 阶段来自已验证的 `target_commitish`，公开阶段来自
+  已验证的 tag ref；调用方不自行猜测或重建该字段。
+
+#### 4. 验证与错误矩阵
+
+| 条件 | 必需结果 |
+|---|---|
+| Draft tag ref 返回 404，`target_commitish` 精确匹配 | 继续下载并审计资产，不返回 `GITHUB_BACKEND_FAILED` |
+| Draft `target_commitish` 与候选 SHA 不同 | `GITHUB_DRAFT_AUDIT_FAILED`，不接受 Draft |
+| 正文/manifest 仅有 LF、CRLF 和末尾换行差异 | 视为同一说明，继续审计 |
+| 正文或 manifest 的内部字符、段落或版本发生漂移 | `GITHUB_DRAFT_AUDIT_FAILED` |
+| Release 已公开但 tag ref 缺失、类型错误或 SHA 漂移 | 在线复核失败，不声明公开完成 |
+
+#### 5. 良好/基线/错误用例
+
+- 良好：Draft API 返回 `tag_name=v0.5.0`、精确候选 `target_commitish`，但 tag ref 404；控制台仍完成
+  NSIS、签名和 manifest 审计并进入待人工公开状态。
+- 良好：候选说明为 LF 且带末尾换行，GitHub 正文与 manifest 为 CRLF 且无末尾换行；规范化后相等。
+- 基线：公开后 tag ref 已存在并指向候选提交，在线复核继续检查 tag、Latest 和资产。
+- 错误：在 Draft 审计中无条件请求 `git/ref/tags/v0.5.0`，把正常 404 报成后端失败。
+- 错误：对说明使用原始字符串相等，或反向使用全局空白折叠而接受正文内容漂移。
+
+#### 6. 必需测试
+
+- `draft_audit_uses_target_commitish_before_github_creates_the_tag_ref`：模拟 Draft tag 404，断言只发出
+  `ListDraftReleases`，候选 SHA 与三项资产审计仍成功。
+- `draft_audit_accepts_github_line_endings_without_accepting_note_drift`：断言 CRLF/末尾换行差异通过；
+  既有正文和 manifest 漂移场景继续失败。
+- `published_release_audit_rejects_a_tag_ref_that_drifted_from_the_candidate`：断言公开阶段仍请求 tag，
+  错误 SHA 返回失败。
+- 候选发布验收必须用真实 `SystemGhBackend` 对实际 Draft 执行一次完整审计，记录 Release ID、候选
+  SHA 和三个资产的大小/SHA-256，但不把联网探针加入默认测试套件。
+
+#### 7. 错误与正确做法
+
+错误：Draft 与公开阶段无条件依赖 tag ref，并按原始换行比较说明。
+
+```rust
+let tag = backend.get_tag(&tag_name).await?;
+if tag.sha != candidate_sha || release.body != expected_notes {
+    return Err(GithubReleaseError::DraftAuditFailed);
+}
+```
+
+正确：Draft 使用已经严格验证的 Release 字段；公开阶段才增加 tag ref 证据，文本只规范化传输差异。
+
+```rust
+let target_commit_sha = if expected_draft {
+    release.target_commitish.clone()
+} else {
+    verify_published_tag(backend, &tag_name, candidate_sha).await?
+};
+if !release_notes_equal(&release.body, expected_notes) {
+    return Err(GithubReleaseError::DraftAuditFailed);
+}
+```
+
 ### 0.3 发布控制台代理、仓库同步与自动恢复契约
 
 #### 1. 范围/触发条件

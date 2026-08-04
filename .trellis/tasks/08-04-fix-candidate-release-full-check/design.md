@@ -10,6 +10,23 @@
 生产 `SafeProcessRunner` 必须继续尊重每个调用方传入的显式超时。本次只调整
 `#[cfg(test)]` 模块中的 PowerShell 夹具与测试预算。
 
+## Draft 审计后续根因与边界
+
+Run `30880121507` 首次成功生成真实 Draft 后，发布控制台的两个平台假设才进入可观察路径：
+
+1. GitHub Draft 的 `tag_name` 是预定名称，正式公开前 `refs/tags/v0.5.0` 不存在，tag API 返回 404；
+   现有夹具却在 Draft 场景伪造了成功的 `GetTag` 响应。
+2. Windows Actions 的多行 output 经 GitHub 后把 LF/末尾换行规范化为 CRLF/无末尾换行；Release 正文
+   与 `latest.json.notes` 相互一致，但与工作区原始字节不同。现有测试让三者共享同一个 `String`，
+   没有覆盖传输边界。
+
+Draft 身份已经由唯一 Draft、精确 `target_commitish == candidate_sha`、标题、说明和资产共同绑定，
+因此 Draft 阶段使用该字段作为 `target_commit_sha`；只有公开后的 `audit_published` 查询真实 tag ref。
+说明比较只规范化 CRLF/孤立 CR 为 LF 并对两侧 `trim_end`，内部字符与空白继续严格相等。
+
+修复提交通过本地全量门禁并普通 push 后，构建更新后的便携控制台。为验证同一个按钮端到端路径，
+现有未公开 Draft 只能在精确身份守卫下删除并由唯一新 Run 重建；不得公开、修改其他 Release 或创建 tag。
+
 ## 测试协调
 
 core 与 release-console 测试都在 `tempfile` 目录创建 PowerShell 脚本、释放标记路径和可选诊断路径：
@@ -46,3 +63,6 @@ runner 和首事件等待共用 `PROCESS_TREE_TEST_TIMEOUT`。该 30 秒值只�
 
 若专项或完整门禁失败，停止在本地并回到根因分析；若远端仍在同一测试失败，保留 Run 证据，
 不重复盲跑。代码回滚只涉及测试模块与测试规范，不需要产品数据迁移或清理远端资产。
+
+重建 Draft 前必须再次验证 Release ID、`tag_name=v0.5.0`、旧候选 SHA 和 `draft=true`，只删除该
+未公开对象；身份任一漂移立即停止。新 Run 失败时保留实际状态，不重复触发或删除其他 Release。

@@ -19,6 +19,7 @@
 - endpoint、公钥、Secrets 名称和 `latest.json` 目标是否与结构测试一致？
 - package、Cargo、锁文件、发布说明和结构测试中的版本是否一致？
 - Draft 的目标提交、最终说明、NSIS、`.sig` 和 `latest.json` 是否逐项核对后才公开？
+- Draft 审计是否用 `target_commitish` 绑定候选且不提前要求 tag ref，并只规范化说明的行尾与末尾空白？
 - 控制台是否阻止同仓库重复 session/后台管线，并在 commit 前失败时先清索引再验证六文件回滚？
 - GitHub Run 发现与监控预算是否覆盖已观测的一小时以上 Windows 冷构建？
 - 正式 Release 公开后，历史 Release、资产和对应 tag 是否由清理工作流删除，且当前

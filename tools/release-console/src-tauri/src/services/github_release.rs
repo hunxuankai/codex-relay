@@ -25,6 +25,18 @@ pub(crate) const RUN_DISCOVERY_DELAY: std::time::Duration = std::time::Duration:
 pub(crate) const REMOTE_MONITOR_ATTEMPTS: usize = 2_881;
 pub(crate) const REMOTE_MONITOR_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
 
+fn release_notes_equal(left: &str, right: &str) -> bool {
+    fn normalize(notes: &str) -> String {
+        notes
+            .replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .trim_end()
+            .to_string()
+    }
+
+    normalize(left) == normalize(right)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum GithubReleaseError {
     #[error("GitHub CLI 调用失败")]
@@ -186,7 +198,7 @@ impl DraftAuditService {
             || release.prerelease
             || release.name != format!("Codex Relay v{target_version}")
             || release.target_commitish != candidate_sha
-            || release.body != expected_notes
+            || !release_notes_equal(&release.body, expected_notes)
         {
             return Err(GithubReleaseError::DraftAuditFailed);
         }
@@ -206,25 +218,30 @@ impl DraftAuditService {
             return Err(GithubReleaseError::DraftAuditFailed);
         }
 
-        let tag_response = backend
-            .execute(GhRequest {
-                operation: GhOperation::GetTag,
-                repository: TARGET_REPOSITORY.to_string(),
-                workflow: None,
-                git_ref: None,
-                tag_name: Some(tag_name.clone()),
-                head_sha: None,
-                created_after: None,
-                resource_id: None,
-                stdin: None,
-            })
-            .await
-            .map_err(|_| GithubReleaseError::BackendFailed)?;
-        let tag: RawTag = serde_json::from_slice(&tag_response.stdout)
-            .map_err(|_| GithubReleaseError::InvalidResponse)?;
-        if tag.object.kind != "commit" || tag.object.sha != candidate_sha {
-            return Err(GithubReleaseError::DraftAuditFailed);
-        }
+        let target_commit_sha = if expected_draft {
+            release.target_commitish.clone()
+        } else {
+            let tag_response = backend
+                .execute(GhRequest {
+                    operation: GhOperation::GetTag,
+                    repository: TARGET_REPOSITORY.to_string(),
+                    workflow: None,
+                    git_ref: None,
+                    tag_name: Some(tag_name.clone()),
+                    head_sha: None,
+                    created_after: None,
+                    resource_id: None,
+                    stdin: None,
+                })
+                .await
+                .map_err(|_| GithubReleaseError::BackendFailed)?;
+            let tag: RawTag = serde_json::from_slice(&tag_response.stdout)
+                .map_err(|_| GithubReleaseError::InvalidResponse)?;
+            if tag.object.kind != "commit" || tag.object.sha != candidate_sha {
+                return Err(GithubReleaseError::DraftAuditFailed);
+            }
+            tag.object.sha
+        };
 
         let temp_root = std::env::temp_dir()
             .canonicalize()
@@ -278,7 +295,9 @@ impl DraftAuditService {
         .map_err(|_| GithubReleaseError::AssetDownloadFailed)?;
         let manifest: RawUpdateManifest = serde_json::from_slice(&manifest_bytes)
             .map_err(|_| GithubReleaseError::DraftAuditFailed)?;
-        if manifest.version != target_version || manifest.notes != expected_notes {
+        if manifest.version != target_version
+            || !release_notes_equal(&manifest.notes, expected_notes)
+        {
             return Err(GithubReleaseError::DraftAuditFailed);
         }
         let installer_name = format!("Codex.Relay_{target_version}_x64-setup.exe");
@@ -319,7 +338,7 @@ impl DraftAuditService {
         Ok(DraftAuditEvidence {
             release_id: release.id,
             tag_name,
-            target_commit_sha: tag.object.sha,
+            target_commit_sha,
             assets: evidence,
             manifest_version: manifest.version,
             manifest_notes: manifest.notes,

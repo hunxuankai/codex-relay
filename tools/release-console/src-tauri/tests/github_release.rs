@@ -64,6 +64,8 @@ struct AlreadyPublishedGhBackend {
 #[derive(Clone, Copy, Debug)]
 enum DraftScenario {
     Valid,
+    TagUnavailable,
+    PlatformNormalizedNotes,
     MissingAsset,
     ExtraAsset,
     ReleaseNotesDrift,
@@ -95,11 +97,15 @@ fn sha256_digest(bytes: &[u8]) -> String {
     format!("sha256:{hex}")
 }
 
+fn platform_normalized_notes(notes: &str) -> String {
+    notes.replace('\n', "\r\n").trim_end().to_string()
+}
+
 fn manifest_bytes(notes: &str, scenario: DraftScenario) -> Vec<u8> {
-    let manifest_notes = if matches!(scenario, DraftScenario::ManifestNotesDrift) {
-        "说明发生漂移"
-    } else {
-        notes
+    let manifest_notes = match scenario {
+        DraftScenario::ManifestNotesDrift => "说明发生漂移".to_string(),
+        DraftScenario::PlatformNormalizedNotes => platform_normalized_notes(notes),
+        _ => notes.to_string(),
     };
     let asset_url = if matches!(scenario, DraftScenario::ManifestUrlDrift) {
         "https://api.github.com/repos/hunxuankai/codex-relay/releases/assets/999"
@@ -227,6 +233,12 @@ impl GhBackend for DraftFixtureGhBackend {
             };
             let stdout = match request.operation {
                 GhOperation::ListDraftReleases => {
+                    let release_notes = if matches!(scenario, DraftScenario::PlatformNormalizedNotes)
+                    {
+                        platform_normalized_notes(&notes)
+                    } else {
+                        notes.clone()
+                    };
                     let mut assets = vec![
                         serde_json::json!({"id": 501, "name": "Codex.Relay_0.5.0_x64-setup.exe", "size": if matches!(scenario, DraftScenario::SizeDrift) { installer.len() + 1 } else { installer.len() }, "digest": digest(501, &installer)}),
                         serde_json::json!({"id": 502, "name": "Codex.Relay_0.5.0_x64-setup.exe.sig", "size": signature.len(), "digest": digest(502, &signature)}),
@@ -250,10 +262,13 @@ impl GhBackend for DraftFixtureGhBackend {
                     "target_commitish": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "draft": true,
                     "prerelease": false,
-                    "body": if matches!(scenario, DraftScenario::ReleaseNotesDrift) { "说明发生漂移" } else { notes.as_str() },
+                    "body": if matches!(scenario, DraftScenario::ReleaseNotesDrift) { "说明发生漂移" } else { release_notes.as_str() },
                     "assets": assets
                 }]))
                     .unwrap()
+                }
+                GhOperation::GetTag if matches!(scenario, DraftScenario::TagUnavailable) => {
+                    return Err("draft tag is unavailable before publication".into());
                 }
                 GhOperation::GetTag => serde_json::to_vec(&serde_json::json!({
                     "object": {
@@ -1064,7 +1079,7 @@ fn draft_audit_verifies_identity_assets_manifest_hashes_and_signature_relationsh
             .iter()
             .map(|request| request.operation)
             .collect::<Vec<_>>(),
-        [GhOperation::ListDraftReleases, GhOperation::GetTag]
+        [GhOperation::ListDraftReleases]
     );
     let downloads = backend.downloads.into_inner().unwrap();
     assert_eq!(
@@ -1072,6 +1087,50 @@ fn draft_audit_verifies_identity_assets_manifest_hashes_and_signature_relationsh
         [501, 502, 503]
     );
     assert!(downloads.iter().all(|(_, path)| !path.exists()));
+}
+
+#[test]
+fn draft_audit_uses_target_commitish_before_github_creates_the_tag_ref() {
+    let notes = "## 更新内容\n\n- 修复：修复发布流程\n\n## 更新方式\n\n已安装 `v0.4.0` 的用户可从 `v0.4.0` 更新到 `v0.5.0`。\n\n## 注意事项\n\n本版本未使用 Windows Authenticode，Windows 可能显示“未知发布者”。安装和升级不会删除 Codex 配置、Codex Relay 应用数据、日志或备份。\n";
+    let backend = draft_fixture(notes, DraftScenario::TagUnavailable);
+
+    let audit = tauri::async_runtime::block_on(DraftAuditService::new().audit(
+        &backend,
+        "0.5.0",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        notes,
+    ))
+    .unwrap();
+
+    assert_eq!(
+        audit.target_commit_sha,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    );
+    let requests = backend.requests.into_inner().unwrap();
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request.operation)
+            .collect::<Vec<_>>(),
+        [GhOperation::ListDraftReleases]
+    );
+}
+
+#[test]
+fn draft_audit_accepts_github_line_endings_without_accepting_note_drift() {
+    let notes = "## 更新内容\n\n- 修复：修复发布流程\n\n## 更新方式\n\n已安装 `v0.4.0` 的用户可从 `v0.4.0` 更新到 `v0.5.0`。\n\n## 注意事项\n\n本版本未使用 Windows Authenticode，Windows 可能显示“未知发布者”。安装和升级不会删除 Codex 配置、Codex Relay 应用数据、日志或备份。\n";
+    let backend = draft_fixture(notes, DraftScenario::PlatformNormalizedNotes);
+
+    let audit = tauri::async_runtime::block_on(DraftAuditService::new().audit(
+        &backend,
+        "0.5.0",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        notes,
+    ))
+    .unwrap();
+
+    assert!(audit.manifest_notes.contains("\r\n"));
+    assert!(!audit.manifest_notes.ends_with(['\r', '\n']));
 }
 
 #[test]
@@ -1111,7 +1170,6 @@ fn draft_audit_rejects_identity_asset_manifest_and_signature_drift() {
         DraftScenario::ManifestNotesDrift,
         DraftScenario::ManifestUrlDrift,
         DraftScenario::SignatureDrift,
-        DraftScenario::TagDrift,
     ] {
         let backend = DraftFixtureGhBackend {
             requests: Mutex::new(Vec::new()),
@@ -1266,6 +1324,28 @@ fn published_release_rechecks_latest_tag_manifest_and_asset_evidence() {
         .unwrap();
 
     assert_eq!(verified, draft);
+}
+
+#[test]
+fn published_release_audit_rejects_a_tag_ref_that_drifted_from_the_candidate() {
+    let notes = "## 更新内容\n\n- 修复：修复发布流程\n\n## 更新方式\n\n已安装 `v0.4.0` 的用户可从 `v0.4.0` 更新到 `v0.5.0`。\n\n## 注意事项\n\n本版本未使用 Windows Authenticode，Windows 可能显示“未知发布者”。安装和升级不会删除 Codex 配置、Codex Relay 应用数据、日志或备份。\n";
+    let backend = PublishedFixtureGhBackend {
+        inner: draft_fixture(notes, DraftScenario::TagDrift),
+    };
+
+    let error = tauri::async_runtime::block_on(DraftAuditService::new().audit_published(
+        &backend,
+        42,
+        "0.5.0",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        notes,
+    ))
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        codex_relay_release_console_lib::services::github_release::GithubReleaseError::DraftAuditFailed
+    ));
 }
 
 #[test]

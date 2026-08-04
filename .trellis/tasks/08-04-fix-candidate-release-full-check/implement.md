@@ -16,8 +16,13 @@
 - [x] 基于第二切片重新运行 Rustfmt、Clippy 和完整项目门禁。
 - [x] 扩展 Windows 冷 Runner 测试规范和发布控制台本地门禁契约。
 - [x] 重新完成 Trellis 全范围检查、差异检查、路径隔离和秘密扫描。
-- [ ] 精确提交修复并普通 push，验证 `origin/main` 与本地 `HEAD` 一致。
-- [ ] 触发并监控唯一的新候选发布 Run；成功后审计 `v0.5.0` Draft 及三类资产，不公开。
+- [x] 监控 Run `30880121507` 到 success，并审计真实 `v0.5.0` Draft 的身份、资产、manifest 和签名。
+- [x] 用真实 Draft 复现 tag 404 与发布说明行尾差异，各完成一个红色测试、最小修复和绿色回归。
+- [x] 用修复后的生产 `SystemGhBackend` 对真实 Draft 完成一次完整审计，随后删除临时联网探针。
+- [x] 完成新增审计修复的全范围检查。
+- [ ] 精确提交并普通 push，验证 `origin/main` 与本地 `HEAD` 一致。
+- [ ] 构建更新后的发布控制台，在精确身份守卫下重建当前 Draft，并通过控制台按钮触发、监控唯一的
+  最终候选 Run；成功后再次审计 `v0.5.0` Draft，不公开。
 - [ ] 更新最终证据，归档任务、记录会话日志并推送全部收尾提交。
 
 ## 验证证据
@@ -50,6 +55,22 @@
   release-console `local_verification` 7 passed/1 ignored 及其余 release-console 套件通过。
 - 第二轮完整门禁的 `codex-relay-second-final-check-*` 路径位于系统 `%TEMP%`，命令结束后已不存在。
   最新 `git diff --check`、任务校验和高置信度秘密扫描通过。
+- Run `30880121507` 在 19 分 18 秒后以 success 结束，Step #7 与 Step #8 均为 success；Run head SHA
+  为 `ebf0d69e1ab542f98320225b0c561ff39e781738`。
+- Draft `364638762` 保持 `draft=true`、`prerelease=false`、未公开，目标提交为 `ebf0d69...`。
+  NSIS 为 4,691,499 字节/SHA-256 `109656b5...c5c5f`，`.sig` 为 424 字节/
+  `5876e60c...f78a4`，`latest.json` 为 2,454 字节/`4b2546e4...a0858`；实际下载摘要与 GitHub digest 一致。
+- `latest.json.version=0.5.0`，两个 Windows 平台均指向安装器资产 ID `500939747`，内联签名与
+  `.sig` 逐字节一致，说明与 Release 正文仅存在 LF/CRLF 和末尾换行传输差异。
+- 真实 `gh api repos/.../git/ref/tags/v0.5.0` 返回 404，`git ls-remote` 也没有该 ref；Draft API
+  同时返回精确 `target_commitish=ebf0d69...`，证明失败点是审计时点假设而非候选身份缺失。
+- `draft_audit_uses_target_commitish_before_github_creates_the_tag_ref` 先以 `BackendFailed` 红灯，再转绿；
+  `draft_audit_accepts_github_line_endings_without_accepting_note_drift` 先以 `DraftAuditFailed` 红灯，再转绿。
+- `github_release` 集成套件最终 20/20 通过；修复后的生产后端真实 Draft 审计 1/1 通过，并记录上述
+  Release ID、候选 SHA 与三项资产摘要。联网探针和下载目录均已删除。
+- 成对安全 Relay 覆盖下新增审计修复的完整 `npm run check` 退出 0，用时 671.6 秒：Trellis 8 项、
+  主前端 60/338、core 249、路径安全 3、Provider 工作流 1、release-console `github_release` 20/20、
+  `local_verification` 7 passed/1 ignored 及其余套件通过；`codex-relay-draft-audit-final-check-*` 已删除。
 
 ## 验证命令
 
@@ -58,6 +79,7 @@ $safeRoot = Join-Path $env:TEMP ('codex-relay-check-' + [guid]::NewGuid().ToStri
 $env:CODEX_RELAY_CODEX_HOME = Join-Path $safeRoot 'codex-home'
 $env:CODEX_RELAY_APP_DATA_DIR = Join-Path $safeRoot 'app-data'
 npm run test:rust:lib -- codex_process::tests -- --test-threads=1
+cargo test --manifest-path tools/release-console/src-tauri/Cargo.toml --test github_release
 cargo fmt --all --check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets --all-features -- -D warnings
 npm run check
@@ -74,7 +96,11 @@ Step 和 Draft Release API 证据。任何失败都保留实际输出，不把�
 - `.trellis/spec/testing/rust-build-feedback.md`：记录长期测试时序契约，不写入一次性成功声明。
 - `tools/release-console/src-tauri/tests/local_verification.rs`：第二切片只修改 Windows 进程测试夹具和
   测试级预算，不改变生产 `LOCAL_COMMAND_TIMEOUT` 或日志实现。
+- `tools/release-console/src-tauri/src/services/github_release.rs`：Draft 只使用精确 `target_commitish`，
+  公开后仍校验 tag ref；文本规范化不得扩展为内部空白折叠。
 - GitHub Draft：仅在 Run 全绿后由现有 workflow 创建；审计失败时保持 Draft，不公开、不改 Tag。
+- Draft 重建：只允许删除本任务已核对的未公开 Draft ID，删除前再次验证 tag、目标 SHA 与
+  `draft=true`，随后由更新后的控制台创建唯一新候选；身份任一漂移立即停止。
 - 真实 `%USERPROFILE%\.codex` 与 `%LOCALAPPDATA%\CodexRelay` 始终不在测试或清理范围内。
 
 ## 缺陷复盘
@@ -110,3 +136,37 @@ Step 和 Draft Release API 证据。任何失败都保留实际输出，不把�
 
 - 已更新 `.trellis/spec/testing/rust-build-feedback.md`；现有索引已覆盖该文件，无需新增索引项。
 - 仓库不存在 `src/templates/markdown/spec/`，没有可同步的规范模板。
+
+### 6. Draft 审计平台状态与文本传输复盘
+
+#### 1. 根因类别
+
+- **B：跨层契约**：控制台没有区分 GitHub Draft 的预定 tag 名称与公开后 Git ref 的生命周期。
+- **D：测试覆盖缺口**：夹具同时伪造 Draft tag 已存在、API 正文与本地说明字节完全相同。
+- **E：隐式假设**：把 GitHub/Windows Actions 的多行文本传输当成不改变行尾和末尾换行。
+
+#### 2. 修复为何此前未暴露
+
+前两轮候选 Run 都在 Step #7 失败，未进入首个真实 Draft 审计；本地测试又完全由同一字符串构造
+Release、manifest 和 expected notes，并为所有阶段返回 `GetTag` 成功，因此不能暴露平台时点和文本
+规范化差异。只修复远端测试时序不能证明按钮完成，因为审计边界从未被真实数据执行。
+
+#### 3. 预防机制
+
+| 优先级 | 机制 | 具体行动 | 状态 |
+|---|---|---|---|
+| P0 | 测试覆盖 | Draft tag 404 与 CRLF/末尾换行分别建立先红后绿回归 | 已完成 |
+| P0 | 架构边界 | Draft 用 `target_commitish`，公开复核才读取 tag ref | 已完成 |
+| P0 | 真实集成 | 候选验收用生产后端审计一次真实 Draft，不保留默认联网测试 | 已完成 |
+| P1 | 长期规范 | 发布规范新增状态时点、文本规范化、矩阵和反例 | 已完成 |
+
+#### 4. 系统性扩展
+
+- Draft 与公开 Release 共用审计函数时，任何只在公开后成立的证据都必须由 lookup 状态显式分支。
+- 外部系统返回的 Markdown 应比较语义稳定的传输规范形态，但不得用全局 trim/split-whitespace 掩盖正文漂移。
+- “workflow success”与“控制台按钮完成”是两个边界；最终验收必须包含生产后端 Draft 审计和 UI 会话终态。
+
+#### 5. 知识沉淀
+
+- 已更新 `.trellis/spec/release/publishing.md` 和发布规范质量检查索引。
+- 仓库仍不存在 `src/templates/markdown/spec/`，无需模板同步。
