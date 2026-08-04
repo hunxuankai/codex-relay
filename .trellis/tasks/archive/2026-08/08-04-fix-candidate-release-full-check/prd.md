@@ -59,9 +59,9 @@
 - [x] AC3：成对安全 Relay 临时覆盖下 `npm run check` 退出 0，Rust core 249 项及其余项目门禁通过。
 - [x] AC8：release-console `local_verification` 流式日志测试在条件协调和自截止下专项连续 3 次通过，
   并继续断言首段日志先于完成、完整尾部和退出码。
-- [ ] AC4：本次相关改动精确提交并普通 push 后，远端跟踪分支与本地 `HEAD` 一致。
-- [ ] AC5：最终候选 SHA 的 GitHub 发布 Run 完整成功，Step #7 与 Step #8 均为 success。
-- [ ] AC6：最终生成的 `v0.5.0` Release 保持 Draft，目标提交和三类 updater 资产审计通过；未执行公开、
+- [x] AC4：本次相关改动精确提交并普通 push 后，远端跟踪分支与本地 `HEAD` 一致。
+- [x] AC5：最终候选 SHA 的 GitHub 发布 Run 完整成功，Step #7 与 Step #8 均为 success。
+- [x] AC6：最终生成的 `v0.5.0` Release 保持 Draft，目标提交和三类 updater 资产审计通过；未执行公开、
   安装、升级或卸载时不声称这些行为成功。
 - [x] AC7：差异与秘密扫描确认没有真实密钥、认证文件或真实 Codex/Relay 用户数据进入改动和证据。
 - [x] AC9：Draft tag 404 与 GitHub 行尾规范化均有先红后绿回归；修复后的生产 `SystemGhBackend`

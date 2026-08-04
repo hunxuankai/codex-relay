@@ -20,10 +20,12 @@
 - [x] 用真实 Draft 复现 tag 404 与发布说明行尾差异，各完成一个红色测试、最小修复和绿色回归。
 - [x] 用修复后的生产 `SystemGhBackend` 对真实 Draft 完成一次完整审计，随后删除临时联网探针。
 - [x] 完成新增审计修复的全范围检查。
-- [ ] 精确提交并普通 push，验证 `origin/main` 与本地 `HEAD` 一致。
-- [ ] 构建更新后的发布控制台，在精确身份守卫下重建当前 Draft，并通过控制台按钮触发、监控唯一的
-  最终候选 Run；成功后再次审计 `v0.5.0` Draft，不公开。
-- [ ] 更新最终证据，归档任务、记录会话日志并推送全部收尾提交。
+- [x] 精确提交并普通 push，验证 `origin/main` 与本地 `HEAD` 一致。
+- [x] 构建更新后的发布控制台，在精确身份守卫下重建当前 Draft，并通过控制台生产
+  `ApplicationRequest` 序列执行与“一键开始候选发布”按钮相同的后端管线；监控唯一的最终候选 Run，
+  再次审计 `v0.5.0` Draft 并停在待人工公开状态。
+- [x] 更新最终候选流程证据，并清理本轮隔离运行器与管线临时目录。
+- [x] 完成归档前门禁并进入 Trellis 3.5；归档、会话日志与最终 push 由收尾流程记账并复核。
 
 ## 验证证据
 
@@ -71,6 +73,36 @@
 - 成对安全 Relay 覆盖下新增审计修复的完整 `npm run check` 退出 0，用时 671.6 秒：Trellis 8 项、
   主前端 60/338、core 249、路径安全 3、Provider 工作流 1、release-console `github_release` 20/20、
   `local_verification` 7 passed/1 ignored 及其余套件通过；`codex-relay-draft-audit-final-check-*` 已删除。
+- 修复提交 `3353898` 与候选提交 `04fa3fd` 已普通 push；候选执行前本地 `HEAD`、`origin/main` 和远端
+  `refs/heads/main` 均为 `04fa3fdc0bfadd7218e29eb5ced48411cacdf02e`。
+- 原 Draft `364638762` 仅在重新核对 `draft=true`、`tag_name=v0.5.0`、目标 SHA 与预期旧候选完全一致后
+  删除；未触及其他 Release 或 tag。最终没有创建 `v0.5.0` tag，也没有调用公开接口。
+- 首次从生产入口直连 GitHub 时在 Fetch 阶段保留 `GIT_FETCH_FAILED`；同环境命令复现连接失败后，改用
+  现有无认证回环 HTTP 代理重试。代理地址和凭据没有写入任务材料、会话或公开日志，重试没有重复提交。
+- Windows 原生 UI 自动化管道不可用，因此没有虚构按钮点击证据。生产会话实际通过控制台公开的
+  `Inspect -> PreparePlan -> Start -> 本地门禁 -> 构建 -> Commit/Push -> Run -> Draft 审计` 请求序列
+  执行；按钮到同一 typed command 的映射由完整前端与 command 测试覆盖。
+- 最终生产会话 `release-20260804071633-0000000000000002` 当前为 `awaitingPublishApproval`，候选 SHA 与
+  远端 main 均为 `04fa3fdc...02e`，`failure=null`、`published=null`；该会话没有进入公开阶段。
+- 最终 Run `30888467766`（https://github.com/hunxuankai/codex-relay/actions/runs/30888467766）由
+  `workflow_dispatch` 触发，head SHA 为 `04fa3fdc...02e`，Run 与 `release` Job 均为 success；Step #7
+  “运行完整检查”和 Step #8“构建 Draft Release”均为 completed/success。
+- 最终 Draft `364697150` 是唯一 `v0.5.0` Release：`draft=true`、`prerelease=false`、
+  `published_at=null`、`target_commitish=04fa3fdc...02e`。公开 Latest 仍为 `v0.4.0`，GitHub tag ref
+  `refs/tags/v0.5.0` 仍返回 404。
+- 最终安装器资产为 4,685,828 字节/SHA-256
+  `3c6fb3de63c9fde3f06171f30b32f268921b5b727a1900596fd96dd50fd07a20`；`.sig` 为 424 字节/
+  `dda26109a190b8c70dee9bfea4de3a53c0921d89cc197edfb38200b2074f2509`；`latest.json` 为 2,607 字节/
+  `436c8bae862c3a8e8846172e08d5578ed34cdee27d3b197e228a4e36f70c37d5`。
+- 按 updater 的二进制请求语义独立下载三项资产后复核：清单版本为 `0.5.0`，两个 Windows 平台 URL
+  均指向本次安装器，Release/manifest/本地说明按允许的传输规范化后相同，内联签名与 `.sig` 一致，
+  实际大小和 SHA-256 与 GitHub digest 一致；独立下载目录随后删除。
+- 隔离运行器 PID `43988` 已退出；`codex-relay-live-runner-3353898` 与
+  `codex-relay-live-pipeline-3353898-proxy` 两个系统临时目录经精确路径和前缀守卫删除并确认不存在。
+- 归档前新鲜复核中，`task.py validate` 与 `git diff --check` 均退出 0；本任务 8 个相关文件的高置信度
+  凭据与具体真实用户路径扫描均为 0 命中，647 个 Git 跟踪文件中没有认证/Provider 密钥存储文件名。
+- 本轮没有执行公开 Release、Tag 创建、真实安装、应用内升级、UAC、重启、卸载、数据保留或
+  Authenticode 验证；这些行为保持未验证，Tauri updater 签名审计不等同于 Windows 发布者签名。
 
 ## 验证命令
 
