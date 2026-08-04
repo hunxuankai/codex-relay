@@ -12,13 +12,17 @@
 
 ## 测试协调
 
-测试在 `tempfile` 目录创建 PowerShell 脚本、释放标记路径和可选诊断路径：
+core 与 release-console 测试都在 `tempfile` 目录创建 PowerShell 脚本、释放标记路径和可选诊断路径：
 
 1. 子进程写出并 flush `first`。
 2. 子进程按短间隔轮询释放标记，等待测试明确允许结束；轮询受测试级 deadline 约束。
 3. 测试通过事件通道收到 `first`，确认 stream 类型、字节内容以及 runner 尚未结束。
 4. 测试写入释放标记，子进程写出 `second` 并正常退出。
 5. 测试断言最终输出、空 stderr 与退出码。
+
+release-console 的 `ProcessLocalVerificationBackend` 生产命令预算仍为 2 小时；集成测试脚本额外
+设置 20 秒的 PowerShell 自截止，外层事件/完成等待使用 30 秒测试预算。这样测试失败时子进程
+会先自行退出，不会把测试错误变成遗留的长命令。
 
 runner 和首事件等待共用 `PROCESS_TREE_TEST_TIMEOUT`。该 30 秒值只给 Windows 冷启动、管道读取
 和调度留下有界容差，不成为产品 SLA；条件满足时测试会立即继续，不固定等待 30 秒。
@@ -32,6 +36,8 @@ runner 和首事件等待共用 `PROCESS_TREE_TEST_TIMEOUT`。该 30 秒值只�
 - 不采用：mock `SafeProcessRunner` 或事件 sink。mock 无法验证真实 Windows pipe 在进程完成前
   推送字节的行为。
 - 不采用：修改生产默认超时或 workflow retry。两者都会把测试时序缺陷扩散到产品或发布层。
+- 不采用：仅把 release-console 外层 `timeout` 从 10 秒扩大而保留 750 毫秒 sleep；这仍会把冷
+  Runner 调度延迟误判为行为失败，并可能在生产命令 2 小时预算内留下后台进程。
 
 ## 发布验证与回滚
 

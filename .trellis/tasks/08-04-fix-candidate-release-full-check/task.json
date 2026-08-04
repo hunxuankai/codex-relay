@@ -22,7 +22,9 @@
   "parent": null,
   "relatedFiles": [
     "src-tauri/crates/codex-relay-core/src/infrastructure/codex_process.rs",
-    ".trellis/spec/testing/rust-build-feedback.md"
+    "tools/release-console/src-tauri/tests/local_verification.rs",
+    ".trellis/spec/testing/rust-build-feedback.md",
+    ".trellis/spec/release/publishing.md"
   ],
   "notes": "",
   "meta": {}

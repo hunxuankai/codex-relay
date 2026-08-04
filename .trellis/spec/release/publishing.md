@@ -562,6 +562,9 @@ interface ReleaseSession {
 - `SafeProcessRunner` 得到主进程退出状态后仍按固定宽限等待 Job Object。宽限后有剩余后代时，调用
   `terminate_job_and_wait`；若安全终止和退出验证成功，保留主进程真实退出码。只有验证失败才返回
   `ProcessTreeTermination`。不得因为“曾有残留后代”就无条件抹掉成功退出码。
+- `tests/local_verification.rs` 验证持久化流式日志时，子 PowerShell 必须在首段日志后等待临时释放标记，
+  并在 20 秒无标记时自行失败；事件与完成等待使用 30 秒测试预算。生产
+  `LOCAL_COMMAND_TIMEOUT=2h` 不因此改变，测试不得用固定 750 毫秒 sleep 或 10 秒完成窗口替代条件。
 - `LocalVerificationBackend` 返回非零 `LocalCommandEvidence` 时使用 `ExitCode(code)`；进程后端失败时
   穷尽映射为 `Process(category)`；取消继续独立映射为 `Cancelled`。
 - `ReleaseOrchestrator` 必须先完成候选事务回滚，再把命令 ID 与类型化失败传给 application。回滚失败
@@ -586,6 +589,8 @@ interface ReleaseSession {
 | 发布说明命中疑似秘密规则 | 非零退出；包含 `RELEASE_NOTES_SECRET_DETECTED`；workflow output 不存在 |
 | `release-structure-tests` 返回退出码 1 | `stepId=release-structure-tests`，code 保持 `RELEASE_LOCAL_VERIFICATION_FAILED`，消息包含退出码 1 和已回滚边界 |
 | 主进程退出 0，剩余后代可安全终止 | 返回 `LocalCommandEvidence.exit_code=0`，不得改写为进程树失败 |
+| 持久化首段本地门禁日志后命令仍运行 | 测试写入临时释放标记，随后得到完整尾部和退出码 0 |
+| 流式测试未能写入释放标记 | 子脚本 20 秒自截止，外层 30 秒失败；不得遗留 2 小时测试命令 |
 | 剩余后代无法安全终止或验证 | `Process(ProcessTreeTermination)`，消息明确进程树未能安全结束 |
 | 进程超过本地门禁超时 | `Process(Timeout)`，消息明确超过允许时间，不显示“无退出码” |
 | 子进程输出超过安全上限 | `Process(OutputTooLarge)`，终止进程树并显示安全分类 |
@@ -603,6 +608,8 @@ interface ReleaseSession {
 - 良好：`release-structure-tests` 退出 1，界面显示
   `[release-structure-tests] RELEASE_LOCAL_VERIFICATION_FAILED`、退出码和“尚未提交或推送”。
 - 良好：`npm run check` 主进程退出 0，但一个后代超过 5 秒；runner 安全终止并验证后仍返回 0。
+- 良好：release-console 集成测试先从日志页观察到 `first\n`，确认命令尚未结束，再写入释放标记并
+  得到 `second-tail`；条件满足后立即继续。
 - 良好：失败 session 持久化 `{ phase: 'localChecks', stepId: 'full-project-check', code: ... }`，
   控制台重启后“发布专项”已完成、“完整检查”失败、“普通构建”未开始。
 - 基线：普通远端或 Push 编排错误仍使用 `releasePipeline` 与现有通用安全消息。
@@ -612,6 +619,8 @@ interface ReleaseSession {
   `ProcessTreeTermination`，不验证终止是否成功。
 - 错误：只向 application 传 `error.code()`，或用 `Option<i32>` 把所有进程失败折叠成 None。
 - 错误：只在实时事件数组保存失败位置；重启后把所有步骤重置为“未开始”。
+- 错误：用 `Start-Sleep -Milliseconds 750` 制造流式窗口，并要求冷 Runner 在 10 秒内完成；本机
+  通过不能证明该固定窗口稳定。
 
 #### 6. 必需测试
 
@@ -620,6 +629,8 @@ interface ReleaseSession {
   无法终止、取消、超时和输出上限契约继续通过。
 - `tests/local_verification.rs`：断言 `ExitCode` / `Process(category)`、后续命令停止和过滤环境结构测试；
   默认 ignored 的完整检查探针必须在 Cargo 外层退出后直接运行测试二进制，避免嵌套 target 锁。
+- `tests/local_verification.rs::process_backend_persists_safe_output_before_the_command_completes`：连续至少
+  3 次断言首段持久化发生在命令完成前、释放后尾部完整且退出码为 0；夹具仅使用临时目录。
 - `tests/release_orchestrator.rs`：断言本地失败先回滚，再保留分类且原子写入 failure，不 Push。
 - `tests/release_state.rs`：断言 `fail` 原子保存、旧 schema v1 兼容、非法非终态 failure 拒绝和新 session 清空。
 - `release_application.rs`：断言分类消息，并对已失败 session 显式重发带 failure 的权威快照。

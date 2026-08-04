@@ -9,9 +9,13 @@
 - [x] 红灯复核：Run `30869666756` 在收到首段输出后于 5.03 秒返回 `Timeout`；本机缓存环境基线通过。
 - [x] 绿灯：把流式输出夹具改为条件协调，并统一使用 `PROCESS_TREE_TEST_TIMEOUT`。
 - [x] 连续运行 `codex_process` 全部 9 项专项 3 次，三轮均为 9/9 通过。
-- [x] 运行 Rustfmt、Clippy 和完整项目门禁。
-- [x] 更新 Windows 冷 Runner 测试规范，记录正常完成预算与流式条件协调契约。
-- [x] 完成 Trellis 全范围检查、差异检查、路径隔离和秘密扫描。
+- [x] 远端 Run `30873762688` 证明 core 修复有效，但暴露 release-console `local_verification` 的独立
+  10 秒固定等待缺陷；其余 6 项同套件测试通过。
+- [x] 红灯复核第二切片：Run `30873762688` 返回 `Elapsed(())`；本机热缓存基线 1/1 通过。
+- [x] 绿灯第二切片：把 release-console 流式夹具改为释放标记、自截止和共享 30 秒测试预算。
+- [x] 基于第二切片重新运行 Rustfmt、Clippy 和完整项目门禁。
+- [x] 扩展 Windows 冷 Runner 测试规范和发布控制台本地门禁契约。
+- [x] 重新完成 Trellis 全范围检查、差异检查、路径隔离和秘密扫描。
 - [ ] 精确提交修复并普通 push，验证 `origin/main` 与本地 `HEAD` 一致。
 - [ ] 触发并监控唯一的新候选发布 Run；成功后审计 `v0.5.0` Draft 及三类资产，不公开。
 - [ ] 更新最终证据，归档任务、记录会话日志并推送全部收尾提交。
@@ -33,7 +37,19 @@
 - 完整门禁使用的 `codex-relay-final-check-*` 路径解析在系统 `%TEMP%` 下；命令结束后该目录已不存在。
 - `git diff --check` 退出 0；改动只位于 Windows 测试模块、测试规范与当前任务材料。高置信度
   API Key/Bearer/Authorization 扫描无命中，`artifacts/` 与 `src-tauri/target/` 保持 ignored。
-- 尚未创建修复提交、push、重跑远端 workflow 或生成 Draft；这些项目继续保持未完成。
+- 工作提交 `86c0d92` 已普通 push，远端、本地与跟踪分支当时精确一致。Run `30873762688` 的
+  Step #7 在 11 分 15 秒后失败：core 249 项通过；唯一失败为
+  `process_backend_persists_safe_output_before_the_command_completes` 在
+  `local_verification.rs:357` 返回 `Elapsed(())`，Step #8 跳过且没有 Draft。
+- 第二切片首次编译因把 `OsString` 传给 `Vec<String>` 而退出 1；按公开 DTO 在测试边界转换路径后，
+  专项 1/1 通过。最终专项连续 3 轮均为 1/1，通过时间 0.60、0.57、0.64 秒。
+- 完整 release-console `local_verification` 集成套件为 7 passed、0 failed、1 个既有完整项目探针
+  ignored，用时 11.71 秒。
+- 第二切片 Rustfmt 与 workspace Clippy `-D warnings` 退出 0；成对安全 Relay 覆盖下最新
+  `npm run check` 退出 0，用时 566.6 秒。主前端 60/338、core 249、路径安全 3、Provider 工作流 1、
+  release-console `local_verification` 7 passed/1 ignored 及其余 release-console 套件通过。
+- 第二轮完整门禁的 `codex-relay-second-final-check-*` 路径位于系统 `%TEMP%`，命令结束后已不存在。
+  最新 `git diff --check`、任务校验和高置信度秘密扫描通过。
 
 ## 验证命令
 
@@ -56,6 +72,8 @@ Step 和 Draft Release API 证据。任何失败都保留实际输出，不把�
 - `src-tauri/crates/codex-relay-core/src/infrastructure/codex_process.rs`：只允许修改测试模块；若出现
   生产 diff，先停止并重新审查范围。
 - `.trellis/spec/testing/rust-build-feedback.md`：记录长期测试时序契约，不写入一次性成功声明。
+- `tools/release-console/src-tauri/tests/local_verification.rs`：第二切片只修改 Windows 进程测试夹具和
+  测试级预算，不改变生产 `LOCAL_COMMAND_TIMEOUT` 或日志实现。
 - GitHub Draft：仅在 Run 全绿后由现有 workflow 创建；审计失败时保持 Draft，不公开、不改 Tag。
 - 真实 `%USERPROFILE%\.codex` 与 `%LOCALAPPDATA%\CodexRelay` 始终不在测试或清理范围内。
 
@@ -84,6 +102,8 @@ Step 和 Draft Release API 证据。任何失败都保留实际输出，不把�
 
 - 同文件扫描发现输出捕获与结构化 stdin 测试也使用本机经验的 5 秒预算，已一并收口；显式验证
   `Timeout`、取消和 Job 分配失败的短预算保留，因为这些值本身就是被测行为。
+- 第一次扩展只扫描 core 文件，遗漏了 release-console 对同一 runner 的集成测试；第二轮已把搜索
+  边界扩大到 `tools/release-console/src-tauri`，并用 Run `30873762688` 记录该传播失败。
 - 生产 `SafeProcessRunner`、发布 workflow 和远端监控无需改变；问题位于测试夹具层，而非架构层。
 
 ### 5. 知识沉淀

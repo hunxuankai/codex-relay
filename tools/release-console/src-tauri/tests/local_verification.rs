@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
+const WINDOWS_PROCESS_TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 fn find_on_path(file_name: &str) -> PathBuf {
     let path = std::env::var_os("PATH").expect("PATH must be available for release checks");
@@ -304,6 +305,25 @@ fn process_backend_persists_safe_output_before_the_command_completes() {
     tauri::async_runtime::block_on(async {
         let repository = tempfile::tempdir().unwrap();
         let git_dir = tempfile::tempdir().unwrap();
+        let stream_script = repository.path().join("stream-output.ps1");
+        let release_file = repository.path().join("release-stream");
+        fs::write(
+            &stream_script,
+            r#"param([string]$ReleaseFile)
+$ErrorActionPreference = 'Stop'
+[Console]::Out.Write("first`n")
+[Console]::Out.Flush()
+$deadline = [DateTime]::UtcNow.AddSeconds(20)
+while (-not (Test-Path -LiteralPath $ReleaseFile)) {
+    if ([DateTime]::UtcNow -ge $deadline) {
+        throw 'STREAM_RELEASE_TIMEOUT'
+    }
+    Start-Sleep -Milliseconds 20
+}
+[Console]::Out.Write("second-tail")
+"#,
+        )
+        .unwrap();
         let store = ReleaseLogStore::new(git_dir.path().to_path_buf());
         store.initialize("session-a").unwrap();
         let recorder = Arc::new(ReleaseLogRecorder::new("session-a", store, 0, None));
@@ -323,20 +343,15 @@ fn process_backend_persists_safe_output_before_the_command_completes() {
                 "-NoLogo".into(),
                 "-NoProfile".into(),
                 "-NonInteractive".into(),
-                "-Command".into(),
-                concat!(
-                    "[Console]::Out.Write(\"first`n\"); ",
-                    "[Console]::Out.Flush(); ",
-                    "Start-Sleep -Milliseconds 750; ",
-                    "[Console]::Out.Write(\"second-tail\")",
-                )
-                .into(),
+                "-File".into(),
+                stream_script.to_string_lossy().into_owned(),
+                release_file.to_string_lossy().into_owned(),
             ],
         };
         let reader = ReleaseLogStore::new(git_dir.path().to_path_buf());
         let run = backend.run(repository.path(), &command);
         tokio::pin!(run);
-        let deadline = tokio::time::sleep(std::time::Duration::from_secs(10));
+        let deadline = tokio::time::sleep(WINDOWS_PROCESS_TEST_TIMEOUT);
         tokio::pin!(deadline);
 
         loop {
@@ -352,7 +367,8 @@ fn process_backend_persists_safe_output_before_the_command_completes() {
             }
         }
 
-        let evidence = tokio::time::timeout(std::time::Duration::from_secs(10), &mut run)
+        fs::write(&release_file, b"release").unwrap();
+        let evidence = tokio::time::timeout(WINDOWS_PROCESS_TEST_TIMEOUT, &mut run)
             .await
             .expect("command should complete after the delayed output")
             .unwrap();

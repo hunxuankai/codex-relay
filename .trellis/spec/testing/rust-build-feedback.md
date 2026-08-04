@@ -133,6 +133,8 @@ npm run test:rust:lib -- provider_http
 
 - Windows 测试模块使用 `PROCESS_TREE_TEST_TIMEOUT: Duration = Duration::from_secs(30)` 作为有界的
   测试级总预算。
+- release-console 集成测试使用同值的 `WINDOWS_PROCESS_TEST_TIMEOUT`；其流式 PowerShell 夹具还必须
+  在 20 秒内未收到释放标记时自行失败，短于外层测试预算。
 - 预期真实 PowerShell 正常完成、产生输出或消费 stdin 的测试统一把该常量传给 runner；只有专门
   验证 `Timeout` / `Cancelled` 的测试可以传入更短的行为预算。
 - 父 PowerShell 必须使用 `.NET System.Diagnostics.ProcessStartInfo` 直接创建后代，设置
@@ -162,6 +164,8 @@ npm run test:rust:lib -- provider_http
 - 30 秒仅是 CI 测试的冷启动容差，不是产品行为、性能承诺或默认运行超时。
 - 普通输出捕获、结构化 stdin、流式事件和大 stdout 文件测试不得各自重新引入 5 秒等本机经验预算；
   共享常量让冷 Runner 容差保持一致，条件满足后测试仍会立即继续。
+- release-console 的生产 `LOCAL_COMMAND_TIMEOUT` 保持 2 小时。集成测试不得用 10 秒外层等待模拟该
+  产品预算；测试脚本自截止负责防止断言失败后留下长命令，30 秒外层预算只约束测试。
 
 ### 4. 验证与错误矩阵
 
@@ -174,6 +178,8 @@ npm run test:rust:lib -- provider_http
 | 超限输出测试先返回 `Timeout` | 保留失败并调查吞吐、读取或预算，不把 `Timeout` 接受为等价结果 |
 | 首段输出已到达，但 PowerShell 在 5 秒内未完成 | 正常完成测试继续使用共享 30 秒预算；不得把 CI 调度延迟当成产品超时 |
 | 流式测试收到首段输出 | runner 必须仍未结束；写入临时释放标记后再断言完整输出与退出码 |
+| release-console 已持久化首段日志 | 写入临时释放标记；30 秒内返回完整日志与退出码，脚本自身最多等待 20 秒 |
+| release-console 测试在写标记前失败 | 子脚本按 ASCII 稳定码自截止，不继续占用 2 小时生产命令预算 |
 | 普通产品调用传入更短超时 | 仍按调用方超时返回 `Timeout`，不受测试常量影响 |
 
 ### 5. 良好/基线/错误用例
@@ -182,6 +188,8 @@ npm run test:rust:lib -- provider_http
   继续，不等待子 PowerShell 执行用户脚本；启动阶段和异常写入临时诊断文件。
 - 良好：流式测试收到 `first` 后确认 runner 未完成，写入临时释放标记，随后得到 `firstsecond` 和
   退出码 0；没有固定等待窗口。
+- 良好：release-console 从持久化日志读取到 `first\n` 后写标记，随后读取 `second-tail`；夹具未收到
+  标记时在 20 秒自行退出。
 - 基线：缓存命中的本机在数百毫秒内满足条件，测试仍快速结束。
 - 错误：在该启动链中使用 `Start-Process` ShellExecute 包装、让子脚本执行 `Set-Content -Value $PID`，
   把“已创建后代”错误提升为“后代 PowerShell 已完成冷启动”；或用 `for _ in 0..250` 把轮询隐式限制
@@ -197,6 +205,8 @@ npm run test:rust:lib -- provider_http
   `output_limit_terminates_the_process_tree` 和
   `generic_runner_streams_output_before_process_completion` 在相关修复时各连续运行至少 3 次，确认没有
   偶然缓存命中。
+- release-console `process_backend_persists_safe_output_before_the_command_completes` 在相关修复时连续
+  运行至少 3 次，并运行完整 `local_verification` 集成套件。
 - 完成前运行 `npm run check`；GitHub Actions 的冷 runner 也必须通过当前完整 core 测试后才能
   进入 Draft 构建。
 
@@ -277,6 +287,10 @@ SafeProcessRunner::default()
 - **预防机制**：所有预期真实 PowerShell 正常完成的测试复用共享冷 Runner 预算；跨异步边界的先后关系
   使用临时标记等可观察条件协调；相关 `codex_process` 套件连续 3 次、完整本地门禁和唯一远端发布 Run
   共同构成完成证据。
+- **传播补充**：第一次系统性扫描只覆盖 core 文件，遗漏了 release-console 对同一
+  `SafeProcessRunner` 的集成测试。Run `30873762688` 中 core 249 项全部通过，随后该集成测试在固定
+  10 秒完成等待返回 `Elapsed(())`。预防扫描必须覆盖 `tools/release-console/src-tauri/tests`，不能按
+  crate 边界提前停止。
 
 ## Scenario：Windows PowerShell 原生命令诊断
 
