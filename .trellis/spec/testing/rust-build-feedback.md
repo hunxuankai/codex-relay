@@ -124,8 +124,8 @@ npm run test:rust:lib -- provider_http
 
 ### 1. 范围/触发条件
 
-- 触发条件：Windows Rust 测试启动 PowerShell、创建后代进程、等待 PID 文件，或通过大量 stdout
-  触发进程输出上限。
+- 触发条件：Windows Rust 测试启动 PowerShell、创建后代进程、等待 PID 文件、验证进程完成前的
+  流式输出，或通过大量 stdout 触发进程输出上限。
 - 目标是让测试验证 Job Object 的取消与输出限制语义，而不是把 GitHub 冷 runner 的进程启动和
   管道吞吐误当成 5 秒产品 SLA。
 
@@ -133,6 +133,8 @@ npm run test:rust:lib -- provider_http
 
 - Windows 测试模块使用 `PROCESS_TREE_TEST_TIMEOUT: Duration = Duration::from_secs(30)` 作为有界的
   测试级总预算。
+- 预期真实 PowerShell 正常完成、产生输出或消费 stdin 的测试统一把该常量传给 runner；只有专门
+  验证 `Timeout` / `Cancelled` 的测试可以传入更短的行为预算。
 - 父 PowerShell 必须使用 `.NET System.Diagnostics.ProcessStartInfo` 直接创建后代，设置
   `UseShellExecute = false` 与 `CreateNoWindow = true`；不要在“挂起后加入 Job Object 再恢复”的
   启动链中依赖 `Start-Process` 的 ShellExecute 包装。
@@ -141,12 +143,14 @@ npm run test:rust:lib -- provider_http
   或测试预算到期。
 - 父脚本在创建前、创建后和写入 PID 后写入临时状态文件；捕获异常时写入临时错误文件，超时消息必须带上
   这些非秘密诊断，不能只报告一个无区分度的超时。
-- `SystemCodexProcessBackend::run(..., PROCESS_TREE_TEST_TIMEOUT, ...)` 只用于需要等待 PowerShell
-  启动、后代创建或输出上限的测试；生产调用方的显式超时不因此改变。
+- `SystemCodexProcessBackend::run(..., PROCESS_TREE_TEST_TIMEOUT, ...)` 用于需要等待 PowerShell
+  正常完成、启动后代、产生输出或触发输出上限的测试；生产调用方的显式超时不因此改变。
 
 ### 3. 契约
 
 - 等待后代进程时必须轮询“PID 文件已写入且可解析”这一真实条件，不能用固定 sleep 猜测启动时间。
+- 验证进程完成前流式输出时，子进程必须先 flush 首段输出，再等待测试位于临时目录的释放标记；
+  测试收到事件并确认 runner 尚未结束后写入标记。不得用固定 500 毫秒 sleep 猜测测试线程会及时调度。
 - PID 必须由创建后代的父进程从 `ProcessStartInfo` 返回的 `Process` 对象写入；不能要求子 PowerShell 先完成
   自身冷启动并执行脚本后再写 PID，因为那验证的是子运行时就绪，不是 Job Object 所需的“后代已创建”。
 - `Start-Process` 在本机缓存环境可能通过，但其 ShellExecute 包装在冷 runner 的挂起/Job Object 嵌套链中
@@ -156,6 +160,8 @@ npm run test:rust:lib -- provider_http
 - 输出上限测试必须给冷 PowerShell 和管道足够的测试预算，再断言错误为 `OutputTooLarge`；若先得到
   `Timeout`，应视为测试预算或实现退化的真实失败，不能放宽断言。
 - 30 秒仅是 CI 测试的冷启动容差，不是产品行为、性能承诺或默认运行超时。
+- 普通输出捕获、结构化 stdin、流式事件和大 stdout 文件测试不得各自重新引入 5 秒等本机经验预算；
+  共享常量让冷 Runner 容差保持一致，条件满足后测试仍会立即继续。
 
 ### 4. 验证与错误矩阵
 
@@ -166,23 +172,32 @@ npm run test:rust:lib -- provider_http
 | deadline 内始终没有有效 PID | 测试失败消息同时包含父脚本最后阶段和异常诊断（若存在） |
 | 超限输出在 deadline 内被读取 | 返回 `OutputTooLarge`，并终止进程树 |
 | 超限输出测试先返回 `Timeout` | 保留失败并调查吞吐、读取或预算，不把 `Timeout` 接受为等价结果 |
+| 首段输出已到达，但 PowerShell 在 5 秒内未完成 | 正常完成测试继续使用共享 30 秒预算；不得把 CI 调度延迟当成产品超时 |
+| 流式测试收到首段输出 | runner 必须仍未结束；写入临时释放标记后再断言完整输出与退出码 |
 | 普通产品调用传入更短超时 | 仍按调用方超时返回 `Timeout`，不受测试常量影响 |
 
 ### 5. 良好/基线/错误用例
 
 - 良好：父进程用 `ProcessStartInfo` 直接创建后代，在返回时写入 `$child.Id`，测试按 20 毫秒轮询并立即
   继续，不等待子 PowerShell 执行用户脚本；启动阶段和异常写入临时诊断文件。
+- 良好：流式测试收到 `first` 后确认 runner 未完成，写入临时释放标记，随后得到 `firstsecond` 和
+  退出码 0；没有固定等待窗口。
 - 基线：缓存命中的本机在数百毫秒内满足条件，测试仍快速结束。
 - 错误：在该启动链中使用 `Start-Process` ShellExecute 包装、让子脚本执行 `Set-Content -Value $PID`，
   把“已创建后代”错误提升为“后代 PowerShell 已完成冷启动”；或用 `for _ in 0..250` 把轮询隐式限制
   为 5 秒。
+- 错误：正常完成测试硬编码 `Duration::from_secs(5)`，或用 `Start-Sleep -Milliseconds 500` 证明
+  “输出发生在完成前”；两者都把本机调度速度误当成 CI 契约。
 
 ### 6. 必需测试
 
-- Windows `codex_process` 5 项专项测试必须全部通过。
-- `cancellation_terminates_descendant_processes_in_the_job` 和
-  `output_limit_terminates_the_process_tree` 在修复时各连续运行至少 3 次，确认没有偶然缓存命中。
-- 完成前运行 `npm run check`；GitHub Actions 的冷 runner 也必须通过相同 172 项 core 测试后才能
+- Windows `codex_process` 专项测试必须全部通过；正常完成测试统一断言共享预算，显式超时和取消
+  测试继续断言调用方行为预算。
+- `cancellation_terminates_descendant_processes_in_the_job`、
+  `output_limit_terminates_the_process_tree` 和
+  `generic_runner_streams_output_before_process_completion` 在相关修复时各连续运行至少 3 次，确认没有
+  偶然缓存命中。
+- 完成前运行 `npm run check`；GitHub Actions 的冷 runner 也必须通过当前完整 core 测试后才能
   进入 Draft 构建。
 
 ### 7. 错误与正确做法
@@ -202,6 +217,13 @@ for _ in 0..250 {
     }
     tokio::time::sleep(Duration::from_millis(20)).await;
 }
+```
+
+```rust
+SafeProcessRunner::default()
+    .run(invocation, Duration::from_secs(5), cancel, Some(sink))
+    .await?;
+// 子脚本固定 sleep 500ms，假设测试线程必然在窗口内获得调度。
 ```
 
 #### 正确
@@ -227,6 +249,13 @@ while Instant::now() < deadline {
 }
 ```
 
+```rust
+SafeProcessRunner::default()
+    .run(invocation, PROCESS_TREE_TEST_TIMEOUT, cancel, Some(sink))
+    .await?;
+// 子脚本 flush 首段输出后等待临时释放标记；测试观察事件后立即写标记。
+```
+
 ### 8. 失败复盘与防复发
 
 - **根因类别**：D（测试覆盖缺口）+ E（隐式时序/启动边界假设）。第一个修复把轮询预算从 5 秒扩大到
@@ -238,6 +267,16 @@ while Instant::now() < deadline {
 - **预防机制**：测试夹具使用无 ShellExecute 的直接创建 API；阶段/异常诊断仅写入安全临时目录，并在
   deadline 错误中呈现；专项测试和完整 `npm run check` 必须在进入发布 Draft 前通过。该修复不改变生产
   Job Object、取消、超时或输出上限逻辑。
+
+### 9. 流式输出固定短预算复盘
+
+- **根因类别**：D（冷 Runner 覆盖缺口）+ E（隐式调度假设）。新增通用 runner 测试没有复用同模块
+  已建立的 `PROCESS_TREE_TEST_TIMEOUT`，并用固定 500 毫秒 sleep 表达“进程仍在运行”。
+- **区分证据**：Run `30869666756` 已收到 `first`，但用例在约 5.03 秒精确返回 `Timeout`；同轮其余
+  248 项 core 测试和本机 249 项基线通过，排除了发布监控、版本门禁和流式读取完全失效。
+- **预防机制**：所有预期真实 PowerShell 正常完成的测试复用共享冷 Runner 预算；跨异步边界的先后关系
+  使用临时标记等可观察条件协调；相关 `codex_process` 套件连续 3 次、完整本地门禁和唯一远端发布 Run
+  共同构成完成证据。
 
 ## Scenario：Windows PowerShell 原生命令诊断
 

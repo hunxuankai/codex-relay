@@ -837,7 +837,7 @@ mod tests {
                     directory.path(),
                     "[Console]::Out.Write('safe-out'); [Console]::Error.Write('safe-err')",
                 ),
-                Duration::from_secs(5),
+                PROCESS_TREE_TEST_TIMEOUT,
                 cancel,
             )
             .await
@@ -1074,11 +1074,27 @@ try {
     #[serial(codex_process)]
     async fn generic_runner_streams_output_before_process_completion() {
         let directory = tempfile::tempdir().unwrap();
+        let stream_script = directory.path().join("stream-output.ps1");
+        let release_file = directory.path().join("release-stream");
+        fs::write(
+            &stream_script,
+            r#"param([string]$ReleaseFile)
+$ErrorActionPreference = 'Stop'
+[Console]::Out.Write('first')
+[Console]::Out.Flush()
+while (-not (Test-Path -LiteralPath $ReleaseFile)) {
+    Start-Sleep -Milliseconds 20
+}
+[Console]::Out.Write('second')
+"#,
+        )
+        .unwrap();
         let (event_sender, mut events) = tokio::sync::mpsc::unbounded_channel();
         let sink = Arc::new(ChannelSink {
             sender: event_sender,
         });
         let (_cancel_sender, cancel) = tokio::sync::watch::channel(false);
+        let child_release_file = release_file.clone();
         let run = tokio::spawn(async move {
             SafeProcessRunner::default()
                 .run(
@@ -1088,22 +1104,23 @@ try {
                             "-NoLogo".into(),
                             "-NoProfile".into(),
                             "-NonInteractive".into(),
-                            "-Command".into(),
-                            "[Console]::Out.Write('first'); [Console]::Out.Flush(); Start-Sleep -Milliseconds 500; [Console]::Out.Write('second')".into(),
+                            "-File".into(),
+                            stream_script.as_os_str().to_owned(),
+                            child_release_file.as_os_str().to_owned(),
                         ],
                         env: filter_inherited_environment(std::env::vars_os()),
                         workdir: directory.path().to_owned(),
                         stdin: None,
                         stdout_file: None,
                     },
-                    Duration::from_secs(5),
+                    PROCESS_TREE_TEST_TIMEOUT,
                     cancel,
                     Some(sink),
                 )
                 .await
         });
 
-        let (stream, first_chunk) = tokio::time::timeout(Duration::from_secs(2), events.recv())
+        let (stream, first_chunk) = tokio::time::timeout(PROCESS_TREE_TEST_TIMEOUT, events.recv())
             .await
             .expect("first output should arrive while the process is running")
             .expect("output channel should remain open");
@@ -1115,6 +1132,7 @@ try {
         );
         assert_eq!(first_chunk, b"first");
         assert!(!run.is_finished());
+        fs::write(&release_file, b"release").unwrap();
 
         let output = run.await.unwrap().unwrap();
         assert_eq!(output.exit_code, Some(0));
@@ -1145,7 +1163,7 @@ try {
         assert!(!debug.contains("structured-input"));
 
         let output = SafeProcessRunner::default()
-            .run(invocation, Duration::from_secs(5), cancel, None)
+            .run(invocation, PROCESS_TREE_TEST_TIMEOUT, cancel, None)
             .await
             .unwrap();
 
