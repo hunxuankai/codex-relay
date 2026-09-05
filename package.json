@@ -58,7 +58,7 @@
     "typecheck:release-console": "npm run typecheck --workspace @codex-relay/release-console"
   },
   "type": "module",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "workspaces": [
     "tools/release-console"
   ]

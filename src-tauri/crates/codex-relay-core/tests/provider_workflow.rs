@@ -1,5 +1,7 @@
 use codex_relay_core::infrastructure::path_service::AppPaths;
-use codex_relay_core::models::provider::{CreateProviderInput, UpdateProviderInput};
+use codex_relay_core::models::provider::{
+    CreateProviderInput, UpdateProviderInput, UpdateProviderPreferenceInput,
+};
 use codex_relay_core::services::provider_service::ProviderService;
 use serde_json::Value;
 use std::fs;
@@ -59,6 +61,72 @@ fn setup() -> (tempfile::TempDir, AppPaths, ProviderService) {
     fs::write(&paths.provider_preferences_file, INITIAL_PREFERENCES).unwrap();
     let service = ProviderService::new(paths.clone(), "0.1.0");
     (directory, paths, service)
+}
+
+#[tokio::test]
+async fn editing_provider_to_gpt_6_astra_saves_and_applies_model_preferences() {
+    let (_directory, paths, service) = setup();
+    let state = service.list_providers().unwrap();
+    let astra = state
+        .model_catalog
+        .iter()
+        .find(|model| model.id == "gpt-6-astra")
+        .expect("the editor catalog should offer gpt-6-astra");
+    assert_eq!(astra.default_reasoning_effort, "low");
+    assert_eq!(
+        astra.reasoning_efforts,
+        ["low", "medium", "high", "xhigh", "max", "ultra"]
+    );
+    assert!(astra.supports_fast);
+
+    service
+        .update_provider(UpdateProviderInput {
+            id: "provider-a".into(),
+            name: "Provider A".into(),
+            wire_api: "responses".into(),
+            models: vec!["gpt-6-astra".into()],
+            fast_enabled: true,
+            sync_if_active: true,
+            expected_files: state.fingerprints,
+        })
+        .await
+        .unwrap();
+
+    let state = service.list_providers().unwrap();
+    let provider = &state.providers[0];
+    assert_eq!(provider.models, ["gpt-6-astra"]);
+    assert_eq!(provider.selected_model.as_deref(), Some("gpt-6-astra"));
+    assert_eq!(provider.reasoning_efforts["gpt-6-astra"], "low");
+    assert!(provider.fast_enabled);
+    let config = fs::read_to_string(&paths.config_file).unwrap();
+    let document = config.parse::<toml_edit::DocumentMut>().unwrap();
+    assert_eq!(document["model"].as_str(), Some("gpt-6-astra"));
+    assert_eq!(document["model_reasoning_effort"].as_str(), Some("low"));
+    assert_eq!(document["service_tier"].as_str(), Some("fast"));
+
+    service
+        .update_provider_preference(UpdateProviderPreferenceInput {
+            provider_id: "provider-a".into(),
+            model: "gpt-6-astra".into(),
+            reasoning_effort: "ultra".into(),
+            expected_files: state.fingerprints,
+        })
+        .await
+        .unwrap();
+
+    let state = service.list_providers().unwrap();
+    assert_eq!(state.providers[0].reasoning_efforts["gpt-6-astra"], "ultra");
+    let config = fs::read_to_string(&paths.config_file).unwrap();
+    let document = config.parse::<toml_edit::DocumentMut>().unwrap();
+    assert_eq!(document["model_reasoning_effort"].as_str(), Some("ultra"));
+    assert_eq!(document["model_provider"].as_str(), Some("provider-a"));
+    assert_eq!(document["features"]["web_search"].as_bool(), Some(true));
+    assert_eq!(
+        document["model_providers"]["provider-a"]["custom_option"].as_str(),
+        Some("keep-me")
+    );
+    assert!(config.contains("# preserve this user comment"));
+    assert_eq!(fs::read_to_string(&paths.auth_file).unwrap(), INITIAL_AUTH);
 }
 
 #[tokio::test]

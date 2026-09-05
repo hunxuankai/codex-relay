@@ -291,7 +291,7 @@ Codex Provider 配置的主要数据源。每个 Provider 的实际 `base_url` �
 
 ### Provider Fast 偏好
 
-Fast 默认关闭。当前内置目录支持 `gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5` 和 `gpt-5.4`；`gpt-5.4-mini` 不支持。模型不支持时开关保持关闭并显示原因；已开启 Fast 后把模型集合改到不支持的偏好模型，会在同一 Provider 事务中自动关闭 Fast。Relay 不提供通用 `service_tier` 下拉框，也不会在运行时调用 `codex debug models` 或通过真实网络探测能力。
+Fast 默认关闭。当前内置目录支持 `gpt-6-astra`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5` 和 `gpt-5.4`；`gpt-5.4-mini` 不支持。`gpt-6-astra` 的推理强度默认为 `low`，可选 `low`、`medium`、`high`、`xhigh`、`max` 和 `ultra`。模型不支持时开关保持关闭并显示原因；已开启 Fast 后把模型集合改到不支持的偏好模型，会在同一 Provider 事务中自动关闭 Fast。Relay 不提供通用 `service_tier` 下拉框，也不会在运行时调用 `codex debug models` 或通过真实网络探测能力。
 
 应用 Fast Provider 时，Relay 在 `config.toml` 顶层写入 `service_tier = "fast"`，并单向确保 `[features].fast_mode = true`。关闭 Fast 只删除顶层 `service_tier`，不会删除 `fast_mode` 或写入 `fast_mode = false`。修改当前 Provider 的 Fast 会立即同步当前 Codex 配置；修改非当前 Provider 只保存偏好，等该 Provider 被应用时再投影。Fast 映射到 priority 服务层，可能使用更多 credits 或产生更高 API 费用。官方依据见 [Codex Configuration Reference](https://developers.openai.com/codex/config-reference/#configtoml) 与 [Speed 文档](https://learn.chatgpt.com/docs/agent-configuration/speed)。
 
