@@ -7,7 +7,7 @@ use crate::models::{
     ReleaseSessionSnapshot, SafeRepositoryPushRequest,
 };
 use std::sync::Arc;
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, InvokeError};
 
 struct TauriReleaseEventSink(Channel<ReleaseEvent>);
 
@@ -227,7 +227,7 @@ async fn session_command(
 pub async fn test_release_connection(
     state: tauri::State<'_, AppState>,
     proxy: ReleaseProxySettings,
-) -> Result<CommandResult<ReleaseConnectionTestResult>, ()> {
+) -> Result<CommandResult<ReleaseConnectionTestResult>, InvokeError> {
     Ok(test_release_connection_inner(&state, proxy).await)
 }
 
@@ -236,7 +236,7 @@ pub async fn inspect_release_repository(
     state: tauri::State<'_, AppState>,
     repository_path: String,
     proxy: ReleaseProxySettings,
-) -> Result<CommandResult<ReleasePreflightResult>, ()> {
+) -> Result<CommandResult<ReleasePreflightResult>, InvokeError> {
     Ok(inspect_release_repository_inner(&state, repository_path, proxy).await)
 }
 
@@ -244,7 +244,7 @@ pub async fn inspect_release_repository(
 pub async fn push_release_repository(
     state: tauri::State<'_, AppState>,
     request: SafeRepositoryPushRequest,
-) -> Result<CommandResult<ReleasePreflightResult>, ()> {
+) -> Result<CommandResult<ReleasePreflightResult>, InvokeError> {
     Ok(push_release_repository_inner(&state, request).await)
 }
 
@@ -255,7 +255,7 @@ pub async fn prepare_release_plan(
     target_version: String,
     notes: Option<String>,
     proxy: ReleaseProxySettings,
-) -> Result<CommandResult<ReleasePlanSummary>, ()> {
+) -> Result<CommandResult<ReleasePlanSummary>, InvokeError> {
     Ok(prepare_release_plan_inner(&state, repository_path, target_version, notes, proxy).await)
 }
 
@@ -265,7 +265,7 @@ pub async fn start_release(
     plan_id: String,
     proxy: ReleaseProxySettings,
     on_event: Channel<ReleaseEvent>,
-) -> Result<CommandResult<ReleaseSession>, ()> {
+) -> Result<CommandResult<ReleaseSession>, InvokeError> {
     Ok(start_release_inner(
         &state,
         plan_id,
@@ -279,7 +279,7 @@ pub async fn start_release(
 pub async fn get_release_session(
     state: tauri::State<'_, AppState>,
     repository_path: String,
-) -> Result<CommandResult<Option<ReleaseSessionSnapshot>>, ()> {
+) -> Result<CommandResult<Option<ReleaseSessionSnapshot>>, InvokeError> {
     Ok(get_release_session_inner(&state, repository_path).await)
 }
 
@@ -288,7 +288,7 @@ pub async fn get_release_logs(
     state: tauri::State<'_, AppState>,
     session_id: String,
     before_sequence: Option<u64>,
-) -> Result<CommandResult<ReleaseLogPage>, ()> {
+) -> Result<CommandResult<ReleaseLogPage>, InvokeError> {
     Ok(get_release_logs_inner(&state, session_id, before_sequence).await)
 }
 
@@ -298,7 +298,7 @@ pub async fn resume_release(
     session_id: String,
     proxy: ReleaseProxySettings,
     on_event: Channel<ReleaseEvent>,
-) -> Result<CommandResult<ReleaseSession>, ()> {
+) -> Result<CommandResult<ReleaseSession>, InvokeError> {
     Ok(resume_release_inner(
         &state,
         session_id,
@@ -312,7 +312,7 @@ pub async fn resume_release(
 pub async fn cancel_release(
     state: tauri::State<'_, AppState>,
     session_id: String,
-) -> Result<CommandResult<ReleaseSession>, ()> {
+) -> Result<CommandResult<ReleaseSession>, InvokeError> {
     Ok(cancel_release_inner(&state, session_id).await)
 }
 
@@ -323,7 +323,7 @@ pub async fn publish_release(
     expected_draft_identity: DraftIdentity,
     proxy: ReleaseProxySettings,
     on_event: Channel<ReleaseEvent>,
-) -> Result<CommandResult<ReleaseSession>, ()> {
+) -> Result<CommandResult<ReleaseSession>, InvokeError> {
     Ok(publish_release_inner(
         &state,
         session_id,
@@ -339,6 +339,6 @@ pub async fn export_release_summary(
     state: tauri::State<'_, AppState>,
     session_id: String,
     destination_path: String,
-) -> Result<CommandResult<String>, ()> {
+) -> Result<CommandResult<String>, InvokeError> {
     Ok(export_release_summary_inner(&state, session_id, destination_path).await)
 }

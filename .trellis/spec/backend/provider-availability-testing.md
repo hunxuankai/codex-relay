@@ -11,19 +11,21 @@
 ### 2. 签名
 
 ```rust
+use tauri::ipc::InvokeError;
+
 pub async fn test_provider_api(
     state: State<'_, AppState>,
     provider_id: String,
     request_id: String,
     use_proxy: bool,
-) -> Result<CommandResult<ProviderAvailabilityResult>, ()>;
+) -> Result<CommandResult<ProviderAvailabilityResult>, InvokeError>;
 
 pub async fn test_provider_codex_compatibility(
     state: State<'_, AppState>,
     provider_id: String,
     request_id: String,
     use_proxy: bool,
-) -> Result<CommandResult<ProviderAvailabilityResult>, ()>;
+) -> Result<CommandResult<ProviderAvailabilityResult>, InvokeError>;
 
 pub fn cancel_provider_test(
     state: State<'_, AppState>,

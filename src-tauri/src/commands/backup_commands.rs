@@ -3,6 +3,7 @@ use crate::commands::command_result;
 use crate::error::CommandResult;
 use crate::models::backup::{BackupFileName, BackupInventory};
 use crate::models::provider::ProviderMutationOutcome;
+use tauri::ipc::InvokeError;
 
 pub(crate) fn list_backups_inner(state: &AppState) -> CommandResult<BackupInventory> {
     command_result(state.provider_service.list_backups())
@@ -42,7 +43,7 @@ pub async fn restore_backup(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     directory_name: String,
-) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+) -> Result<CommandResult<ProviderMutationOutcome>, InvokeError> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),

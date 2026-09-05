@@ -46,6 +46,63 @@ interface CommandResult<T> {
 
 command 只能：解析参数 → 调用一次服务 → 映射 `CommandResult<T>` → 触发必要的安全刷新。不得直接读写四个受管文件，不得返回堆栈、内部路径错误、文件全文或普通列表中的密钥。只有 `get_provider_api_keys_for_management` 可在显式管理边界返回完整密钥，并必须使用脱敏 `Debug`。
 
+## Scenario：Tauri 异步命令的传输结果
+
+### 1. 范围/触发条件
+
+主应用与发布控制台中使用 `State<'_, AppState>` 等引用或生命周期参数的异步 Tauri command。
+
+### 2. 签名
+
+```rust
+use tauri::ipc::InvokeError;
+
+pub async fn run_extended_self_check(
+    state: tauri::State<'_, AppState>,
+) -> Result<CommandResult<HealthReport>, InvokeError>;
+```
+
+### 3. 契约
+
+- Tauri 宏要求此类 async command 保留外层 `Result`；错误参数统一使用框架的 `InvokeError`。
+- 业务成功和失败继续返回 `Ok(CommandResult<T>)`。业务错误保留安全 `code/message`，不得改成外层 `Err`，以免改变前端 Promise 与 DTO 契约。
+- 外层只满足 IPC 传输接口；Tauri 拆开 Result 后序列化 DTO，因此不能向前端新增 `Ok`/`Err` JSON 包装。
+- 不使用 `Result<_, ()>` 或抑制 `clippy::result_unit_err`；不靠降低工具链绕过严格检查。
+- 当前锁定 serde 1.0.229 未实现 `Infallible: Serialize`，Tauri 2.11.5 也没有相应 `Into<InvokeError>` 转换，不能直接替换为 `Infallible`。
+
+### 4. 验证与错误矩阵
+
+| 条件 | 必需结果 |
+| --- | --- |
+| 带生命周期参数的 async command 去掉外层 Result | Tauri 宏拒绝编译 |
+| 外层错误为 `()`，使用 Rust/Clippy 1.98 且 `-D warnings` | `result_unit_err` 阻止通过 |
+| 外层错误为 `InvokeError`，业务失败仍在 DTO 中 | IPC 返回既有 `success=false` 和安全错误，不新增 Promise 拒绝路径 |
+| 本地与 CI 工具链版本不同 | 记录 `rustc --version`、`cargo clippy --version`，用实际 CI 版本核验修复 |
+
+### 5. 良好/基线/错误用例
+
+- 良好：外层 `Result<CommandResult<T>, InvokeError>`，函数体只包装既有安全 DTO。
+- 基线：同步 command 继续直接返回 `CommandResult<T>`，无需机械增加 Result。
+- 错误：用 `Err(InvokeError::from_error(error))` 替代既有业务错误映射，泄漏内部错误并改变前端行为。
+
+### 6. 必需测试
+
+- 使用实际 CI 工具链运行 workspace `cargo fmt --check` 和 `cargo clippy --workspace --all-targets --all-features -- -D warnings`，覆盖两套应用的宏展开。
+- 运行既有 command、typed service 与安全错误序列化测试，确认 DTO、参数与错误消息不变。
+- 发布前运行完整 `npm run check` 和普通构建；旧工具链的通过记录不能替代新版 Clippy 的证据。
+
+### 7. 错误与正确做法
+
+```rust
+// 错误：单位错误会触发严格 Clippy。
+async fn command(...) -> Result<CommandResult<T>, ()> { ... }
+
+// 正确：保留 Tauri 传输 Result 和既有业务响应。
+async fn command(...) -> Result<CommandResult<T>, InvokeError> {
+    Ok(existing_safe_command_result)
+}
+```
+
 ## Provider 写操作矩阵
 
 | 操作 | 必须经过 | 关键验证 |

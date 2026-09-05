@@ -2,6 +2,7 @@ use crate::app_state::AppState;
 use crate::commands::command_result;
 use crate::error::{AppError, CommandResult};
 use crate::models::provider_availability::ProviderAvailabilityResult;
+use tauri::ipc::InvokeError;
 use uuid::Uuid;
 
 fn parse_request_id(value: &str) -> Result<Uuid, AppError> {
@@ -38,7 +39,7 @@ pub async fn test_provider_api(
     provider_id: String,
     request_id: String,
     use_proxy: bool,
-) -> Result<CommandResult<ProviderAvailabilityResult>, ()> {
+) -> Result<CommandResult<ProviderAvailabilityResult>, InvokeError> {
     Ok(test_provider_api_inner(&state, provider_id, request_id, use_proxy).await)
 }
 
@@ -66,7 +67,7 @@ pub async fn test_provider_codex_compatibility(
     provider_id: String,
     request_id: String,
     use_proxy: bool,
-) -> Result<CommandResult<ProviderAvailabilityResult>, ()> {
+) -> Result<CommandResult<ProviderAvailabilityResult>, InvokeError> {
     Ok(test_provider_codex_compatibility_inner(&state, provider_id, request_id, use_proxy).await)
 }
 

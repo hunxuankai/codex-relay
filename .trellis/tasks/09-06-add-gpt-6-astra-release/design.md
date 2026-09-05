@@ -17,3 +17,11 @@
 Draft 审计绑定候选 SHA，校验版本、最终说明、安装器与两种 Windows 平台清单、文件大小和 SHA-256、独立签名关联；优先用已有工具验证 updater 签名。发布后核验 Latest 下载、标签目标和清理工作流。公开后发现问题只发布更高 SemVer 修复，不替换已公开资产。
 
 本轮不改安装/卸载/数据保留代码；未执行的 Sandbox/VM、真实安装、UAC、重启或应用内升级保留为未验证。
+
+## 发布阻断修复：Tauri 传输错误类型
+
+首次 CI Run 使用 Rust/Clippy 1.98.0，本地原工具链为 1.97.1；新版 lint 对 29 个既有 `Result<CommandResult<T>, ()>` 报 `clippy::result_unit_err`。Tauri 2.11.5/tauri-macros 2.6.3 对带 `State<'_, _>` 的 async command 仍要求外层 Result，故不能删除该层。
+
+五个 command 文件统一改为 `Result<CommandResult<T>, tauri::ipc::InvokeError>`。这是 Tauri 支持的传输错误类型，不新增依赖或错误封装；所有函数体继续返回 `Ok(CommandResult<T>)`，不把业务错误移到外层 Err。锁定 serde 1.0.229 没有 Infallible 的 Serialize 实现，Tauri 也没有对应转换，不采用该替代。
+
+红色证据来自本轮实际 CI。安装独立 1.98.0 工具链而不改变系统默认，使用该版本 Clippy、完整检查和普通构建核验最终候选；新候选仍发布尚未占用的 `0.5.1`。同步后端签名规范并记录工具链差异，保留原失败 Run。

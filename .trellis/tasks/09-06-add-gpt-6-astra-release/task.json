@@ -29,7 +29,14 @@
     "package-lock.json",
     "src-tauri/Cargo.toml",
     "src-tauri/crates/codex-relay-core/Cargo.toml",
-    "src-tauri/Cargo.lock"
+    "src-tauri/Cargo.lock",
+    "src-tauri/src/commands/provider_commands.rs",
+    "src-tauri/src/commands/provider_availability_commands.rs",
+    "src-tauri/src/commands/backup_commands.rs",
+    "src-tauri/src/commands/self_check_commands.rs",
+    "tools/release-console/src-tauri/src/commands.rs",
+    ".trellis/spec/backend/service-boundaries.md",
+    ".trellis/spec/backend/provider-availability-testing.md"
   ],
   "notes": "",
   "meta": {}

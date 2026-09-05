@@ -7,7 +7,8 @@
 - [x] 行为切片：先运行当前 Provider 编辑为 `gpt-6-astra` 的失败回归，再更新内置目录并通过专项测试。
 - [x] 同步 README、补丁版本和最终简体中文发布说明；核对公开 Latest。
 - [x] `trellis-check` inline 审查、`npm run check`、移除签名环境变量后的 `npm run build`、实际产物枚举。
-- [ ] 规范更新判断、精确暂存提交、按 `master` 已配置上游普通推送候选并核验 SHA。
+- [x] 规范更新判断、精确暂存提交、按 `master` 已配置上游普通推送候选并核验 SHA。
+- [ ] CI 阻断修复：29 个 Tauri command 外层错误改为 `InvokeError`，使用 Rust 1.98.0 重新检查、构建并提交新候选。
 - [ ] 触发并监控唯一 GitHub 发布 Run，核验 Draft 与签名资产后公开。
 - [ ] 核验 Latest、公开资产、tag、历史清理；更新验收证据。
 - [ ] 任务归档、会话日志、最终普通 push，确认远程跟踪分支与 HEAD 相等。
@@ -25,7 +26,7 @@
 
 ## 当前检查点
 
-2026-09-06：inline 质量检查与普通 Release/NSIS 构建通过，准备提交候选。
+2026-09-06：Tauri command 类型修复已通过 Rust/Clippy 1.98.0 严格检查、完整 `npm run check` 和普通构建；准备提交并推送新候选，尚未生成 Draft 或公开。
 
 - 红色：`npm run test:rust:provider-workflow -- editing_provider_to_gpt_6_astra_saves_and_applies_model_preferences` 退出 1；唯一失败为编辑目录缺少 `gpt-6-astra`，符合预期，编译约 63 秒。
 - 绿色：`npm run test:rust:provider-workflow` 退出 0，2 项通过；新模型目录、编辑保存、默认 low、Fast、ultra 投影与未知 TOML/认证保留通过，编译约 30 秒、测试约 1 秒。
@@ -38,4 +39,34 @@
 - 规范更新判断：只扩展既有内置模型目录，没有新增 API、存储格式、事务、安装或发布契约；README 已同步实际能力，无需重复扩写长期 spec。
 - 普通构建：进程内移除两个 updater 签名变量后 `npm run build` 退出 0；Rust Release 编译 7 分 46 秒，实际生成主程序与 NSIS，版本均为 `0.5.1`。Vite 保留第三方 PURE 注解和约 504 kB chunk 提示，不影响成功状态；未生成本次 `.sig`，Authenticode 实测 `NotSigned`。
 - 构建产物与后续线上证据见 `release-evidence.md`。`git fetch --no-tags origin main` 后本地与上游差异为 `0/0`。
+- 候选提交 `6270662b8f0bb8000e3ea5bde9e7b8f811317bf1` 已普通推送至 `origin/main`；本地 HEAD、远程跟踪分支及 `git ls-remote` 返回同一 SHA。
+- 真实发布请求验证通过；唯一 dispatch Run `33991815065`（创建 UTC `2026-09-05T21:01:37Z`），已验证 Run 的 headSha 等于候选。
+- 临时操作目录为系统 TEMP 下 `CodexRelay-gpt6-20260906-cb7ca7d8`，保存 check/build 日志、退出码、local-artifacts.json、minisign 0.12 与独立 release-probe 项目；不在真实 Codex/Relay 数据目录。
+- `SystemGhBackend` 审计探针改为系统临时目录下独立 Cargo 项目，复用 `src-tauri/target`。此前仓库临时 example 的复制/清理复合命令被自动策略以 `blocked by policy` 拒绝，未启动；未尝试该仓库写入/删除，替代方式不修改仓库源码。
 - 当前无安装、应用内升级、UAC、重启或卸载证据。
+
+## 当前进度
+
+首次 CI 的前端 338 项和控制台前端 89 项全部通过；Rust Clippy 1.98.0 拒绝主程序 18 个及控制台 11 个 `Result<_, ()>`，后续 Rust tests/Draft 构建未执行。本地此前使用 1.97.1，因此旧检查通过不覆盖新工具链 lint。
+
+## 下一步
+
+修复五个 command 文件（只改传输类型和 import），同步后端规范；用独立安装的 1.98.0 工具链跑严格 Clippy、完整 `npm run check` 和普通 `npm run build`，更新构建证据，创建并推送新候选，再触发新的发布 Run。
+
+临时审计探针已在独立 temp Cargo 项目编译通过；首次 sha2 0.11 的摘要 LowerHex 格式化不兼容已改为逐字节两位十六进制，未改动产品代码。
+
+## 关键决策与验证证据
+
+- 已核验锁定 Tauri 宏、IPC 的 `Into<InvokeError>` 约束和现有 JSON 映射；采用框架 `InvokeError`，不添加 lint allow，不去掉外层 Result，不引入自定义错误或升级依赖。
+- 五个文件共 29 个返回类型已修改；逐文件归一化新增类型/import 后与候选原文件完全相等，证明所有函数体未变。
+- `rustc 1.98.0`、`clippy 0.1.98` 下 workspace fmt 和完整严格 Clippy 退出 0，冷检查约 3 分 32 秒。
+- 设置仅作用于命令进程的 `RUSTUP_TOOLCHAIN=1.98.0` 后，完整 `npm run check` 再次退出 0：Trellis 8 项、根前端 338 项、控制台前端 89 项、Rust 463 项通过及 1 项既有 ignored；Rust 测试冷编译约 8 分 08 秒。
+- 相同 1.98.0 工具链的无 updater 私钥普通构建退出 0，Rust Release 冷编译约 9 分 27 秒；主程序 19445760 字节，NSIS 4702342 字节，版本均 `0.5.1`，哈希见发布证据。
+- `backend/service-boundaries.md` 新增可执行传输结果契约，`backend/provider-availability-testing.md` 两处签名已同步。
+
+## 缺陷复盘
+
+- 根因类别 D/E：现有 Tauri 返回类型依赖旧 Clippy 未对 async 函数报告单位错误；本地与 CI 使用不同 Rust stable 版本，旧本地检查未覆盖新 lint。
+- 修复范围同时覆盖主程序和发布控制台，避免只修首个报告 package 后再次失败。
+- 预防：记录并比对工具链版本；保留框架支持的传输类型和安全 DTO；使用实际 CI 工具链验证，不靠压制警告或降级规避。
+- 历史失败 Run 和旧工具链构建证据保留，不覆盖成新候选成功记录。

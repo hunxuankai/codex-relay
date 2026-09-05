@@ -9,6 +9,7 @@ use crate::models::provider::{
     SaveProviderBaseUrlsInput, SelectProviderApiKeyInput, SelectProviderBaseUrlInput,
     SwitchOutcome, UpdateProviderFastInput, UpdateProviderInput, UpdateProviderPreferenceInput,
 };
+use tauri::ipc::InvokeError;
 
 pub(crate) fn list_providers_inner(state: &AppState) -> CommandResult<ProviderListState> {
     command_result(state.provider_service.list_providers())
@@ -31,7 +32,7 @@ pub async fn reorder_providers(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     input: ReorderProvidersInput,
-) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+) -> Result<CommandResult<ProviderMutationOutcome>, InvokeError> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),
@@ -75,7 +76,7 @@ pub async fn create_provider(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     input: CreateProviderInput,
-) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+) -> Result<CommandResult<ProviderMutationOutcome>, InvokeError> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),
@@ -100,7 +101,7 @@ pub async fn update_provider(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     input: UpdateProviderInput,
-) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+) -> Result<CommandResult<ProviderMutationOutcome>, InvokeError> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),
@@ -125,7 +126,7 @@ pub async fn save_provider_base_urls(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     input: SaveProviderBaseUrlsInput,
-) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+) -> Result<CommandResult<ProviderMutationOutcome>, InvokeError> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),
@@ -150,7 +151,7 @@ pub async fn select_provider_base_url(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     input: SelectProviderBaseUrlInput,
-) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+) -> Result<CommandResult<ProviderMutationOutcome>, InvokeError> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),
@@ -175,7 +176,7 @@ pub async fn save_provider_api_keys(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     input: SaveProviderApiKeysInput,
-) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+) -> Result<CommandResult<ProviderMutationOutcome>, InvokeError> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),
@@ -200,7 +201,7 @@ pub async fn select_provider_api_key(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     input: SelectProviderApiKeyInput,
-) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+) -> Result<CommandResult<ProviderMutationOutcome>, InvokeError> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),
@@ -230,7 +231,7 @@ pub async fn update_provider_preference(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     input: UpdateProviderPreferenceInput,
-) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+) -> Result<CommandResult<ProviderMutationOutcome>, InvokeError> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),
@@ -255,7 +256,7 @@ pub async fn update_provider_fast(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     input: UpdateProviderFastInput,
-) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+) -> Result<CommandResult<ProviderMutationOutcome>, InvokeError> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),
@@ -287,7 +288,7 @@ pub async fn delete_provider(
     state: tauri::State<'_, AppState>,
     provider_id: String,
     expected_files: FileSetFingerprint,
-) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+) -> Result<CommandResult<ProviderMutationOutcome>, InvokeError> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),
@@ -317,7 +318,7 @@ pub async fn apply_provider_connection(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     input: ApplyProviderConnectionInput,
-) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+) -> Result<CommandResult<ProviderMutationOutcome>, InvokeError> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),
@@ -347,7 +348,7 @@ pub async fn restore_provider_connection(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     input: RestoreProviderConnectionInput,
-) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+) -> Result<CommandResult<ProviderMutationOutcome>, InvokeError> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),
@@ -372,7 +373,7 @@ pub async fn switch_provider(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     provider_id: String,
-) -> Result<CommandResult<SwitchOutcome>, ()> {
+) -> Result<CommandResult<SwitchOutcome>, InvokeError> {
     let switch_guard = match state.tray_runtime.try_begin_switch() {
         Some(guard) => guard,
         None => {
@@ -416,7 +417,7 @@ pub async fn import_current_auth_key(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     input: ImportCurrentApiKeyInput,
-) -> Result<CommandResult<ProviderMutationOutcome>, ()> {
+) -> Result<CommandResult<ProviderMutationOutcome>, InvokeError> {
     let application_write = match state.begin_application_write() {
         Ok(application_write) => application_write,
         Err(error) => return Ok(CommandResult::failure(&error)),
