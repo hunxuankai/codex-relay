@@ -12,10 +12,10 @@
   "assignee": "kai",
   "createdAt": "2026-09-06",
   "completedAt": null,
-  "branch": null,
+  "branch": "master",
   "base_branch": "master",
   "worktree_path": null,
-  "commit": null,
+  "commit": "9f0b005a1063a37292a81460fcb418a75f4ef588",
   "pr_url": null,
   "subtasks": [],
   "children": [],
@@ -42,5 +42,19 @@
     ".trellis/spec/testing/rust-build-feedback.md"
   ],
   "notes": "",
-  "meta": {}
+  "meta": {
+    "release": {
+      "version": "0.5.1",
+      "releaseId": 383434699,
+      "candidateSha": "9f0b005a1063a37292a81460fcb418a75f4ef588",
+      "successfulRunId": 34005156714,
+      "failedRunIds": [
+        33991815065,
+        33997571201
+      ],
+      "publishedAt": "2026-09-06T03:11:39Z",
+      "url": "https://github.com/hunxuankai/codex-relay/releases/tag/v0.5.1",
+      "cleanupRunId": 34008378763
+    }
+  }
 }

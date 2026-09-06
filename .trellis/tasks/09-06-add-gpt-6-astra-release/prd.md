@@ -8,7 +8,7 @@
 
 - 用户明确要求“给编辑页的可用模型加一个 gpt-6-astra，然后发布更新”，已授权实施和发布。
 - 编辑页消费后端内置模型目录；权威数据位于 `src-tauri/crates/codex-relay-core/src/services/provider_preference_service.rs`。
-- 开始时本地版本及公开 Latest 均为 `0.5.0`，工作分支 `master` 跟踪 `origin/main`，工作区干净。已确认目标补丁版本为 `0.5.1`，无同名 Release/Tag。
+- 开始时本地版本及公开 Latest 均为 `0.5.0`，工作分支 `master` 跟踪 `origin/main`，工作区干净。目标补丁版本 `0.5.1` 在预检时未被占用，现已完成正式发布。
 - 当前运行时提供的 `gpt-6-astra` 能力为 `low`（默认）、`medium`、`high`、`xhigh`、`max`、`ultra`，支持 priority 服务层。
 
 ## 需求
@@ -27,9 +27,13 @@
 - [x] 既有模型选择及编辑测试通过，本轮 `npm run check` 通过。
 - [x] 使用与失败 CI 相同的 Rust 1.98 验证最终候选，Clippy 严格门禁及完整检查通过，不通过抑制 lint 或降低工具链绕过失败。
 - [x] 不带更新私钥的本地 `npm run build` 通过，记录实际 EXE/NSIS 大小、时间与 SHA-256。
-- [ ] Draft 指向已验证候选，版本、说明、Windows 安装器、`.sig`、`latest.json` 相互一致；更新签名核验通过后公开。
-- [ ] Latest 公开指向新版本，下载清单及资产核验通过；记录历史 Release 清理结果。
-- [ ] 相关提交、Trellis 归档与会话日志完成并推送，远程跟踪分支与本地 HEAD 一致。
+- [x] Draft 指向已验证候选，版本、说明、Windows 安装器、`.sig`、`latest.json` 相互一致；更新签名核验通过后公开。
+- [x] Latest 公开指向新版本，下载清单及资产核验通过；记录历史 Release 清理结果。
+- [x] 功能与修复提交已普通推送，HEAD、远程跟踪分支和远端发布候选 SHA 一致。
+
+## 交付收尾
+
+发布证据提交后，必须通过 Trellis 完成任务归档和会话日志，再普通推送全部相关提交；最终 HEAD 与远程跟踪分支的一致性在交付答复中报告。
 
 ## 范围外
 
