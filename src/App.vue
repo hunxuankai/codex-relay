@@ -344,6 +344,7 @@ onUnmounted(() => {
 .app-shell {
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+  height: 100dvh;
   min-height: 100vh;
 }
 
@@ -406,6 +407,7 @@ onUnmounted(() => {
 }
 
 .app-content {
+  min-width: 0;
   min-height: 0;
   overflow: auto;
 }
@@ -446,6 +448,12 @@ onUnmounted(() => {
 
 .status-bar :deep(.el-button) {
   margin-left: auto;
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    height: auto;
+  }
 }
 
 @media (max-width: 720px) {

@@ -593,11 +593,17 @@ watch(apiKeyManagerProvider, (provider) => {
 .providers-view {
   display: grid;
   grid-template-columns: minmax(17rem, 0.8fr) minmax(25rem, 1.5fr);
-  min-height: 100%;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
 }
 
 .providers-column,
 .provider-detail {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: 1rem;
 }
 
@@ -699,7 +705,16 @@ watch(apiKeyManagerProvider, (provider) => {
 
 @media (max-width: 760px) {
   .providers-view {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    height: auto;
+    min-height: 100%;
+  }
+
+  .providers-column,
+  .provider-detail {
+    overflow: visible;
+    overscroll-behavior-y: auto;
   }
 
   .providers-column {
