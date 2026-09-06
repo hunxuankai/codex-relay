@@ -791,6 +791,11 @@ mod tests {
     }
 
     fn invocation(workdir: &Path, script: impl Into<OsString>) -> CodexInvocation {
+        // 夹具只使用 .NET API，避免冷 Runner 自动加载 PowerShell 模块。
+        let mut command = OsString::from(
+            "$PSModuleAutoLoadingPreference = 'None'; $ErrorActionPreference = 'Stop'; ",
+        );
+        command.push(script.into());
         CodexInvocation {
             executable: powershell(),
             args: vec![
@@ -798,7 +803,7 @@ mod tests {
                 OsString::from("-NoProfile"),
                 OsString::from("-NonInteractive"),
                 OsString::from("-Command"),
-                script.into(),
+                command,
             ],
             env: Vec::new(),
             workdir: workdir.to_owned(),
@@ -868,7 +873,7 @@ mod tests {
             let (_sender, cancel) = tokio::sync::watch::channel(false);
             let error = SystemCodexProcessBackend::with_job_factory(factory)
                 .run(
-                    invocation(directory.path(), "Start-Sleep -Seconds 30"),
+                    invocation(directory.path(), "[Threading.Thread]::Sleep(30000)"),
                     Duration::from_secs(5),
                     cancel,
                 )
@@ -889,7 +894,7 @@ mod tests {
                 invocation(
                     directory.path(),
                     format!(
-                        "$bytes = New-Object byte[] {}; [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length)",
+                        "$bytes = [byte[]]::new({}); [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length)",
                         MAX_PROCESS_OUTPUT_BYTES + 1
                     ),
                 ),
@@ -910,7 +915,7 @@ mod tests {
         let started = Instant::now();
         let timeout_error = SystemCodexProcessBackend::default()
             .run(
-                invocation(directory.path(), "Start-Sleep -Seconds 30"),
+                invocation(directory.path(), "[Threading.Thread]::Sleep(30000)"),
                 Duration::from_millis(100),
                 cancel,
             )
@@ -923,7 +928,7 @@ mod tests {
         let run = tokio::spawn(async move {
             SystemCodexProcessBackend::default()
                 .run(
-                    invocation(directory.path(), "Start-Sleep -Seconds 30"),
+                    invocation(directory.path(), "[Threading.Thread]::Sleep(30000)"),
                     Duration::from_secs(10),
                     cancel,
                 )
@@ -948,21 +953,22 @@ mod tests {
         fs::write(
             &parent_script,
             r#"param([string]$PidFile, [string]$StatusFile, [string]$ErrorFile)
+$PSModuleAutoLoadingPreference = 'None'
 $ErrorActionPreference = 'Stop'
 try {
-    Set-Content -LiteralPath $StatusFile -Value 'before-start'
-    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    [IO.File]::WriteAllText($StatusFile, 'before-start')
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = "$PSHOME\powershell.exe"
-    $startInfo.Arguments = '-NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 120"'
+    $startInfo.Arguments = '-NoLogo -NoProfile -NonInteractive -Command "$PSModuleAutoLoadingPreference = ''None''; [Threading.Thread]::Sleep(120000)"'
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $child = [System.Diagnostics.Process]::Start($startInfo)
-    Set-Content -LiteralPath $StatusFile -Value 'after-start'
-    Set-Content -LiteralPath $PidFile -Value $child.Id
-    Set-Content -LiteralPath $StatusFile -Value 'pid-written'
+    [IO.File]::WriteAllText($StatusFile, 'after-start')
+    [IO.File]::WriteAllText($PidFile, $child.Id.ToString())
+    [IO.File]::WriteAllText($StatusFile, 'pid-written')
     $child.WaitForExit()
 } catch {
-    Set-Content -LiteralPath $ErrorFile -Value ($_ | Out-String)
+    [IO.File]::WriteAllText($ErrorFile, $_.Exception.ToString())
     throw
 }
 "#,
@@ -1010,20 +1016,21 @@ try {
         fs::write(
             &parent_script,
             r#"param([string]$PidFile, [string]$StatusFile, [string]$ErrorFile)
+$PSModuleAutoLoadingPreference = 'None'
 $ErrorActionPreference = 'Stop'
 try {
-    Set-Content -LiteralPath $StatusFile -Value 'before-start'
-    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    [IO.File]::WriteAllText($StatusFile, 'before-start')
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = "$PSHOME\powershell.exe"
-    $startInfo.Arguments = '-NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 120"'
+    $startInfo.Arguments = '-NoLogo -NoProfile -NonInteractive -Command "$PSModuleAutoLoadingPreference = ''None''; [Threading.Thread]::Sleep(120000)"'
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $child = [System.Diagnostics.Process]::Start($startInfo)
-    Set-Content -LiteralPath $StatusFile -Value 'after-start'
-    Set-Content -LiteralPath $PidFile -Value $child.Id
-    Set-Content -LiteralPath $StatusFile -Value 'pid-written'
+    [IO.File]::WriteAllText($StatusFile, 'after-start')
+    [IO.File]::WriteAllText($PidFile, $child.Id.ToString())
+    [IO.File]::WriteAllText($StatusFile, 'pid-written')
 } catch {
-    Set-Content -LiteralPath $ErrorFile -Value ($_ | Out-String)
+    [IO.File]::WriteAllText($ErrorFile, $_.Exception.ToString())
     throw
 }
 "#,
@@ -1079,11 +1086,12 @@ try {
         fs::write(
             &stream_script,
             r#"param([string]$ReleaseFile)
+$PSModuleAutoLoadingPreference = 'None'
 $ErrorActionPreference = 'Stop'
 [Console]::Out.Write('first')
 [Console]::Out.Flush()
-while (-not (Test-Path -LiteralPath $ReleaseFile)) {
-    Start-Sleep -Milliseconds 20
+while (-not [IO.File]::Exists($ReleaseFile)) {
+    [Threading.Thread]::Sleep(20)
 }
 [Console]::Out.Write('second')
 "#,
@@ -1152,7 +1160,7 @@ while (-not (Test-Path -LiteralPath $ReleaseFile)) {
                 "-NoProfile".into(),
                 "-NonInteractive".into(),
                 "-Command".into(),
-                "$value = [Console]::In.ReadToEnd(); [Console]::Out.Write($value.Length)".into(),
+                "$PSModuleAutoLoadingPreference = 'None'; $ErrorActionPreference = 'Stop'; $value = [Console]::In.ReadToEnd(); [Console]::Out.Write($value.Length)".into(),
             ],
             env: filter_inherited_environment(std::env::vars_os()),
             workdir: directory.path().to_owned(),
@@ -1188,7 +1196,7 @@ while (-not (Test-Path -LiteralPath $ReleaseFile)) {
                         "-NonInteractive".into(),
                         "-Command".into(),
                         format!(
-                            "$bytes = New-Object byte[] {}; [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length)",
+                            "$PSModuleAutoLoadingPreference = 'None'; $ErrorActionPreference = 'Stop'; $bytes = [byte[]]::new({}); [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length)",
                             MAX_PROCESS_OUTPUT_BYTES + 1
                         )
                         .into(),

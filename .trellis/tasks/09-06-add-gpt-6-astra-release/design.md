@@ -25,3 +25,9 @@ Draft 审计绑定候选 SHA，校验版本、最终说明、安装器与两种 
 五个 command 文件统一改为 `Result<CommandResult<T>, tauri::ipc::InvokeError>`。这是 Tauri 支持的传输错误类型，不新增依赖或错误封装；所有函数体继续返回 `Ok(CommandResult<T>)`，不把业务错误移到外层 Err。锁定 serde 1.0.229 没有 Infallible 的 Serialize 实现，Tauri 也没有对应转换，不采用该替代。
 
 红色证据来自本轮实际 CI。安装独立 1.98.0 工具链而不改变系统默认，使用该版本 Clippy、完整检查和普通构建核验最终候选；新候选仍发布尚未占用的 `0.5.1`。同步后端签名规范并记录工具链差异，保留原失败 Run。
+
+## 发布阻断修复：Windows 进程测试夹具
+
+第二次 CI 已通过 Clippy，但 core 的后代取消与大 stdout 文件测试超时。9 个进程测试原本就有串行锁和 30 秒预算；取消测试的首个状态写入依赖 `Set-Content`，大文件依赖 `New-Object`，异常诊断又依赖 `Out-String`。纯 Console/字符串 stdin 夹具在同次 CI 约 0.2 秒通过，带 cmdlet 的夹具耗时显著较高；尚无 CI 进程级 trace 证明内部等待点。
+
+先在大 stdout 夹具禁用 PowerShell 模块自动加载，确认现有 `New-Object` 依赖确定性失败；随后把测试夹具统一改为 PowerShell 5.1 支持的纯 .NET 构造、文件和线程 API，并持续禁用自动加载，使未来误用模块 cmdlet 快速失败。保留现有进程树/流式断言及 release-console 的 20 秒脚本自截止，不修改生产实现或扩大超时。

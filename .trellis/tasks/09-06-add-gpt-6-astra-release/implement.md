@@ -8,7 +8,8 @@
 - [x] 同步 README、补丁版本和最终简体中文发布说明；核对公开 Latest。
 - [x] `trellis-check` inline 审查、`npm run check`、移除签名环境变量后的 `npm run build`、实际产物枚举。
 - [x] 规范更新判断、精确暂存提交、按 `master` 已配置上游普通推送候选并核验 SHA。
-- [ ] CI 阻断修复：29 个 Tauri command 外层错误改为 `InvokeError`，使用 Rust 1.98.0 重新检查、构建并提交新候选。
+- [x] CI 阻断修复：29 个 Tauri command 外层错误改为 `InvokeError`，使用 Rust 1.98.0 重新检查、构建并提交新候选。
+- [ ] 第二次 CI 阻断修复：PowerShell 夹具禁用模块自动加载并使用纯 .NET API，专项连续三次、完整检查和最终构建通过后发布新候选。
 - [ ] 触发并监控唯一 GitHub 发布 Run，核验 Draft 与签名资产后公开。
 - [ ] 核验 Latest、公开资产、tag、历史清理；更新验收证据。
 - [ ] 任务归档、会话日志、最终普通 push，确认远程跟踪分支与 HEAD 相等。
@@ -26,7 +27,7 @@
 
 ## 当前检查点
 
-2026-09-06：Tauri command 类型修复已通过 Rust/Clippy 1.98.0 严格检查、完整 `npm run check` 和普通构建；准备提交并推送新候选，尚未生成 Draft 或公开。
+2026-09-06：PowerShell 夹具专项连续三轮、最终完整检查和普通构建均通过，准备提交第三个候选；尚未生成 Draft 或公开。
 
 - 红色：`npm run test:rust:provider-workflow -- editing_provider_to_gpt_6_astra_saves_and_applies_model_preferences` 退出 1；唯一失败为编辑目录缺少 `gpt-6-astra`，符合预期，编译约 63 秒。
 - 绿色：`npm run test:rust:provider-workflow` 退出 0，2 项通过；新模型目录、编辑保存、默认 low、Fast、ultra 投影与未知 TOML/认证保留通过，编译约 30 秒、测试约 1 秒。
@@ -51,7 +52,9 @@
 
 ## 下一步
 
-修复五个 command 文件（只改传输类型和 import），同步后端规范；用独立安装的 1.98.0 工具链跑严格 Clippy、完整 `npm run check` 和普通 `npm run build`，更新构建证据，创建并推送新候选，再触发新的发布 Run。
+监控 Run `33997571201`。成功后在安全临时 evidence 目录调用 `src-tauri/target/debug/codex-relay-release-probe.exe audit <repo> <evidence-dir> 0.5.1 031dbec4b4fbe794fb51d7766eda1c4d7912b747 <gh.exe>`，使用 minisign 独立验签后才调用同一探针 `publish` 和 `verify`。随后核验公开 Latest 下载与清理工作流，完成记录、归档、日志及最终 push。
+
+上述第二次 Run 已失败，需先以本节新切片修复夹具；后续 dispatch 与探针必须使用新的候选 SHA，不能继续使用 `031dbec`。
 
 临时审计探针已在独立 temp Cargo 项目编译通过；首次 sha2 0.11 的摘要 LowerHex 格式化不兼容已改为逐字节两位十六进制，未改动产品代码。
 
@@ -62,6 +65,7 @@
 - `rustc 1.98.0`、`clippy 0.1.98` 下 workspace fmt 和完整严格 Clippy 退出 0，冷检查约 3 分 32 秒。
 - 设置仅作用于命令进程的 `RUSTUP_TOOLCHAIN=1.98.0` 后，完整 `npm run check` 再次退出 0：Trellis 8 项、根前端 338 项、控制台前端 89 项、Rust 463 项通过及 1 项既有 ignored；Rust 测试冷编译约 8 分 08 秒。
 - 相同 1.98.0 工具链的无 updater 私钥普通构建退出 0，Rust Release 冷编译约 9 分 27 秒；主程序 19445760 字节，NSIS 4702342 字节，版本均 `0.5.1`，哈希见发布证据。
+- 修复提交 `031dbec4b4fbe794fb51d7766eda1c4d7912b747`，普通 push 成功，HEAD/远程跟踪/ls-remote 三者一致。第二次请求校验通过后只 dispatch 一次，Run `33997571201`。
 - `backend/service-boundaries.md` 新增可执行传输结果契约，`backend/provider-availability-testing.md` 两处签名已同步。
 
 ## 缺陷复盘
@@ -70,3 +74,13 @@
 - 修复范围同时覆盖主程序和发布控制台，避免只修首个报告 package 后再次失败。
 - 预防：记录并比对工具链版本；保留框架支持的传输类型和安全 DTO；使用实际 CI 工具链验证，不靠压制警告或降级规避。
 - 历史失败 Run 和旧工具链构建证据保留，不覆盖成新候选成功记录。
+
+## 第二次 CI 与夹具修复证据
+
+- Run `33997571201`：Clippy 已通过，core 247 项通过、2 项失败。后代取消测试 30 秒内没有状态/PID 文件，大 stdout 文件测试返回 Timeout；其余带 cmdlet 夹具在同次 CI 也耗时约 23–28 秒，纯 Console/stdin 夹具约 0.2 秒通过。
+- 本地可复现依赖：在大 stdout 夹具关闭模块自动加载后，原 `New-Object` 版本退出 1（0.55 秒）；独立 PowerShell 复现明确返回 `CommandNotFoundException`。改用 `[byte[]]::new` 后同一测试退出 0（0.42 秒）。
+- core 9 项进程测试均改用直接 .NET API，父/后代/流式/输入输出夹具持续禁用模块自动加载；release-console 流式夹具同步替换，并保留 20 秒自截止。
+- 首轮 core 9 项全部通过（8.47 秒）。生产 process runner 在 `cfg(test)` 前的内容与提交 `031dbec` 逐字节相同，30 秒预算和所有断言保留。
+- core 9 项连续三轮通过（8.47 / 8.31 / 8.46 秒）；release-console 流式持久化专项连续三轮通过，完整 `local_verification` 7 项通过、1 项既有 ignored。当前使用 Rust 1.98.0 运行最终 `check-final.log`，成功后自动执行无私钥的 `build-final.log`。
+- 最终 `check-final.log` 和 `build-final.log` 均退出 0；Trellis 8 项、根前端 338 项、控制台前端 89 项、Rust 463 项通过与 1 项既有 ignored；普通 Release 编译约 2 分 48 秒，产物版本与哈希已重新枚举。
+- 尚未获取 CI 进程级 trace，不把模块内部等待机制写成已完全证实；后续 CI 用来检验去除该依赖后的稳定性。

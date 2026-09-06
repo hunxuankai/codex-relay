@@ -19,6 +19,7 @@
 - R4：按已配置上游普通推送；记录候选提交、Actions、发布地址、资产哈希和远端一致性。不得推送 Tag 或 force push。
 - R5：仅使用临时测试路径及成对 Relay 覆盖；不读取、写入或删除真实 Codex/Relay 数据，不访问签名私钥或输出秘密。
 - R6：修复本轮 CI 暴露的 Rust 1.98 Clippy 阻断：主应用及发布控制台的 Tauri async command 使用框架支持的传输错误类型，业务错误继续通过既有 `CommandResult<T>` 返回，前端 JSON/Promise 行为保持一致。
+- R7：修复第二次 CI 暴露的 Windows 进程测试夹具超时；消除夹具对 PowerShell 模块自动加载的依赖，保留生产 runner、环境白名单、30 秒测试预算、Job Object、取消、输出上限及完整输出断言。
 
 ## 验收标准
 

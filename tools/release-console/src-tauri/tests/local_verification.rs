@@ -310,15 +310,16 @@ fn process_backend_persists_safe_output_before_the_command_completes() {
         fs::write(
             &stream_script,
             r#"param([string]$ReleaseFile)
+$PSModuleAutoLoadingPreference = 'None'
 $ErrorActionPreference = 'Stop'
 [Console]::Out.Write("first`n")
 [Console]::Out.Flush()
 $deadline = [DateTime]::UtcNow.AddSeconds(20)
-while (-not (Test-Path -LiteralPath $ReleaseFile)) {
+while (-not [IO.File]::Exists($ReleaseFile)) {
     if ([DateTime]::UtcNow -ge $deadline) {
         throw 'STREAM_RELEASE_TIMEOUT'
     }
-    Start-Sleep -Milliseconds 20
+    [Threading.Thread]::Sleep(20)
 }
 [Console]::Out.Write("second-tail")
 "#,

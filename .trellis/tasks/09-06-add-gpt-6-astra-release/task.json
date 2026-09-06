@@ -36,7 +36,10 @@
     "src-tauri/src/commands/self_check_commands.rs",
     "tools/release-console/src-tauri/src/commands.rs",
     ".trellis/spec/backend/service-boundaries.md",
-    ".trellis/spec/backend/provider-availability-testing.md"
+    ".trellis/spec/backend/provider-availability-testing.md",
+    "src-tauri/crates/codex-relay-core/src/infrastructure/codex_process.rs",
+    "tools/release-console/src-tauri/tests/local_verification.rs",
+    ".trellis/spec/testing/rust-build-feedback.md"
   ],
   "notes": "",
   "meta": {}

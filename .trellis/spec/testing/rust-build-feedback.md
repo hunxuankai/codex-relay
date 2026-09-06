@@ -133,24 +133,31 @@ npm run test:rust:lib -- provider_http
 
 - Windows 测试模块使用 `PROCESS_TREE_TEST_TIMEOUT: Duration = Duration::from_secs(30)` 作为有界的
   测试级总预算。
+- core 与 release-console 的 PowerShell 夹具入口显式设置 `$PSModuleAutoLoadingPreference = 'None'`
+  和 `$ErrorActionPreference = 'Stop'`。夹具只使用直接 .NET API，不依赖 Utility/Management 模块自动加载。
 - release-console 集成测试使用同值的 `WINDOWS_PROCESS_TEST_TIMEOUT`；其流式 PowerShell 夹具还必须
   在 20 秒内未收到释放标记时自行失败，短于外层测试预算。
 - 预期真实 PowerShell 正常完成、产生输出或消费 stdin 的测试统一把该常量传给 runner；只有专门
   验证 `Timeout` / `Cancelled` 的测试可以传入更短的行为预算。
-- 父 PowerShell 必须使用 `.NET System.Diagnostics.ProcessStartInfo` 直接创建后代，设置
+- 父 PowerShell 必须使用 `[System.Diagnostics.ProcessStartInfo]::new()` 直接创建后代，设置
   `UseShellExecute = false` 与 `CreateNoWindow = true`；不要在“挂起后加入 Job Object 再恢复”的
   启动链中依赖 `Start-Process` 的 ShellExecute 包装。
 - 父进程创建后代后立即把返回的 `$child.Id` 写入 PID 文件；
   `wait_for_process_id(path, status_path, error_path) -> u32` 每 20 毫秒重新读取该文件，直到条件满足
   或测试预算到期。
 - 父脚本在创建前、创建后和写入 PID 后写入临时状态文件；捕获异常时写入临时错误文件，超时消息必须带上
-  这些非秘密诊断，不能只报告一个无区分度的超时。
+  这些非秘密诊断，不能只报告一个无区分度的超时。写入使用 `[IO.File]::WriteAllText`，异常使用
+  `$_.Exception.ToString()`，避免诊断自身依赖 `Set-Content` 或 `Out-String`。
 - `SystemCodexProcessBackend::run(..., PROCESS_TREE_TEST_TIMEOUT, ...)` 用于需要等待 PowerShell
   正常完成、启动后代、产生输出或触发输出上限的测试；生产调用方的显式超时不因此改变。
 
 ### 3. 契约
 
 - 等待后代进程时必须轮询“PID 文件已写入且可解析”这一真实条件，不能用固定 sleep 猜测启动时间。
+- PowerShell 字节数组通过 `[byte[]]::new(size)` 创建，文件存在性通过 `[IO.File]::Exists` 检查，
+  轮询和挂起夹具通过 `[Threading.Thread]::Sleep` 实现；父进程启动的后代也禁用模块自动加载。
+- 禁用自动加载后出现 `CommandNotFoundException` 表示夹具误用了模块 cmdlet，应修正夹具，不能重新开启
+  自动加载、扩大生产超时或把 `Timeout` 接受为预期输出限制结果。
 - 验证进程完成前流式输出时，子进程必须先 flush 首段输出，再等待测试位于临时目录的释放标记；
   测试收到事件并确认 runner 尚未结束后写入标记。不得用固定 500 毫秒 sleep 猜测测试线程会及时调度。
 - PID 必须由创建后代的父进程从 `ProcessStartInfo` 返回的 `Process` 对象写入；不能要求子 PowerShell 先完成
@@ -181,6 +188,8 @@ npm run test:rust:lib -- provider_http
 | release-console 已持久化首段日志 | 写入临时释放标记；30 秒内返回完整日志与退出码，脚本自身最多等待 20 秒 |
 | release-console 测试在写标记前失败 | 子脚本按 ASCII 稳定码自截止，不继续占用 2 小时生产命令预算 |
 | 普通产品调用传入更短超时 | 仍按调用方超时返回 `Timeout`，不受测试常量影响 |
+| 禁用自动加载后使用 `New-Object`、`Set-Content` 等模块 cmdlet | 夹具快速失败，改用直接 .NET API |
+| 直接 .NET 夹具禁用自动加载 | PID、流式输出、超限输出和文件输出仍满足原来的全部断言 |
 
 ### 5. 良好/基线/错误用例
 
@@ -203,7 +212,8 @@ npm run test:rust:lib -- provider_http
   测试继续断言调用方行为预算。
 - `cancellation_terminates_descendant_processes_in_the_job`、
   `output_limit_terminates_the_process_tree` 和
-  `generic_runner_streams_output_before_process_completion` 在相关修复时各连续运行至少 3 次，确认没有
+  `generic_runner_streams_output_before_process_completion`、
+  `generic_runner_streams_large_stdout_directly_to_new_file` 在相关修复时各连续运行至少 3 次，确认没有
   偶然缓存命中。
 - release-console `process_backend_persists_safe_output_before_the_command_completes` 在相关修复时连续
   运行至少 3 次，并运行完整 `local_verification` 集成套件。
@@ -239,13 +249,15 @@ SafeProcessRunner::default()
 #### 正确
 
 ```powershell
-$startInfo = New-Object System.Diagnostics.ProcessStartInfo
+$PSModuleAutoLoadingPreference = 'None'
+$ErrorActionPreference = 'Stop'
+$startInfo = [System.Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = "$PSHOME\powershell.exe"
-$startInfo.Arguments = '-NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 120"'
+$startInfo.Arguments = '-NoLogo -NoProfile -NonInteractive -Command "$PSModuleAutoLoadingPreference = ''None''; [Threading.Thread]::Sleep(120000)"'
 $startInfo.UseShellExecute = $false
 $startInfo.CreateNoWindow = $true
 $child = [System.Diagnostics.Process]::Start($startInfo)
-Set-Content -LiteralPath $PidFile -Value $child.Id
+[IO.File]::WriteAllText($PidFile, $child.Id.ToString())
 $child.WaitForExit()
 ```
 
