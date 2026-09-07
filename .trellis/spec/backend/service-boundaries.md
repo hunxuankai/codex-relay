@@ -127,3 +127,57 @@ async fn command(...) -> Result<CommandResult<T>, InvokeError> {
 command、前端和自检不得分别按 URL/Key 值重新推导来源；失效关系必须保留并返回稳定错误，直到
 显式恢复或经受管普通切换安全清除。关系来源和目标的删除分别返回
 `PROVIDER_CONNECTION_SOURCE_DELETE_FORBIDDEN` 与 `PROVIDER_CONNECTION_TARGET_DELETE_FORBIDDEN`。
+
+## Scenario：模型目录与旧偏好兼容
+
+### 1. 范围/触发条件
+
+调整 `provider_preference_service` 的模型能力，特别是移除旧版曾允许保存的推理强度时适用。
+目录同时驱动前端选项、用户输入校验和私有偏好加载；仅删除目录项可能使整个 Provider 列表无法读取。
+
+### 2. 签名
+
+```rust
+pub fn model_catalog() -> &'static [ModelCatalogEntry];
+pub fn validate_preference(preference: &ProviderPreference) -> Result<(), AppError>;
+pub fn parse_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, AppError>;
+pub fn serialize_store(store: &ProviderPreferenceStore) -> Result<Vec<u8>, AppError>;
+```
+
+### 3. 契约
+
+- `gpt-6-astra` 仅支持 `low / medium / high / xhigh / max`，默认 `low`，支持 Fast。
+- v0.5.1 曾在 v4 文件保存 Astra 的 `ultra`。当前 v4 读取时仅将这一精确组合映射为 `max`，并设置 `needs_upgrade=true`；未选中的 Astra 偏好同样适用。
+- 读取保持无写入，指纹和事务备份仍使用原始磁盘字节。沿用既有升级校准规则，后续显式 Provider 事务才持久化规范化结果。
+- 用户选择和 `serialize_store` 始终严格校验。兼容逻辑不进入通用验证器，不允许新 `ultra`，不猜测其他模型或未知强度。
+- 保持 v4 结构和既有 v1/v2/v3 迁移契约；原始备份恢复后仍可只读加载旧值。
+
+### 4. 验证与错误矩阵
+
+| 输入或操作 | 结果 |
+|---|---|
+| Astra 的五个有效强度 | 可保存并按当前/非当前 Provider 语义投影 |
+| 新选择 Astra `ultra`、`none` | `INVALID_MODEL_REASONING_EFFORT`，受管文件不变 |
+| v4 文件中的 Astra `ultra` | 读取为 `max`，标记待升级，磁盘不变 |
+| 其他模型的 `ultra` 或 Astra `ULTRA` | 严格拒绝，不进行宽泛纠错 |
+| 序列化仍含 Astra `ultra` 的新数据 | 严格拒绝 |
+| 已规范化偏好再次保存、加载 | 保持原值，`needs_upgrade=false` |
+
+### 5. 良好/基线/错误用例
+
+- 良好：旧 v4 Astra `ultra` 正常展示为 `max`，切换 Provider 的事务同步保存偏好和 TOML。
+- 基线：Astra 新建默认 `low`，其他模型的默认值和 Fast 能力保持不变。
+- 错误：只删除目录里的 `ultra`，或在通用验证器里接受它，分别导致旧文件无法加载或新非法值继续写入。
+
+### 6. 必需测试
+
+- 公共 Provider 流程覆盖目录完整五档、逐档保存、非法输入后的四文件字节不变。
+- 旧 v4 文件覆盖只读加载、备份数量不变、显式事务持久化、认证保留和备份恢复原字节。
+- 模块测试覆盖未选中的 Astra、其他有效字段保留、严格序列化、其他非法组合拒绝，以及规范化后的幂等加载。
+- 测试使用 `tempfile` / `AppPaths::for_test`；提交前执行路径安全和完整 `npm run check`。
+
+### 7. 错误与正确做法
+
+错误：在 `validate_preference` 中把所有未知强度替换为默认值，使新输入校验失效。
+
+正确：仅在当前 v4 读取分支转换已知旧值，再调用严格的 `normalize_store`，由 `needs_upgrade` 驱动既有事务写入。

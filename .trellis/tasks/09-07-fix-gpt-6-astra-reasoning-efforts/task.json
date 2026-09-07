@@ -1,0 +1,33 @@
+{
+  "id": "fix-gpt-6-astra-reasoning-efforts",
+  "name": "fix-gpt-6-astra-reasoning-efforts",
+  "title": "修正 GPT-6 Astra 推理强度并兼容旧偏好",
+  "description": "将 GPT-6 Astra 限定为五档推理强度，拒绝新 ultra 输入，并以只读兼容和既有事务处理旧 v4 ultra 偏好。",
+  "status": "in_progress",
+  "dev_type": "backend",
+  "scope": "provider-preferences",
+  "package": null,
+  "priority": "P2",
+  "creator": "kai",
+  "assignee": "kai",
+  "createdAt": "2026-09-07",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "src-tauri/crates/codex-relay-core/src/services/provider_preference_service.rs",
+    "src-tauri/crates/codex-relay-core/tests/provider_workflow.rs",
+    "README.md",
+    ".trellis/spec/backend/index.md",
+    ".trellis/spec/backend/service-boundaries.md",
+    ".trellis/spec/project/product-contract.md"
+  ],
+  "notes": "",
+  "meta": {}
+}

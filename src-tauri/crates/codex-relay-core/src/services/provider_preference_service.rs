@@ -44,7 +44,7 @@ const GPT_56_EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh", "max
 const MODEL_CATALOG: &[ModelCatalogEntry] = &[
     ModelCatalogEntry {
         id: "gpt-6-astra",
-        reasoning_efforts: &["low", "medium", "high", "xhigh", "max", "ultra"],
+        reasoning_efforts: &["low", "medium", "high", "xhigh", "max"],
         default_reasoning_effort: "low",
         supports_fast: true,
     },
@@ -462,7 +462,7 @@ pub fn parse_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, AppErr
         2 => parse_v2_store(bytes),
         3 => parse_v3_store(bytes),
         PROVIDER_PREFERENCE_VERSION => {
-            let store =
+            let mut store =
                 serde_json::from_slice::<ProviderPreferenceStore>(bytes).map_err(|error| {
                     AppError::new(
                         "INVALID_PROVIDER_PREFERENCES",
@@ -470,9 +470,20 @@ pub fn parse_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, AppErr
                         error.to_string(),
                     )
                 })?;
+            // v0.5.1 曾保存 Astra 的 ultra；仅在读取旧文件时兼容，写入仍严格校验。
+            let mut needs_upgrade = false;
+            for preference in store.providers.values_mut() {
+                if let Some(model_preference) = &mut preference.model_preference
+                    && let Some(effort) = model_preference.reasoning_efforts.get_mut("gpt-6-astra")
+                    && effort.as_str() == "ultra"
+                {
+                    *effort = "max".into();
+                    needs_upgrade = true;
+                }
+            }
             Ok(LoadedProviderPreferenceStore {
                 store: normalize_store(store)?,
-                needs_upgrade: false,
+                needs_upgrade,
             })
         }
         unsupported => Err(AppError::new(
@@ -781,6 +792,69 @@ mod tests {
         let error = validate_preference(&invalid).unwrap_err();
 
         assert_eq!(error.code(), "INVALID_MODEL_REASONING_EFFORT");
+    }
+
+    #[test]
+    fn legacy_astra_ultra_is_normalized_only_when_loading_v4() {
+        let mut preference =
+            ProviderPreference::from_models(&["gpt-6-astra".into(), "gpt-5.6-sol".into()]).unwrap();
+        preference.select("gpt-5.6-sol", "high").unwrap();
+        preference.set_fast(true).unwrap();
+        preference
+            .reasoning_efforts
+            .insert("gpt-6-astra".into(), "ultra".into());
+        let mut store = ProviderPreferenceStore::default();
+        store.provider_order.push("provider-a".into());
+        store.providers.insert(
+            "provider-a".into(),
+            ProviderPrivatePreference {
+                base_urls: vec![NamedBaseUrl {
+                    id: "legacy-default".into(),
+                    name: "主用地址".into(),
+                    url: "https://provider-a.example.test/v1".into(),
+                }],
+                model_preference: Some(preference),
+            },
+        );
+
+        let error = serialize_store(&store).unwrap_err();
+        assert_eq!(error.code(), "INVALID_MODEL_REASONING_EFFORT");
+
+        let loaded = parse_store(&serde_json::to_vec(&store).unwrap()).unwrap();
+        assert!(loaded.needs_upgrade);
+        store
+            .providers
+            .get_mut("provider-a")
+            .unwrap()
+            .model_preference
+            .as_mut()
+            .unwrap()
+            .reasoning_efforts
+            .insert("gpt-6-astra".into(), "max".into());
+        assert_eq!(loaded.store, store);
+
+        let reparsed = parse_store(&serialize_store(&loaded.store).unwrap()).unwrap();
+        assert!(!reparsed.needs_upgrade);
+        assert_eq!(reparsed.store, store);
+
+        for (model, effort) in [
+            ("gpt-6-astra", "none"),
+            ("gpt-6-astra", "ULTRA"),
+            ("gpt-5.6-sol", "ultra"),
+        ] {
+            let mut invalid = store.clone();
+            invalid
+                .providers
+                .get_mut("provider-a")
+                .unwrap()
+                .model_preference
+                .as_mut()
+                .unwrap()
+                .reasoning_efforts
+                .insert(model.into(), effort.into());
+            let error = parse_store(&serde_json::to_vec(&invalid).unwrap()).unwrap_err();
+            assert_eq!(error.code(), "INVALID_MODEL_REASONING_EFFORT");
+        }
     }
 
     #[test]

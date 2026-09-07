@@ -75,7 +75,7 @@ async fn editing_provider_to_gpt_6_astra_saves_and_applies_model_preferences() {
     assert_eq!(astra.default_reasoning_effort, "low");
     assert_eq!(
         astra.reasoning_efforts,
-        ["low", "medium", "high", "xhigh", "max", "ultra"]
+        ["low", "medium", "high", "xhigh", "max"]
     );
     assert!(astra.supports_fast);
 
@@ -104,21 +104,29 @@ async fn editing_provider_to_gpt_6_astra_saves_and_applies_model_preferences() {
     assert_eq!(document["model_reasoning_effort"].as_str(), Some("low"));
     assert_eq!(document["service_tier"].as_str(), Some("fast"));
 
-    service
-        .update_provider_preference(UpdateProviderPreferenceInput {
-            provider_id: "provider-a".into(),
-            model: "gpt-6-astra".into(),
-            reasoning_effort: "ultra".into(),
-            expected_files: state.fingerprints,
-        })
-        .await
-        .unwrap();
+    for effort in ["low", "medium", "high", "xhigh", "max"] {
+        service
+            .update_provider_preference(UpdateProviderPreferenceInput {
+                provider_id: "provider-a".into(),
+                model: "gpt-6-astra".into(),
+                reasoning_effort: effort.into(),
+                expected_files: service.list_providers().unwrap().fingerprints,
+            })
+            .await
+            .unwrap();
+
+        let state = service.list_providers().unwrap();
+        assert_eq!(state.providers[0].reasoning_efforts["gpt-6-astra"], effort);
+        let config = fs::read_to_string(&paths.config_file).unwrap();
+        let document = config.parse::<toml_edit::DocumentMut>().unwrap();
+        assert_eq!(document["model_reasoning_effort"].as_str(), Some(effort));
+    }
 
     let state = service.list_providers().unwrap();
-    assert_eq!(state.providers[0].reasoning_efforts["gpt-6-astra"], "ultra");
+    assert_eq!(state.providers[0].reasoning_efforts["gpt-6-astra"], "max");
     let config = fs::read_to_string(&paths.config_file).unwrap();
     let document = config.parse::<toml_edit::DocumentMut>().unwrap();
-    assert_eq!(document["model_reasoning_effort"].as_str(), Some("ultra"));
+    assert_eq!(document["model_reasoning_effort"].as_str(), Some("max"));
     assert_eq!(document["model_provider"].as_str(), Some("provider-a"));
     assert_eq!(document["features"]["web_search"].as_bool(), Some(true));
     assert_eq!(
@@ -127,6 +135,118 @@ async fn editing_provider_to_gpt_6_astra_saves_and_applies_model_preferences() {
     );
     assert!(config.contains("# preserve this user comment"));
     assert_eq!(fs::read_to_string(&paths.auth_file).unwrap(), INITIAL_AUTH);
+
+    let managed_paths = [
+        &paths.config_file,
+        &paths.auth_file,
+        &paths.providers_file,
+        &paths.provider_preferences_file,
+    ];
+    let original_files = managed_paths.map(|path| fs::read(path).unwrap());
+    for effort in ["ultra", "none"] {
+        let error = service
+            .update_provider_preference(UpdateProviderPreferenceInput {
+                provider_id: "provider-a".into(),
+                model: "gpt-6-astra".into(),
+                reasoning_effort: effort.into(),
+                expected_files: service.list_providers().unwrap().fingerprints,
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code(), "INVALID_MODEL_REASONING_EFFORT");
+        assert_eq!(
+            managed_paths.map(|path| fs::read(path).unwrap()),
+            original_files
+        );
+    }
+}
+
+#[tokio::test]
+async fn legacy_gpt_6_astra_ultra_is_read_only_until_a_transaction_saves_max() {
+    let (_directory, paths, service) = setup();
+    service
+        .update_provider(UpdateProviderInput {
+            id: "provider-a".into(),
+            name: "Provider A".into(),
+            wire_api: "responses".into(),
+            models: vec!["gpt-6-astra".into()],
+            fast_enabled: true,
+            sync_if_active: true,
+            expected_files: service.list_providers().unwrap().fingerprints,
+        })
+        .await
+        .unwrap();
+
+    let mut preferences: Value =
+        serde_json::from_slice(&fs::read(&paths.provider_preferences_file).unwrap()).unwrap();
+    preferences["providers"]["provider-a"]["modelPreference"]["reasoningEfforts"]["gpt-6-astra"] =
+        "ultra".into();
+    fs::write(
+        &paths.provider_preferences_file,
+        serde_json::to_string_pretty(&preferences).unwrap() + "\n",
+    )
+    .unwrap();
+    let mut document = fs::read_to_string(&paths.config_file)
+        .unwrap()
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap();
+    document["model_reasoning_effort"] = toml_edit::value("ultra");
+    fs::write(&paths.config_file, document.to_string()).unwrap();
+
+    let managed_paths = [
+        &paths.config_file,
+        &paths.auth_file,
+        &paths.providers_file,
+        &paths.provider_preferences_file,
+    ];
+    let original_files = managed_paths.map(|path| fs::read(path).unwrap());
+    let backup_count = service.list_backups().unwrap().backups.len();
+
+    let state = service.list_providers().unwrap();
+    assert_eq!(state.providers[0].reasoning_efforts["gpt-6-astra"], "max");
+    assert!(state.providers[0].fast_enabled);
+    assert_eq!(
+        managed_paths.map(|path| fs::read(path).unwrap()),
+        original_files
+    );
+    assert_eq!(service.list_backups().unwrap().backups.len(), backup_count);
+
+    service.switch_provider("provider-a").await.unwrap();
+
+    let preferences: Value =
+        serde_json::from_slice(&fs::read(&paths.provider_preferences_file).unwrap()).unwrap();
+    assert_eq!(
+        preferences["providers"]["provider-a"]["modelPreference"]["reasoningEfforts"]["gpt-6-astra"],
+        "max"
+    );
+    let config = fs::read_to_string(&paths.config_file).unwrap();
+    let document = config.parse::<toml_edit::DocumentMut>().unwrap();
+    assert_eq!(document["model_reasoning_effort"].as_str(), Some("max"));
+    assert_eq!(document["model"].as_str(), Some("gpt-6-astra"));
+    assert_eq!(document["service_tier"].as_str(), Some("fast"));
+    assert_eq!(fs::read(&paths.auth_file).unwrap(), original_files[1]);
+    assert_eq!(fs::read(&paths.providers_file).unwrap(), original_files[2]);
+
+    let snapshot = service
+        .list_backups()
+        .unwrap()
+        .backups
+        .into_iter()
+        .find(|backup| backup.metadata.operation == "switch_provider")
+        .unwrap();
+    service
+        .restore_backup(&snapshot.directory_name)
+        .await
+        .unwrap();
+    assert_eq!(
+        managed_paths.map(|path| fs::read(path).unwrap()),
+        original_files
+    );
+    assert_eq!(
+        service.list_providers().unwrap().providers[0].reasoning_efforts["gpt-6-astra"],
+        "max"
+    );
 }
 
 #[tokio::test]

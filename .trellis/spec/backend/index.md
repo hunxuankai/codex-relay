@@ -4,6 +4,7 @@
 
 - 修改 Rust 结构、依赖或序列化：读取 [rust-guidelines.md](rust-guidelines.md)。
 - 修改 command、service、repository/infrastructure 边界：读取 [service-boundaries.md](service-boundaries.md)。
+- 调整模型目录或收窄推理强度：读取 [service-boundaries.md](service-boundaries.md) 中的模型目录与旧偏好兼容契约。
 - 修改错误、日志、通知或事件：读取 [error-and-logging.md](error-and-logging.md)。
 - 修改备份文件列表或本地打开能力：读取 [backup-file-access.md](backup-file-access.md)。
 - 涉及配置写入时同时读取 `../security/transaction-safety.md`。
