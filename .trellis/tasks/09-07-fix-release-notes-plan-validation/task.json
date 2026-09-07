@@ -1,0 +1,33 @@
+{
+  "id": "fix-release-notes-plan-validation",
+  "name": "fix-release-notes-plan-validation",
+  "title": "修复发布计划的发布说明校验阻塞",
+  "description": "修复恢复上一轮发布说明后生成新版本计划被版本校验阻塞的问题，保留发布安全门禁并构建验证控制台。",
+  "status": "in_progress",
+  "dev_type": "frontend",
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "kai",
+  "assignee": "kai",
+  "createdAt": "2026-09-07",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "tools/release-console/src/App.vue",
+    "tools/release-console/src/App.test.ts",
+    "tools/release-console/src/composables/useReleaseSession.ts",
+    "tools/release-console/src/composables/useReleaseSession.test.ts",
+    ".trellis/spec/release/publishing.md",
+    "tools/release-console/src-tauri/src/services/release_notes.rs"
+  ],
+  "notes": "",
+  "meta": {}
+}

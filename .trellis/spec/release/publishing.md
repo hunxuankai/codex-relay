@@ -423,6 +423,72 @@ if !release_notes_equal(&release.body, expected_notes) {
 }
 ```
 
+### 0.2.3 发布说明草稿与计划上下文契约
+
+#### 1. 范围/触发条件
+
+修改发布控制台的会话恢复、发布说明编辑、目标版本输入或计划失效时遵循本节。历史 Draft 说明是
+已发布候选的证据，不能隐式成为下一版本计划的人工输入。
+
+#### 2. 签名
+
+- `ReleaseConsoleClient.preparePlan(repositoryPath, targetVersion, proxy, notes?)`：`notes` 为空时由
+  typed IPC 传递 `null`，Rust 根据正式 Latest、目标和 Git 提交生成说明。
+- `useReleaseSession.invalidatePlan()`：清除已校验计划，使在途操作序列失效并复位 busy/error。
+- `useReleaseSession.invalidateRepositoryContext()`：同时清除预检与计划。
+- `inspect()`、`preparePlan()`、`load()`：请求序列过期时返回 `null`，不更新状态或向调用者返回旧 DTO。
+
+#### 3. 契约
+
+- `App.loadSession()` 可以恢复目标版本显示；`session.draft.manifestNotes` 继续属于历史会话，不能
+  回填为新计划的可编辑说明。Draft 审计与公开仍使用会话中的权威证据。
+- 仓库路径、目标版本或预检 `latestReleaseTag` 变化时，同步清除旧说明并使旧计划失效；前端只比较
+  上下文变化，不解析 SemVer、替换正文中的版本或重建后端校验规则。
+- 同一上下文内的人工编辑必须原样传入重新生成请求；说明与已校验计划不一致时，开始按钮保持禁用。
+- 失效只影响前端候选上下文，不删除或改写已落盘会话，也不声称取消了后端发布管线。
+- Rust 继续校验目标严格高于公开版本、版本标记、必需段落、安全提示、人工占位与秘密内容。
+
+#### 4. 验证与错误矩阵
+
+| 条件 | 必需结果 |
+|---|---|
+| 恢复已完成 `0.5.1`，Latest=`v0.5.1`，目标=`0.5.2` | 新计划不携带旧 `0.5.0 → 0.5.1` 正文 |
+| 仓库、目标或 Latest 变化 | 旧计划与说明清空，开始按钮禁用 |
+| 同一计划编辑说明后重新生成 | 传入编辑正文，成功后展示新计划 |
+| 失效后的预检、计划或恢复请求晚返回 | 返回 `null`，不回填旧路径、版本、说明或计划 |
+| 人工说明缺少新目标标记或安全提示 | 继续返回 `RELEASE_NOTES_REQUIRED_CONTENT_MISSING` |
+
+#### 5. 良好/基线/错误用例
+
+- 良好：历史 `v0.5.1` 会话仍可查看，新 `0.5.2` 计划由后端生成当前升级起点和目标。
+- 基线：修改当前计划说明后重新生成，保留维护者编辑内容和后端安全门禁。
+- 错误：把历史说明中的版本直接替换成新版本，或忽略缺失内容错误而开始发布。
+
+#### 6. 必需测试
+
+- `App.test.ts`：通过恢复会话、仓库预检、输入目标、点击生成的用户路径，断言 IPC 不复用旧说明；
+  覆盖三类上下文变化、开始按钮失效、人工编辑保留及历史会话证据不变。
+- `useReleaseSession.test.ts`：使用受控 Promise，断言失效后的预检、计划、恢复响应既不更新状态，
+  也不通过返回值传播给 App。
+- Rust `release_notes`、`release_candidate` 测试继续覆盖必需内容、秘密拒绝与六文件事务边界。
+
+#### 7. 错误与正确做法
+
+错误：把历史证据填入新草稿，再把所有非空正文当作当前版本说明。
+
+```typescript
+notes.value = loaded.draft?.manifestNotes ?? notes.value
+```
+
+正确：历史说明保留在会话 DTO；新上下文清空草稿，无人工内容时请求 Rust 生成说明。旧请求必须
+同时阻断状态更新和返回值传播：
+
+```typescript
+if (sequence !== operationSequence) return null
+plan.value = value
+return value
+```
+
 ### 0.3 发布控制台代理、仓库同步与自动恢复契约
 
 #### 1. 范围/触发条件

@@ -7,6 +7,7 @@ import type {
   ReleasePlanSummary,
   ReleasePreflightResult,
   ReleaseSession,
+  ReleaseSessionSnapshot,
 } from '../types/release'
 import { useReleaseSession } from './useReleaseSession'
 
@@ -54,6 +55,78 @@ function logPage(entries: readonly ReleaseLogEntry[]): ReleaseLogPage {
 }
 
 describe('useReleaseSession', () => {
+  it.each(['inspection', 'plan', 'session'] as const)(
+    'discards a pending %s response after its context is invalidated',
+    async (operation) => {
+      const repositoryPath = 'D:\\safe-temp\\repository'
+      const inspected: ReleasePreflightResult = {
+        repositoryPath,
+        repository: {
+          localBranch: 'master',
+          defaultBranch: 'main',
+          headSha: 'a'.repeat(40),
+          remoteMainSha: 'a'.repeat(40),
+          remoteUrl: 'https://github.com/hunxuankai/codex-relay.git',
+          clean: true,
+          sync: { status: 'synced', aheadCount: 0, behindCount: 0, aheadCommits: [] },
+        },
+        external: {
+          tools: { git: '2.50', node: '24', npm: '11', cargo: '1.90', gh: '2.76' },
+          activeReleaseRuns: 0,
+          conflictingDrafts: 0,
+          latestReleaseTag: 'v0.5.1',
+        },
+        releaseReady: true,
+        blockingReasons: [],
+        safePush: null,
+      }
+      const planned: ReleasePlanSummary = {
+        id: 'plan-0.5.2',
+        repositoryPath,
+        previousVersion: '0.5.1',
+        targetVersion: '0.5.2',
+        notes: '旧请求的说明',
+        files: [],
+      }
+      const snapshot: ReleaseSessionSnapshot = {
+        session: session('old-session', 'completed'),
+        logs: logPage([]),
+      }
+      type Response = ReleasePreflightResult | ReleasePlanSummary | ReleaseSessionSnapshot
+      let resolveResponse: ((value: Response) => void) | undefined
+      const response = new Promise<Response>((resolve) => { resolveResponse = resolve })
+      const client = {
+        inspectRepository: vi.fn().mockReturnValue(response),
+        pushRepository: vi.fn(),
+        preparePlan: vi.fn().mockReturnValue(response),
+        startRelease: vi.fn(),
+        getReleaseSession: vi.fn().mockReturnValue(response),
+        getReleaseLogs: vi.fn(),
+        resumeRelease: vi.fn(),
+        cancelRelease: vi.fn(),
+        publishRelease: vi.fn(),
+        exportSummary: vi.fn(),
+      }
+      const release = useReleaseSession({ client })
+      const pending = operation === 'inspection'
+        ? release.inspect(repositoryPath, directProxy)
+        : operation === 'plan'
+          ? release.preparePlan(repositoryPath, '0.5.2', directProxy)
+          : release.load(repositoryPath)
+
+      if (operation === 'plan') release.invalidatePlan()
+      else release.invalidateRepositoryContext()
+      resolveResponse?.({ inspection: inspected, plan: planned, session: snapshot }[operation])
+
+      expect(await pending).toBeNull()
+      expect(release.inspection.value).toBeNull()
+      expect(release.plan.value).toBeNull()
+      expect(release.session.value).toBeNull()
+      expect(release.busy.value).toBe(false)
+      expect(release.error.value).toBeNull()
+    },
+  )
+
   it('loads the latest log page and keeps realtime step logs bounded and out of events', async () => {
     let resumeEvent: ((event: ReleaseEvent) => void) | undefined
     const persisted = session('session-logs', 'workflowRunning')

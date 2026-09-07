@@ -243,7 +243,8 @@ export function useReleaseSession(options: UseReleaseSessionOptions = {}) {
     const sequence = beginOperation()
     try {
       const value = await client.inspectRepository(repositoryPath, proxy)
-      if (sequence === operationSequence) inspection.value = value
+      if (sequence !== operationSequence) return null
+      inspection.value = value
       return value
     } catch (cause) {
       recordError(sequence, cause)
@@ -262,7 +263,8 @@ export function useReleaseSession(options: UseReleaseSessionOptions = {}) {
     const sequence = beginOperation()
     try {
       const value = await client.preparePlan(repositoryPath, targetVersion, proxy, notes)
-      if (sequence === operationSequence) plan.value = value
+      if (sequence !== operationSequence) return null
+      plan.value = value
       return value
     } catch (cause) {
       recordError(sequence, cause)
@@ -327,12 +329,11 @@ export function useReleaseSession(options: UseReleaseSessionOptions = {}) {
     resetLogs()
     try {
       const value = await client.getReleaseSession(repositoryPath)
-      if (sequence === operationSequence) {
-        session.value = value?.session ?? null
-        const logs = value?.logs ?? emptyLogPage()
-        logPage.value = logs
-        latestLogPage.value = logs
-      }
+      if (sequence !== operationSequence) return null
+      session.value = value?.session ?? null
+      const logs = value?.logs ?? emptyLogPage()
+      logPage.value = logs
+      latestLogPage.value = logs
       return value?.session ?? null
     } catch (cause) {
       recordError(sequence, cause)
@@ -408,9 +409,16 @@ export function useReleaseSession(options: UseReleaseSessionOptions = {}) {
     }
   }
 
+  function invalidatePlan() {
+    operationSequence += 1
+    plan.value = null
+    busy.value = false
+    error.value = null
+  }
+
   function invalidateRepositoryContext() {
     inspection.value = null
-    plan.value = null
+    invalidatePlan()
   }
 
   return {
@@ -437,6 +445,7 @@ export function useReleaseSession(options: UseReleaseSessionOptions = {}) {
     loadEarlierLogs,
     refreshLogPage,
     returnToLatestLogs,
+    invalidatePlan,
     invalidateRepositoryContext,
   }
 }

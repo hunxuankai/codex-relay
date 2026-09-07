@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ReleasePreflightResult } from './types/release'
+import type { ReleasePlanSummary, ReleasePreflightResult, ReleaseSession } from './types/release'
 
 const { invokeMock, messageMock, messageBoxAlertMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
@@ -31,6 +31,7 @@ import App from './App.vue'
 import appSource from './App.vue?raw'
 import ProxySettingsPanel from './components/release/ProxySettingsPanel.vue'
 import ReleaseLogPanel from './components/release/ReleaseLogPanel.vue'
+import ReleasePlanPanel from './components/release/ReleasePlanPanel.vue'
 import ReleaseRecoveryPanel from './components/release/ReleaseRecoveryPanel.vue'
 import RepositorySyncConfirmDialog from './components/release/RepositorySyncConfirmDialog.vue'
 import { REPOSITORY_PREFERENCE_KEY } from './composables/useRepositoryPreference'
@@ -87,6 +88,46 @@ function aheadInspection(repositoryPath: string): ReleasePreflightResult {
       commitCount: 1,
       commits: [{ sha: 'b'.repeat(40), subject: 'feat: reviewed local commit' }],
     },
+  }
+}
+
+function releasePlan(
+  repositoryPath: string,
+  targetVersion = '0.5.2',
+  previousVersion = '0.5.1',
+): ReleasePlanSummary {
+  return {
+    id: `plan-${targetVersion}`,
+    repositoryPath,
+    previousVersion,
+    targetVersion,
+    notes: `从 v${previousVersion} 更新到 v${targetVersion} 的发布说明`,
+    files: [],
+  }
+}
+
+function completedSession(repositoryPath: string): ReleaseSession {
+  return {
+    id: 'completed-0.5.1',
+    repositoryPath,
+    targetVersion: '0.5.1',
+    phase: 'completed',
+    candidateSha: 'a'.repeat(40),
+    remoteMainSha: 'a'.repeat(40),
+    workflow: null,
+    draft: {
+      releaseId: 51,
+      tagName: 'v0.5.1',
+      targetCommitSha: 'a'.repeat(40),
+      assets: [],
+      manifestVersion: '0.5.1',
+      manifestNotes: releasePlan(repositoryPath, '0.5.1', '0.5.0').notes,
+      signature: 'test-key-release-signature-not-real',
+    },
+    published: { releaseId: 51, tagName: 'v0.5.1', publishedAt: '2026-09-01T00:00:00Z' },
+    cleanup: null,
+    cleanupWarning: null,
+    failure: null,
   }
 }
 
@@ -491,6 +532,124 @@ describe('release console shell', () => {
     expect(invokeMock).toHaveBeenCalledWith('get_release_session', { repositoryPath })
     expect(wrapper.findComponent(ReleaseRecoveryPanel).exists()).toBe(false)
     expect(wrapper.text()).not.toContain('加载活动会话')
+  })
+
+  it('generates fresh notes for 0.5.2 after restoring a completed 0.5.1 release', async () => {
+    const repositoryPath = 'D:\\safe-temp\\repository'
+    const completed = completedSession(repositoryPath)
+    const currentInspection = inspection(repositoryPath)
+    currentInspection.external.latestReleaseTag = 'v0.5.1'
+    const plan = releasePlan(repositoryPath)
+    window.localStorage.setItem(
+      REPOSITORY_PREFERENCE_KEY,
+      JSON.stringify({ version: 1, repositoryPath }),
+    )
+    invokeMock
+      .mockResolvedValueOnce({ success: true, data: { session: completed } })
+      .mockResolvedValueOnce({ success: true, data: currentInspection })
+      .mockResolvedValueOnce({ success: true, data: plan })
+    const wrapper = mount(App)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="inspect-button"]').trigger('click')
+    await flushPromises()
+    await wrapper.get<HTMLInputElement>('input[aria-label="目标版本"]').setValue('0.5.2')
+    await wrapper.get('[data-testid="plan-button"]').trigger('click')
+    await flushPromises()
+
+    expect(invokeMock).toHaveBeenLastCalledWith('prepare_release_plan', {
+      repositoryPath,
+      targetVersion: '0.5.2',
+      proxy: { enabled: false, proxyType: 'http', host: '', port: null },
+      notes: null,
+    })
+    expect(wrapper.get<HTMLTextAreaElement>('textarea[aria-label="发布说明"]').element.value)
+      .toBe(plan.notes)
+    expect(wrapper.getComponent(ReleasePlanPanel).props('plan')).toEqual(plan)
+    expect(wrapper.getComponent(ReleaseRecoveryPanel).props('session')).toEqual(completed)
+    wrapper.unmount()
+  })
+
+  it.each(['target version', 'repository', 'latest release'] as const)(
+    'clears the reviewed plan and notes when the %s changes',
+    async (changedContext) => {
+      const repositoryPath = 'D:\\safe-temp\\repository'
+      const currentInspection = inspection(repositoryPath)
+      currentInspection.external.latestReleaseTag = 'v0.5.1'
+      const nextInspection = inspection(repositoryPath)
+      nextInspection.external.latestReleaseTag = 'v0.5.2'
+      const plan = releasePlan(repositoryPath)
+      invokeMock
+        .mockResolvedValueOnce({ success: true, data: currentInspection })
+        .mockResolvedValueOnce({ success: true, data: plan })
+        .mockResolvedValueOnce({ success: true, data: nextInspection })
+      const wrapper = mount(App)
+      const repositoryInput = wrapper.get<HTMLInputElement>('input[aria-label="仓库路径"]')
+      const targetInput = wrapper.get<HTMLInputElement>('input[aria-label="目标版本"]')
+      const notesInput = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="发布说明"]')
+
+      await repositoryInput.setValue(repositoryPath)
+      await wrapper.get('[data-testid="inspect-button"]').trigger('click')
+      await flushPromises()
+      await targetInput.setValue('0.5.2')
+      await wrapper.get('[data-testid="plan-button"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.get<HTMLButtonElement>('[data-testid="start-release-button"]').element.disabled)
+        .toBe(false)
+
+      if (changedContext === 'target version') {
+        await targetInput.setValue('0.5.3')
+      } else if (changedContext === 'repository') {
+        await repositoryInput.setValue('D:\\safe-temp\\other-repository')
+      } else {
+        await wrapper.get('[data-testid="inspect-button"]').trigger('click')
+        await flushPromises()
+      }
+
+      expect(wrapper.getComponent(ReleasePlanPanel).props('plan')).toBeNull()
+      expect(notesInput.element.value).toBe('')
+      expect(wrapper.get<HTMLButtonElement>('[data-testid="start-release-button"]').element.disabled)
+        .toBe(true)
+      wrapper.unmount()
+    },
+  )
+
+  it('preserves edited notes when regenerating the same release plan', async () => {
+    const repositoryPath = 'D:\\safe-temp\\repository'
+    const plan = releasePlan(repositoryPath)
+    const editedNotes = `${plan.notes}\n补充本版本的用户可见修复。`
+    const editedPlan = { ...plan, id: 'plan-edited', notes: editedNotes }
+    const currentInspection = inspection(repositoryPath)
+    currentInspection.external.latestReleaseTag = 'v0.5.1'
+    invokeMock
+      .mockResolvedValueOnce({ success: true, data: currentInspection })
+      .mockResolvedValueOnce({ success: true, data: plan })
+      .mockResolvedValueOnce({ success: true, data: editedPlan })
+    const wrapper = mount(App)
+
+    await wrapper.get<HTMLInputElement>('input[aria-label="仓库路径"]').setValue(repositoryPath)
+    await wrapper.get('[data-testid="inspect-button"]').trigger('click')
+    await flushPromises()
+    await wrapper.get<HTMLInputElement>('input[aria-label="目标版本"]').setValue('0.5.2')
+    await wrapper.get('[data-testid="plan-button"]').trigger('click')
+    await flushPromises()
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="发布说明"]').setValue(editedNotes)
+    expect(wrapper.get<HTMLButtonElement>('[data-testid="start-release-button"]').element.disabled)
+      .toBe(true)
+
+    wrapper.getComponent(ReleasePlanPanel).vm.$emit('regenerate')
+    await flushPromises()
+
+    expect(invokeMock).toHaveBeenLastCalledWith('prepare_release_plan', {
+      repositoryPath,
+      targetVersion: '0.5.2',
+      proxy: { enabled: false, proxyType: 'http', host: '', port: null },
+      notes: editedNotes,
+    })
+    expect(wrapper.getComponent(ReleasePlanPanel).props('plan')).toEqual(editedPlan)
+    expect(wrapper.get<HTMLButtonElement>('[data-testid="start-release-button"]').element.disabled)
+      .toBe(false)
+    wrapper.unmount()
   })
 
   it('shows the detected committed session and resumes it with the current proxy', async () => {

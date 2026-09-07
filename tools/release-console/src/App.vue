@@ -40,6 +40,15 @@ const publishDialogOpen = shallowRef(false)
 const repositoryPushDialogOpen = shallowRef(false)
 const showTerminalResult = shallowRef(false)
 
+watch(
+  [repositoryPath, targetVersion, () => release.inspection.value?.external.latestReleaseTag],
+  () => {
+    notes.value = ''
+    release.invalidatePlan()
+  },
+  { flush: 'sync' },
+)
+
 const draftIdentity = computed(() => release.session.value?.draft ?? null)
 const isFinished = computed(() =>
   ['completed', 'completedWithWarnings'].includes(release.session.value?.phase ?? ''),
@@ -119,7 +128,6 @@ async function loadSession() {
   showTerminalResult.value = false
   if (loaded) {
     targetVersion.value = loaded.targetVersion
-    notes.value = loaded.draft?.manifestNotes ?? notes.value
   }
 }
 
