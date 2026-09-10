@@ -37,14 +37,30 @@ fn release_notes_equal(left: &str, right: &str) -> bool {
     normalize(left) == normalize(right)
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum GithubReleaseError {
     #[error("GitHub CLI 调用失败")]
     BackendFailed,
-    #[error("GitHub CLI 返回无效 JSON")]
+    #[error("GitHub Run 查询命令失败")]
+    CommandFailed,
+    #[error("GitHub Run 查询超时")]
+    ProcessTimeout,
+    #[error("GitHub Run 查询已取消")]
+    ProcessCancelled,
+    #[error("GitHub CLI 进程启动失败")]
+    ProcessStartFailed,
+    #[error("GitHub CLI 进程树未能安全结束")]
+    ProcessTreeTerminationFailed,
+    #[error("GitHub CLI 输出超过安全上限")]
+    OutputTooLarge,
+    #[error("GitHub CLI 返回无效响应")]
     InvalidResponse,
     #[error("GitHub Actions Run 的候选提交不匹配")]
     CandidateMismatch,
+    #[error("GitHub Actions Run 身份不匹配")]
+    WorkflowRunIdentityMismatch,
+    #[error("GitHub Actions Run 监控预算已耗尽")]
+    WorkflowRunTimeout,
     #[error("GitHub Actions Run 执行失败")]
     WorkflowRunFailed,
     #[error("未找到唯一的新 GitHub Actions Run")]
@@ -67,8 +83,16 @@ impl GithubReleaseError {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::BackendFailed => "GITHUB_BACKEND_FAILED",
+            Self::CommandFailed => "GITHUB_COMMAND_FAILED",
+            Self::ProcessTimeout => "GITHUB_PROCESS_TIMEOUT",
+            Self::ProcessCancelled => "GITHUB_PROCESS_CANCELLED",
+            Self::ProcessStartFailed => "GITHUB_PROCESS_START_FAILED",
+            Self::ProcessTreeTerminationFailed => "GITHUB_PROCESS_TREE_TERMINATION_FAILED",
+            Self::OutputTooLarge => "GITHUB_OUTPUT_TOO_LARGE",
             Self::InvalidResponse => "GITHUB_RESPONSE_INVALID",
             Self::CandidateMismatch => "GITHUB_RUN_SHA_MISMATCH",
+            Self::WorkflowRunIdentityMismatch => "GITHUB_RUN_IDENTITY_MISMATCH",
+            Self::WorkflowRunTimeout => "GITHUB_RUN_TIMEOUT",
             Self::WorkflowRunFailed => "GITHUB_RUN_FAILED",
             Self::WorkflowRunNotUnique => "GITHUB_RUN_NOT_UNIQUE",
             Self::DraftNotUnique => "GITHUB_DRAFT_NOT_UNIQUE",
@@ -78,6 +102,22 @@ impl GithubReleaseError {
             Self::CleanupRunNotUnique => "GITHUB_CLEANUP_RUN_NOT_UNIQUE",
             Self::AssetDownloadFailed => "GITHUB_ASSET_DOWNLOAD_FAILED",
         }
+    }
+
+    fn from_backend_code(code: String) -> Self {
+        match code.as_str() {
+            "GH_COMMAND_FAILED" => Self::CommandFailed,
+            "GH_PROCESS_TIMEOUT" => Self::ProcessTimeout,
+            "GH_PROCESS_CANCELLED" => Self::ProcessCancelled,
+            "GH_PROCESS_START_FAILED" => Self::ProcessStartFailed,
+            "GH_PROCESS_TREE_TERMINATION_FAILED" => Self::ProcessTreeTerminationFailed,
+            "GH_OUTPUT_TOO_LARGE" => Self::OutputTooLarge,
+            _ => Self::BackendFailed,
+        }
+    }
+
+    pub(crate) fn is_retryable_run_query(self) -> bool {
+        matches!(self, Self::CommandFailed | Self::ProcessTimeout)
     }
 }
 
@@ -450,6 +490,21 @@ impl GithubReleaseService {
         run_id: u64,
         expected_sha: &str,
     ) -> Result<WorkflowRunStatus, GithubReleaseError> {
+        let run = self
+            .get_release_run_status(backend, run_id, expected_sha)
+            .await?;
+        if run.status == "completed" && run.conclusion.as_deref() != Some("success") {
+            return Err(GithubReleaseError::WorkflowRunFailed);
+        }
+        Ok(run)
+    }
+
+    pub(crate) async fn get_release_run_status(
+        &self,
+        backend: &dyn GhBackend,
+        run_id: u64,
+        expected_sha: &str,
+    ) -> Result<WorkflowRunStatus, GithubReleaseError> {
         let response = backend
             .execute(GhRequest {
                 operation: GhOperation::ViewReleaseRun,
@@ -463,14 +518,38 @@ impl GithubReleaseService {
                 stdin: None,
             })
             .await
-            .map_err(|_| GithubReleaseError::BackendFailed)?;
+            .map_err(GithubReleaseError::from_backend_code)?;
         let raw: RawWorkflowRun = serde_json::from_slice(&response.stdout)
             .map_err(|_| GithubReleaseError::InvalidResponse)?;
+        if run_id == 0
+            || raw.database_id != run_id
+            || raw.url != WorkflowDispatch::expected_url(run_id)
+        {
+            return Err(GithubReleaseError::WorkflowRunIdentityMismatch);
+        }
         if raw.head_sha != expected_sha {
             return Err(GithubReleaseError::CandidateMismatch);
         }
-        if raw.status == "completed" && raw.conclusion.as_deref() != Some("success") {
-            return Err(GithubReleaseError::WorkflowRunFailed);
+        if !matches!(
+            raw.status.as_str(),
+            "queued" | "in_progress" | "completed" | "waiting" | "requested" | "pending"
+        ) || (raw.status == "completed"
+            && !matches!(
+                raw.conclusion.as_deref(),
+                Some(
+                    "success"
+                        | "failure"
+                        | "cancelled"
+                        | "timed_out"
+                        | "action_required"
+                        | "neutral"
+                        | "skipped"
+                        | "stale"
+                        | "startup_failure"
+                )
+            ))
+        {
+            return Err(GithubReleaseError::InvalidResponse);
         }
         Ok(workflow_status_from_raw(raw))
     }

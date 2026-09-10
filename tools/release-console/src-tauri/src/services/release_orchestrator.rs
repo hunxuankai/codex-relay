@@ -6,7 +6,8 @@ use crate::models::{
 };
 use crate::services::git_release::{GitPushOutcome, GitReleaseService};
 use crate::services::github_release::{
-    DraftAuditService, GithubReleaseService, REMOTE_MONITOR_ATTEMPTS, REMOTE_MONITOR_DELAY,
+    DraftAuditService, GithubReleaseError, GithubReleaseService, REMOTE_MONITOR_ATTEMPTS,
+    REMOTE_MONITOR_DELAY,
 };
 use crate::services::local_verification::{
     LocalVerificationBackend, LocalVerificationError, LocalVerificationFailure,
@@ -124,7 +125,7 @@ pub trait ReleaseRemoteBackend: Send + Sync {
         &'a self,
         workflow: &'a WorkflowDispatch,
         candidate_sha: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<WorkflowRunStatus, String>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<WorkflowRunStatus, GithubReleaseError>> + Send + 'a>>;
 
     fn audit_draft<'a>(
         &'a self,
@@ -159,6 +160,26 @@ pub trait ReleaseRemoteBackend: Send + Sync {
 pub struct GithubRemoteBackend<'a> {
     backend: &'a dyn GhBackend,
     progress: Arc<dyn ReleaseProgressSink>,
+    monitor_policy: RunMonitorPolicy,
+}
+
+struct RunMonitorPolicy {
+    attempts: usize,
+    delay: std::time::Duration,
+    timeout: std::time::Duration,
+    max_query_failures: usize,
+}
+
+impl Default for RunMonitorPolicy {
+    fn default() -> Self {
+        Self {
+            attempts: REMOTE_MONITOR_ATTEMPTS,
+            delay: REMOTE_MONITOR_DELAY,
+            timeout: REMOTE_MONITOR_DELAY
+                .saturating_mul(REMOTE_MONITOR_ATTEMPTS.saturating_sub(1) as u32),
+            max_query_failures: 4,
+        }
+    }
 }
 
 impl<'a> GithubRemoteBackend<'a> {
@@ -166,6 +187,7 @@ impl<'a> GithubRemoteBackend<'a> {
         Self {
             backend,
             progress: Arc::new(NoopReleaseProgressSink),
+            monitor_policy: RunMonitorPolicy::default(),
         }
     }
 
@@ -193,31 +215,83 @@ impl ReleaseRemoteBackend for GithubRemoteBackend<'_> {
         &'a self,
         workflow: &'a WorkflowDispatch,
         candidate_sha: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<WorkflowRunStatus, String>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<WorkflowRunStatus, GithubReleaseError>> + Send + 'a>>
+    {
         Box::pin(async move {
-            let started = Instant::now();
+            let started = tokio::time::Instant::now();
             let mut tracker = ReleaseRunProgressTracker::new();
-            for attempt in 0..REMOTE_MONITOR_ATTEMPTS {
-                let run = GithubReleaseService::new()
-                    .get_release_run(self.backend, workflow.run_id, candidate_sha)
-                    .await
-                    .map_err(|error| error.code().to_string())?;
-                let decision = tracker.observe(started.elapsed(), &run);
-                if decision != ReleaseRunProgressDecision::Silent {
-                    self.progress.log(
-                        "remoteRun",
-                        crate::models::ReleaseLogLevel::Info,
-                        &format_run_progress(&run, decision),
-                    );
+            let mut query_failures = 0;
+            for attempt in 0..self.monitor_policy.attempts {
+                // 不在外层丢弃进程 future；当前查询由 SafeProcessRunner 安全结束。
+                if started.elapsed() >= self.monitor_policy.timeout {
+                    break;
                 }
-                if run.status == "completed" {
-                    return Ok(run);
+                let result = GithubReleaseService::new()
+                    .get_release_run_status(self.backend, workflow.run_id, candidate_sha)
+                    .await;
+                match result {
+                    Ok(run) => {
+                        if run.url != workflow.url {
+                            return Err(GithubReleaseError::WorkflowRunIdentityMismatch);
+                        }
+                        if query_failures > 0 {
+                            self.progress.log(
+                                "remoteRun",
+                                crate::models::ReleaseLogLevel::Info,
+                                &format!("Run {} 查询已恢复，继续监控同一 Run。", workflow.run_id),
+                            );
+                        }
+                        query_failures = 0;
+                        let decision = tracker.observe(started.elapsed(), &run);
+                        if decision != ReleaseRunProgressDecision::Silent {
+                            self.progress.log(
+                                "remoteRun",
+                                crate::models::ReleaseLogLevel::Info,
+                                &format_run_progress(&run, decision),
+                            );
+                        }
+                        if run.status == "completed" {
+                            return if run.conclusion.as_deref() == Some("success") {
+                                Ok(run)
+                            } else {
+                                Err(GithubReleaseError::WorkflowRunFailed)
+                            };
+                        }
+                    }
+                    Err(error) if error.is_retryable_run_query() => {
+                        query_failures += 1;
+                        if query_failures >= self.monitor_policy.max_query_failures {
+                            return Err(error);
+                        }
+                        if attempt + 1 >= self.monitor_policy.attempts
+                            || started.elapsed().saturating_add(self.monitor_policy.delay)
+                                >= self.monitor_policy.timeout
+                        {
+                            return Err(GithubReleaseError::WorkflowRunTimeout);
+                        }
+                        self.progress.log(
+                            "remoteRun",
+                            crate::models::ReleaseLogLevel::Warning,
+                            &format!(
+                                "Run {} 查询暂时失败（{}），连续第 {}/{} 次；将重试查询同一 Run。",
+                                workflow.run_id,
+                                error.code(),
+                                query_failures,
+                                self.monitor_policy.max_query_failures,
+                            ),
+                        );
+                    }
+                    Err(error) => return Err(error),
                 }
-                if attempt + 1 < REMOTE_MONITOR_ATTEMPTS {
-                    tokio::time::sleep(REMOTE_MONITOR_DELAY).await;
+                if attempt + 1 < self.monitor_policy.attempts {
+                    let remaining = self
+                        .monitor_policy
+                        .timeout
+                        .saturating_sub(started.elapsed());
+                    tokio::time::sleep(self.monitor_policy.delay.min(remaining)).await;
                 }
             }
-            Err("GITHUB_RUN_TIMEOUT".into())
+            Err(GithubReleaseError::WorkflowRunTimeout)
         })
     }
 
@@ -318,6 +392,8 @@ pub enum ReleaseOrchestratorError {
     CancelAfterPushForbidden,
     #[error("远端发布阶段失败")]
     RemoteFailed,
+    #[error("GitHub Run 监控停止：{0}")]
+    RunMonitoringFailed(GithubReleaseError),
     #[error("发布会话缺少恢复所需的远端证据")]
     RemoteStateInvalid,
     #[error("界面确认的 Draft 身份与会话证据不一致")]
@@ -337,6 +413,7 @@ impl ReleaseOrchestratorError {
             Self::Cancelled => "RELEASE_CANCELLED",
             Self::CancelAfterPushForbidden => "RELEASE_CANCEL_AFTER_PUSH_FORBIDDEN",
             Self::RemoteFailed => "RELEASE_REMOTE_FAILED",
+            Self::RunMonitoringFailed(error) => error.code(),
             Self::RemoteStateInvalid => "RELEASE_REMOTE_STATE_INVALID",
             Self::PublishIdentityMismatch => "RELEASE_PUBLISH_IDENTITY_MISMATCH",
         }
@@ -346,12 +423,22 @@ impl ReleaseOrchestratorError {
         match self {
             Self::LocalVerificationFailed { command_id, .. } => command_id,
             Self::PublishIdentityMismatch => "publishApproval",
+            Self::RunMonitoringFailed(_) => "remoteRun",
             _ => "releasePipeline",
         }
     }
 
     pub(crate) fn failure_message(&self) -> String {
         match self {
+            Self::RunMonitoringFailed(error) => {
+                if error.is_retryable_run_query()
+                    || *error == GithubReleaseError::WorkflowRunTimeout
+                {
+                    format!("{error}；已保留 Run，可检查 GitHub 连接后继续监控同一 Run。")
+                } else {
+                    format!("{error}；已停止监控，请核对 GitHub Run。")
+                }
+            }
             Self::LocalVerificationFailed {
                 failure: LocalVerificationFailure::ExitCode(exit_code),
                 ..
@@ -706,8 +793,23 @@ impl ReleaseOrchestrator {
         expected_notes: &str,
         remote: &dyn ReleaseRemoteBackend,
     ) -> Result<DraftAuditEvidence, ReleaseOrchestratorError> {
-        let _repository_lock = RepositorySessionLock::acquire(git_dir)
+        let repository_lock = RepositorySessionLock::acquire(git_dir)
             .map_err(|_| ReleaseOrchestratorError::SessionLockFailed)?;
+        if session.phase == ReleasePhase::Failed {
+            let previous_code = session
+                .failure
+                .as_ref()
+                .map(|failure| failure.code.clone())
+                .ok_or(ReleaseOrchestratorError::RemoteStateInvalid)?;
+            state_store
+                .resume_remote_monitoring(session, &repository_lock)
+                .map_err(|_| ReleaseOrchestratorError::RemoteStateInvalid)?;
+            self.progress.log(
+                "remoteRun",
+                crate::models::ReleaseLogLevel::Info,
+                &format!("已恢复原 GitHub Run 的监控检查点；上次失败代码 {previous_code}。"),
+            );
+        }
         let candidate_sha = session
             .candidate_sha
             .clone()
@@ -769,27 +871,31 @@ impl ReleaseOrchestrator {
                 .ok_or(ReleaseOrchestratorError::RemoteStateInvalid)?;
             let run = match remote.wait_for_run(workflow, &candidate_sha).await {
                 Ok(run) => run,
-                Err(_) => {
+                Err(cause) => {
+                    let error = ReleaseOrchestratorError::RunMonitoringFailed(cause);
                     self.progress.log(
                         "remoteRun",
                         crate::models::ReleaseLogLevel::Error,
-                        "GitHub 发布 Run 监控失败（RELEASE_REMOTE_FAILED）。",
+                        &format!("{}：{}", error.code(), error.failure_message()),
                     );
-                    return Err(ReleaseOrchestratorError::RemoteFailed);
+                    return Err(error);
                 }
             };
-            if run.id != workflow.run_id
-                || run.url != workflow.url
-                || run.head_sha != candidate_sha
-                || run.status != "completed"
-                || run.conclusion.as_deref() != Some("success")
+            if run.id != workflow.run_id || run.url != workflow.url || run.head_sha != candidate_sha
             {
-                self.progress.log(
-                    "remoteRun",
-                    crate::models::ReleaseLogLevel::Error,
-                    "GitHub 发布 Run 身份或成功结论未通过验证。",
-                );
-                return Err(ReleaseOrchestratorError::RemoteFailed);
+                return Err(ReleaseOrchestratorError::RunMonitoringFailed(
+                    GithubReleaseError::WorkflowRunIdentityMismatch,
+                ));
+            }
+            if run.status != "completed" || run.conclusion.as_deref().is_none_or(str::is_empty) {
+                return Err(ReleaseOrchestratorError::RunMonitoringFailed(
+                    GithubReleaseError::InvalidResponse,
+                ));
+            }
+            if run.conclusion.as_deref() != Some("success") {
+                return Err(ReleaseOrchestratorError::RunMonitoringFailed(
+                    GithubReleaseError::WorkflowRunFailed,
+                ));
             }
             self.progress.completed(
                 "remoteRun",
@@ -1062,13 +1168,333 @@ fn short_sha(sha: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{GithubRemoteBackend, ReleaseRemoteBackend};
-    use crate::infrastructure::gh::{GhBackend, GhRequest, GhResponse};
+    use crate::infrastructure::gh::{GhBackend, GhOperation, GhRequest, GhResponse};
     use crate::models::{ReleaseLogLevel, WorkflowDispatch};
     use crate::services::release_log::{ReleaseLogRecorder, ReleaseLogStore, ReleaseProgressSink};
+    use std::collections::VecDeque;
     use std::future::Future;
     use std::path::Path;
     use std::pin::Pin;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
+
+    struct ScriptedRunBackend {
+        responses: Mutex<VecDeque<Result<GhResponse, String>>>,
+        requests: Mutex<Vec<GhRequest>>,
+    }
+
+    impl GhBackend for ScriptedRunBackend {
+        fn execute<'a>(
+            &'a self,
+            request: GhRequest,
+        ) -> Pin<Box<dyn Future<Output = Result<GhResponse, String>> + Send + 'a>> {
+            self.requests.lock().unwrap().push(request);
+            let response = self.responses.lock().unwrap().pop_front().unwrap();
+            Box::pin(async move { response })
+        }
+
+        fn download_asset<'a>(
+            &'a self,
+            _asset_id: u64,
+            _destination: &'a Path,
+        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+            Box::pin(async { panic!("monitoring must not download assets") })
+        }
+    }
+
+    fn run_response(status: &str, conclusion: Option<&str>) -> GhResponse {
+        GhResponse {
+            stdout: serde_json::to_vec(&serde_json::json!({
+                "databaseId": 42,
+                "status": status,
+                "conclusion": conclusion,
+                "headSha": "a".repeat(40),
+                "url": "https://github.com/hunxuankai/codex-relay/actions/runs/42",
+                "jobs": [],
+            }))
+            .unwrap(),
+        }
+    }
+
+    #[test]
+    fn run_monitor_recovers_after_one_failed_query_without_dispatching() {
+        let git_dir = tempfile::tempdir().unwrap();
+        let store = ReleaseLogStore::new(git_dir.path().to_path_buf());
+        store.initialize("session-retry").unwrap();
+        let recorder = Arc::new(ReleaseLogRecorder::new("session-retry", store, 0, None));
+        let backend = ScriptedRunBackend {
+            responses: Mutex::new(VecDeque::from([
+                Err("GH_COMMAND_FAILED".into()),
+                Ok(run_response("completed", Some("success"))),
+            ])),
+            requests: Mutex::new(Vec::new()),
+        };
+        let remote = GithubRemoteBackend::new(&backend).with_progress(recorder);
+        let workflow = WorkflowDispatch {
+            run_id: 42,
+            url: "https://github.com/hunxuankai/codex-relay/actions/runs/42".into(),
+        };
+
+        let run = tauri::async_runtime::block_on(remote.wait_for_run(&workflow, &"a".repeat(40)))
+            .expect("a temporary query failure must not fail the release run");
+
+        assert_eq!(run.status, "completed");
+        assert_eq!(run.conclusion.as_deref(), Some("success"));
+        let requests = backend.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests.iter().all(|request| {
+            request.operation == GhOperation::ViewReleaseRun && request.resource_id == Some(42)
+        }));
+        let page = ReleaseLogStore::new(git_dir.path().to_path_buf())
+            .load_page("session-retry", None)
+            .unwrap();
+        assert!(page.entries.iter().any(|entry| {
+            entry.step_id == "remoteRun"
+                && entry.level == ReleaseLogLevel::Warning
+                && entry.message.contains("GITHUB_COMMAND_FAILED")
+        }));
+    }
+
+    fn monitor_fixture(
+        responses: Vec<Result<GhResponse, String>>,
+    ) -> (ScriptedRunBackend, WorkflowDispatch) {
+        (
+            ScriptedRunBackend {
+                responses: Mutex::new(responses.into()),
+                requests: Mutex::new(Vec::new()),
+            },
+            WorkflowDispatch {
+                run_id: 42,
+                url: "https://github.com/hunxuankai/codex-relay/actions/runs/42".into(),
+            },
+        )
+    }
+
+    #[test]
+    fn run_monitor_resets_consecutive_failures_after_a_valid_running_response() {
+        let mut responses = Vec::new();
+        for _ in 0..2 {
+            responses.extend((0..3).map(|_| Err("GH_PROCESS_TIMEOUT".into())));
+            responses.push(Ok(run_response("in_progress", None)));
+        }
+        responses.push(Ok(run_response("completed", Some("success"))));
+        let (backend, workflow) = monitor_fixture(responses);
+        let mut remote = GithubRemoteBackend::new(&backend);
+        remote.monitor_policy.delay = std::time::Duration::ZERO;
+
+        let run = tauri::async_runtime::block_on(remote.wait_for_run(&workflow, &"a".repeat(40)))
+            .unwrap();
+
+        assert_eq!(run.conclusion.as_deref(), Some("success"));
+        assert_eq!(backend.requests.lock().unwrap().len(), 9);
+    }
+
+    #[test]
+    fn run_monitor_stops_after_four_consecutive_query_failures_with_the_specific_code() {
+        for (backend_code, public_code) in [
+            ("GH_COMMAND_FAILED", "GITHUB_COMMAND_FAILED"),
+            ("GH_PROCESS_TIMEOUT", "GITHUB_PROCESS_TIMEOUT"),
+        ] {
+            let mut responses = (0..4).map(|_| Err(backend_code.into())).collect::<Vec<_>>();
+            responses.push(Ok(run_response("completed", Some("success"))));
+            let (backend, workflow) = monitor_fixture(responses);
+            let mut remote = GithubRemoteBackend::new(&backend);
+            remote.monitor_policy.delay = std::time::Duration::ZERO;
+
+            let error =
+                tauri::async_runtime::block_on(remote.wait_for_run(&workflow, &"a".repeat(40)))
+                    .unwrap_err();
+
+            assert_eq!(error.code(), public_code);
+            assert_eq!(backend.requests.lock().unwrap().len(), 4);
+        }
+    }
+
+    #[test]
+    fn run_monitor_never_retries_cancellation_safety_or_unknown_backend_errors() {
+        for (backend_code, public_code) in [
+            ("GH_PROCESS_CANCELLED", "GITHUB_PROCESS_CANCELLED"),
+            ("GH_PROCESS_START_FAILED", "GITHUB_PROCESS_START_FAILED"),
+            (
+                "GH_PROCESS_TREE_TERMINATION_FAILED",
+                "GITHUB_PROCESS_TREE_TERMINATION_FAILED",
+            ),
+            ("GH_OUTPUT_TOO_LARGE", "GITHUB_OUTPUT_TOO_LARGE"),
+            ("test-key-backend-error-not-real", "GITHUB_BACKEND_FAILED"),
+        ] {
+            let (backend, workflow) = monitor_fixture(vec![
+                Err(backend_code.into()),
+                Ok(run_response("completed", Some("success"))),
+            ]);
+            let remote = GithubRemoteBackend::new(&backend);
+
+            let error =
+                tauri::async_runtime::block_on(remote.wait_for_run(&workflow, &"a".repeat(40)))
+                    .unwrap_err();
+
+            assert_eq!(error.code(), public_code);
+            assert!(!format!("{error:?} {error}").contains("test-key"));
+            assert_eq!(backend.requests.lock().unwrap().len(), 1);
+        }
+    }
+
+    #[test]
+    fn run_monitor_rejects_identity_response_and_failed_conclusion_without_retrying() {
+        for (field, value, public_code) in [
+            (
+                "databaseId",
+                serde_json::json!(43),
+                "GITHUB_RUN_IDENTITY_MISMATCH",
+            ),
+            (
+                "url",
+                serde_json::json!("https://example.invalid/run/42"),
+                "GITHUB_RUN_IDENTITY_MISMATCH",
+            ),
+            (
+                "headSha",
+                serde_json::json!("b".repeat(40)),
+                "GITHUB_RUN_SHA_MISMATCH",
+            ),
+            (
+                "status",
+                serde_json::json!("unrecognized"),
+                "GITHUB_RESPONSE_INVALID",
+            ),
+            (
+                "conclusion",
+                serde_json::Value::Null,
+                "GITHUB_RESPONSE_INVALID",
+            ),
+            (
+                "conclusion",
+                serde_json::json!("future_conclusion"),
+                "GITHUB_RESPONSE_INVALID",
+            ),
+            (
+                "conclusion",
+                serde_json::json!("  "),
+                "GITHUB_RESPONSE_INVALID",
+            ),
+            (
+                "conclusion",
+                serde_json::json!("failure"),
+                "GITHUB_RUN_FAILED",
+            ),
+        ] {
+            let mut raw: serde_json::Value =
+                serde_json::from_slice(&run_response("completed", Some("success")).stdout).unwrap();
+            raw[field] = value;
+            let (backend, workflow) = monitor_fixture(vec![
+                Ok(GhResponse {
+                    stdout: serde_json::to_vec(&raw).unwrap(),
+                }),
+                Ok(run_response("completed", Some("success"))),
+            ]);
+            let remote = GithubRemoteBackend::new(&backend);
+
+            let error =
+                tauri::async_runtime::block_on(remote.wait_for_run(&workflow, &"a".repeat(40)))
+                    .unwrap_err();
+
+            assert_eq!(error.code(), public_code);
+            assert_eq!(backend.requests.lock().unwrap().len(), 1);
+        }
+    }
+
+    #[test]
+    fn run_monitor_logs_a_failed_terminal_projection_before_stopping() {
+        let git_dir = tempfile::tempdir().unwrap();
+        let log_store = ReleaseLogStore::new(git_dir.path().to_path_buf());
+        log_store.initialize("session-failed-run").unwrap();
+        let recorder = Arc::new(ReleaseLogRecorder::new(
+            "session-failed-run",
+            log_store,
+            0,
+            None,
+        ));
+        let mut failed: serde_json::Value =
+            serde_json::from_slice(&run_response("completed", Some("failure")).stdout).unwrap();
+        failed["jobs"] = serde_json::json!([{
+            "name": "release", "status": "completed", "conclusion": "failure",
+            "steps": [{"name": "运行完整检查", "number": 7, "status": "completed", "conclusion": "failure"}]
+        }]);
+        let (backend, workflow) = monitor_fixture(vec![
+            Ok(run_response("in_progress", None)),
+            Ok(GhResponse {
+                stdout: serde_json::to_vec(&failed).unwrap(),
+            }),
+            Ok(run_response("completed", Some("success"))),
+        ]);
+        let mut remote = GithubRemoteBackend::new(&backend).with_progress(recorder);
+        remote.monitor_policy.delay = std::time::Duration::ZERO;
+
+        let error = tauri::async_runtime::block_on(remote.wait_for_run(&workflow, &"a".repeat(40)))
+            .unwrap_err();
+
+        assert_eq!(error.code(), "GITHUB_RUN_FAILED");
+        assert_eq!(backend.requests.lock().unwrap().len(), 2);
+        let page = ReleaseLogStore::new(git_dir.path().to_path_buf())
+            .load_page("session-failed-run", None)
+            .unwrap();
+        assert!(page.entries.iter().any(|entry| {
+            entry.message.contains("conclusion=failure")
+                && entry.message.contains("Step #7 运行完整检查")
+        }));
+    }
+
+    #[test]
+    fn run_monitor_does_not_announce_a_retry_after_the_last_attempt() {
+        let git_dir = tempfile::tempdir().unwrap();
+        let log_store = ReleaseLogStore::new(git_dir.path().to_path_buf());
+        log_store.initialize("session-last-query").unwrap();
+        let recorder = Arc::new(ReleaseLogRecorder::new(
+            "session-last-query",
+            log_store,
+            0,
+            None,
+        ));
+        let (backend, workflow) = monitor_fixture(vec![Err("GH_COMMAND_FAILED".into())]);
+        let mut remote = GithubRemoteBackend::new(&backend).with_progress(recorder);
+        remote.monitor_policy.attempts = 1;
+
+        let error = tauri::async_runtime::block_on(remote.wait_for_run(&workflow, &"a".repeat(40)))
+            .unwrap_err();
+
+        assert_eq!(error.code(), "GITHUB_RUN_TIMEOUT");
+        let page = ReleaseLogStore::new(git_dir.path().to_path_buf())
+            .load_page("session-last-query", None)
+            .unwrap();
+        assert!(
+            !page
+                .entries
+                .iter()
+                .any(|entry| entry.message.contains("将重试"))
+        );
+    }
+
+    #[test]
+    fn run_monitor_does_not_start_queries_after_the_deadline_or_attempt_budget() {
+        let (backend, workflow) = monitor_fixture(Vec::new());
+        let mut remote = GithubRemoteBackend::new(&backend);
+        remote.monitor_policy.timeout = std::time::Duration::ZERO;
+        let error = tauri::async_runtime::block_on(remote.wait_for_run(&workflow, &"a".repeat(40)))
+            .unwrap_err();
+        assert_eq!(error.code(), "GITHUB_RUN_TIMEOUT");
+        assert!(backend.requests.lock().unwrap().is_empty());
+
+        let (backend, workflow) = monitor_fixture(
+            (0..3)
+                .map(|_| Ok(run_response("in_progress", None)))
+                .collect(),
+        );
+        let mut remote = GithubRemoteBackend::new(&backend);
+        remote.monitor_policy.delay = std::time::Duration::ZERO;
+        remote.monitor_policy.attempts = 3;
+        let error = tauri::async_runtime::block_on(remote.wait_for_run(&workflow, &"a".repeat(40)))
+            .unwrap_err();
+        assert_eq!(error.code(), "GITHUB_RUN_TIMEOUT");
+        assert_eq!(backend.requests.lock().unwrap().len(), 3);
+    }
 
     struct CompletedRunBackend;
 

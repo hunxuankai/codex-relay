@@ -104,6 +104,99 @@ for _ in 0..900 {
 // commit 后 push 失败：持久化 Committed，只重试 push。
 ```
 
+### 0.1.1 GitHub Run 查询中断与原 Run 恢复
+
+#### 1. 范围/触发条件
+
+修改 Run 轮询、GitHub CLI 错误映射、失败会话恢复或恢复按钮时遵循本节。查询失败不等于远端
+工作流失败；2026-09-10 曾出现控制台提前报错，而同一 Run 随后成功完成的真实案例。
+
+#### 2. 签名
+
+```rust
+ReleaseRemoteBackend::wait_for_run(workflow, candidate_sha)
+    -> Future<Output = Result<WorkflowRunStatus, GithubReleaseError>>
+ReleaseSession::can_resume_remote_monitoring(&self) -> bool
+ReleaseStateStore::resume_remote_monitoring(&self, session, lock)
+    -> Result<(), ReleaseStateError>
+```
+
+前端继续使用原 `ReleaseSession`/`ReleaseFailureEvidence` DTO，不持久化第二份恢复状态。通用
+`ReleasePhase::transition_to` 不允许从 `Failed` 返回活动阶段。
+
+#### 3. 契约
+
+- Run 查询只能把后端返回值映射为固定枚举；原始错误字符串、stderr、JSON、环境与凭据不得进入
+  公开消息或持久化状态。`GH_COMMAND_FAILED` 与 `GH_PROCESS_TIMEOUT` 保留为对应 `GITHUB_*` 码。
+- 仅这两类只读查询故障允许自动重试；最多连续失败 4 次，成功查询清零。默认间隔 5 秒，维持
+  4 小时预算与次数上限。每次新查询前用单调时钟检查预算；已启动的查询由既有 60 秒进程预算
+  安全结束，不能用外层超时直接丢弃持有进程树的 future。
+- 每次响应先验证正 Run ID、固定仓库 URL、候选 SHA、已知 status 与 completed conclusion；身份或
+  响应异常、取消、进程树终止失败、启动失败、输出超限不重试。未知/空白结论属于无效响应。
+- 已验证的真实失败终态必须先留下 Run/Job/Step 的结构化投影，再返回 `GITHUB_RUN_FAILED`；尚未
+  得到成功结论时不进行 Draft 审计。最后一次尝试或预算已耗尽时不得记录还会重试。
+- 监控错误由 `RunMonitoringFailed(GithubReleaseError)` 传播，失败步骤为 `remoteRun`；日志、
+  `session.failure` 和 `stepFailed` 都保留同一具体错误码，不能退化为 `RELEASE_REMOTE_FAILED`。
+- 恢复仅接受 `failed` 且 `failure.phase=workflowRunning` 的会话：新记录必须是
+  `remoteRun + GITHUB_COMMAND_FAILED/GITHUB_PROCESS_TIMEOUT/GITHUB_RUN_TIMEOUT`；历史记录只兼容
+  `releasePipeline + RELEASE_REMOTE_FAILED`。无 failure 的旧终态、真实 Run 失败与安全错误不恢复。
+- 恢复要求候选 SHA 是 40 位十六进制且等于已记录的远端 SHA，Run ID/URL 属于固定仓库，且没有
+  Draft、公开、清理或 cleanup warning 等更晚证据。恢复方法必须持有同一 Git dir 的仓库锁，
+  重读磁盘并确认完整 session 与调用方快照一致后，原子写入 `workflowRunning + failure=null`。
+- 恢复日志重新记录原失败码；恢复后只查询原 Run、复核候选并审计 Draft，不重复构建、提交、Push、
+  dispatch 或公开。公开仍须走原确认门禁。schema version 保持 1。
+- application 失败收尾只能修改同一 session ID；未取得仓库锁或恢复快照已失效时仅报告该请求失败，
+  不能把较新会话或由另一管线持有的会话改为 failed。
+- Vue 的恢复条件只用于展示按钮；后端必须重新验证。busy 与无效代理仍阻止网络恢复，普通终态仍
+  保持“查看上次结果”。nullable 证据按 `null` 判断，不把空字符串当成不存在。
+
+#### 4. 验证与错误矩阵
+
+| 条件 | 必需结果 |
+|---|---|
+| 查询暂时失败，下一次成功 | warning 后继续同一 Run；不派发新 Run |
+| 连续第 4 次查询失败 | 返回最后的具体查询错误，保存 `remoteRun` 失败证据 |
+| 4 小时/次数预算耗尽 | `GITHUB_RUN_TIMEOUT`，不开始新的查询 |
+| 真实 `completed/failure` | 先记录完整终态投影，再 `GITHUB_RUN_FAILED`；不审计 Draft |
+| JSON/status/conclusion 不可信 | `GITHUB_RESPONSE_INVALID`，不重试 |
+| Run ID/URL 或 SHA 不匹配 | `GITHUB_RUN_IDENTITY_MISMATCH` / `GITHUB_RUN_SHA_MISMATCH`，不重试 |
+| 旧泛化监控失败且证据完整 | 专用恢复到 `workflowRunning`，复核同一 Run 后停在公开确认 |
+| 恢复锁不匹配、磁盘已变化或证据不完整 | 拒绝恢复；磁盘与内存快照保持原样 |
+| 过期请求报错，磁盘属于较新 session | 只报告旧请求错误，不修改较新 session |
+
+#### 5. 良好/基线/错误用例
+
+- 良好：短暂 CLI 查询失败后记录次数，后续读取到成功 Run 并审计已有 Draft。
+- 基线：旧 `failed` 会话有原 Run 和候选证据，通过“继续监控”恢复；不知道历史底层原因时明确保留未知。
+- 错误：遇到一次网络/CLI 错误就宣称远端发布失败，或为恢复而重新 dispatch。
+- 错误：无条件放开所有 `Failed` 转移，或锁失败后仍把其他管线的 session 标成失败。
+
+#### 6. 必需测试
+
+- `run_monitor_*`：一次故障恢复、计数重置、四次上限、取消/安全错误、身份/结论异常、最后终态日志与预算。
+- `run_monitor_failure_persists_specific_evidence_before_the_failure_event`：错误日志 → 权威失败 session → `stepFailed`。
+- `legacy_failed_monitor_session_resumes_the_same_run_without_dispatching`：原 Run/候选不变，dispatch/publish 次数为 0，停在公开确认。
+- `failed_monitor_resume_*`：新旧码兼容、匹配锁、原子恢复、证据拒绝、陈旧快照与字节不变。
+- `failed_monitor_attempt_does_not_fail_a_newer_or_unowned_session`：失败收尾不得篡改未拥有的检查点。
+- `ReleaseRecoveryPanel.test.ts`：旧/新中断入口、非恢复错误、完整证据、busy/代理门禁与原结果入口。
+
+#### 7. 错误与正确做法
+
+错误：用泛化字符串丢弃查询原因，并把所有历史失败重新派发。
+
+```rust
+let run = query().await.map_err(|_| RemoteFailed)?;
+```
+
+正确：仅在只读监控中对枚举允许的故障有界重试，终态和安全错误保留原类别；恢复始终持锁核对
+完整快照并复用原 Run，后续写操作仍执行原有审计和确认门禁。
+
+```rust
+let lock = RepositorySessionLock::acquire(git_dir)?;
+store.resume_remote_monitoring(&mut session, &lock)?;
+// session.workflow 保持原值；随后查询并核对同一 Run。
+```
+
 ### 0.2 仓库偏好与 Latest 预检契约
 
 #### 1. 范围/触发条件
@@ -570,7 +663,8 @@ get_release_session(repositoryPath): CommandResult<ReleaseSession | null>
 - 启动时只对已记住路径调用 `get_release_session`；该命令只读取本地 Git 元数据、工作区事实、session 与
   发布说明，不 Fetch、不调用 GitHub。无 session 不显示恢复入口，也不保留“加载活动会话”按钮。
 - 本地中断阶段只能“取消并验证回滚”；`committed` 继续 Push；远端阶段继续监控；等待公开进入确认；终态
-  只查看结果。代理无效只阻止继续 Push/监控/公开等网络动作，不得阻止取消回滚或查看本地结果。
+  默认只查看结果，只有符合 0.1.1 完整条件的监控失败可以继续原 Run。代理无效只阻止继续
+  Push/监控/公开等网络动作，不得阻止取消回滚或查看本地结果。
 - 终态结果必须分别判断 Release 是否已公开、在线复核是否完成、cleanup 是否完成。仅有
   `published != null` 不能推导在线复核或历史清理成功。
 

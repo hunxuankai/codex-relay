@@ -1,0 +1,33 @@
+{
+  "id": "fix-release-run-monitor",
+  "name": "fix-release-run-monitor",
+  "title": "修复发布控制台远端 Run 监控中断",
+  "description": "修复 GitHub Run 查询故障提前终止、错误类别丢失和已记录 Run 的失败会话无法恢复；补齐发布监控回归与交付证据。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "release-console",
+  "package": null,
+  "priority": "P2",
+  "creator": "kai",
+  "assignee": "kai",
+  "createdAt": "2026-09-10",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "tools/release-console/src-tauri/src/services/github_release.rs",
+    "tools/release-console/src-tauri/src/services/release_orchestrator.rs",
+    "tools/release-console/src-tauri/src/services/release_application.rs",
+    "tools/release-console/src-tauri/src/services/release_state.rs",
+    "tools/release-console/src-tauri/src/models.rs",
+    "tools/release-console/src/components/release/ReleaseRecoveryPanel.vue"
+  ],
+  "notes": "",
+  "meta": {}
+}

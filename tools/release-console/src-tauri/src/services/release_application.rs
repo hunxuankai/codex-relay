@@ -94,6 +94,7 @@ struct ReleaseFailureDetails<'a> {
     step_id: &'a str,
     code: &'a str,
     message: &'a str,
+    persist_failure: bool,
 }
 
 #[derive(Clone)]
@@ -776,13 +777,13 @@ impl SystemReleaseApplication {
             session_id,
             events.clone(),
         ));
-        if resume_action(session.phase) == ResumeAction::RequiresLocalCancel {
+        if resume_session_action(&session) == ResumeAction::RequiresLocalCancel {
             return Err(app_error(
                 "RELEASE_LOCAL_RESUME_REQUIRES_CANCEL",
                 "本地发布阶段中断，请先取消并验证回滚后重新开始。",
             ));
         }
-        if resume_action(session.phase) == ResumeAction::ReturnSnapshot {
+        if resume_session_action(&session) == ResumeAction::ReturnSnapshot {
             return Ok(session);
         }
         let cancel = self.register_pipeline(session_id)?;
@@ -810,7 +811,7 @@ impl SystemReleaseApplication {
             let environment = profile.environment().to_vec();
             let store = ReleaseStateStore::new(context.git_dir.clone());
             let progress: Arc<dyn ReleaseProgressSink> = recorder.clone();
-            if resume_action(session.phase) == ResumeAction::PushCommitted {
+            if resume_session_action(&session) == ResumeAction::PushCommitted {
                 let git = GitBackend::new_cancellable_with_proxy(
                     context.tools.git.clone(),
                     environment.clone(),
@@ -846,7 +847,7 @@ impl SystemReleaseApplication {
                 cancel,
             );
             let remote = GithubRemoteBackend::new(&gh).with_progress(progress.clone());
-            let result = match resume_action(session.phase) {
+            let result = match resume_session_action(&session) {
                 ResumeAction::RemoteToDraft => ReleaseOrchestrator::new()
                     .with_progress(progress.clone())
                     .run_remote_to_draft(
@@ -1140,6 +1141,7 @@ impl SystemReleaseApplication {
                 step_id: "releasePipeline",
                 code,
                 message: "发布流程失败，请查看对应阶段证据。",
+                persist_failure: true,
             },
         );
     }
@@ -1162,6 +1164,11 @@ impl SystemReleaseApplication {
                 step_id: error.failure_step_id(),
                 code: error.code(),
                 message: &message,
+                persist_failure: !matches!(
+                    error,
+                    ReleaseOrchestratorError::SessionLockFailed
+                        | ReleaseOrchestratorError::RemoteStateInvalid
+                ),
             },
         );
     }
@@ -1182,7 +1189,10 @@ impl SystemReleaseApplication {
                 format!("{}：{}", failure.code, failure.message),
             );
         }
-        if let Ok(Some(mut current)) = store.load() {
+        if failure.persist_failure
+            && let Ok(Some(mut current)) = store.load()
+            && current.id == session_id
+        {
             let should_emit = if matches!(
                 current.phase,
                 ReleasePhase::Committed | ReleasePhase::Failed | ReleasePhase::Cancelled
@@ -1578,6 +1588,14 @@ fn should_signal_process_cancel(phase: ReleasePhase) -> bool {
             | ReleasePhase::LocalBuild
             | ReleasePhase::SourceAudit
     )
+}
+
+fn resume_session_action(session: &ReleaseSession) -> ResumeAction {
+    if session.can_resume_remote_monitoring() {
+        ResumeAction::RemoteToDraft
+    } else {
+        resume_action(session.phase)
+    }
 }
 
 fn resume_action(phase: ReleasePhase) -> ResumeAction {
@@ -2493,6 +2511,148 @@ mod tests {
                 ReleaseEvent::StepFailed { code, .. } if code == "RELEASE_PUSH_FAILED"
             )
         }));
+    }
+
+    #[test]
+    fn failed_monitor_attempt_does_not_fail_a_newer_or_unowned_session() {
+        for (requested_id, error) in [
+            (
+                "previous-session",
+                ReleaseOrchestratorError::RunMonitoringFailed(
+                    crate::services::github_release::GithubReleaseError::ProcessTimeout,
+                ),
+            ),
+            (
+                "current-session",
+                ReleaseOrchestratorError::SessionLockFailed,
+            ),
+            (
+                "current-session",
+                ReleaseOrchestratorError::RemoteStateInvalid,
+            ),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let store = ReleaseStateStore::new(directory.path().to_path_buf());
+            let mut current =
+                ReleaseSession::new("current-session", r"D:\safe-temp\repository", "0.5.0");
+            current.phase = ReleasePhase::WorkflowRunning;
+            current.candidate_sha = Some("a".repeat(40));
+            current.remote_main_sha = current.candidate_sha.clone();
+            current.workflow = Some(crate::models::WorkflowDispatch {
+                run_id: 42,
+                url: "https://github.com/hunxuankai/codex-relay/actions/runs/42".into(),
+            });
+            store.save(&current).unwrap();
+
+            SystemReleaseApplication::new().finish_with_orchestrator_error(
+                requested_id,
+                &store,
+                None,
+                None,
+                &error,
+            );
+
+            assert_eq!(store.load().unwrap().unwrap(), current);
+        }
+    }
+
+    #[test]
+    fn failed_monitor_session_routes_to_remote_recovery_only_with_safe_evidence() {
+        let mut session =
+            ReleaseSession::new("session-recovery", r"D:\safe-temp\repository", "0.5.0");
+        session.phase = ReleasePhase::Failed;
+        session.candidate_sha = Some("a".repeat(40));
+        session.remote_main_sha = session.candidate_sha.clone();
+        session.workflow = Some(crate::models::WorkflowDispatch {
+            run_id: 42,
+            url: "https://github.com/hunxuankai/codex-relay/actions/runs/42".into(),
+        });
+        session.failure = Some(crate::models::ReleaseFailureEvidence {
+            phase: ReleasePhase::WorkflowRunning,
+            step_id: "releasePipeline".into(),
+            code: "RELEASE_REMOTE_FAILED".into(),
+        });
+        assert_eq!(resume_session_action(&session), ResumeAction::RemoteToDraft);
+        session.failure.as_mut().unwrap().code = "GITHUB_RUN_FAILED".into();
+        assert_eq!(
+            resume_session_action(&session),
+            ResumeAction::ReturnSnapshot
+        );
+        session.failure = None;
+        assert_eq!(
+            resume_session_action(&session),
+            ResumeAction::ReturnSnapshot
+        );
+    }
+
+    #[test]
+    fn run_monitor_failure_persists_specific_evidence_before_the_failure_event() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReleaseStateStore::new(directory.path().to_path_buf());
+        let mut session = ReleaseSession::new(
+            "session-monitor-evidence",
+            r"D:\safe-temp\repository",
+            "0.5.0",
+        );
+        session.phase = ReleasePhase::WorkflowRunning;
+        session.candidate_sha = Some("a".repeat(40));
+        session.remote_main_sha = session.candidate_sha.clone();
+        session.workflow = Some(crate::models::WorkflowDispatch {
+            run_id: 42,
+            url: "https://github.com/hunxuankai/codex-relay/actions/runs/42".into(),
+        });
+        store.save(&session).unwrap();
+        let log_store = ReleaseLogStore::new(directory.path().to_path_buf());
+        log_store.initialize(&session.id).unwrap();
+        let sink = Arc::new(TestEventSink::default());
+        let recorder = ReleaseLogRecorder::new(&session.id, log_store, 0, Some(sink.clone()));
+        let error = ReleaseOrchestratorError::RunMonitoringFailed(
+            crate::services::github_release::GithubReleaseError::ProcessTimeout,
+        );
+
+        SystemReleaseApplication::new().finish_with_orchestrator_error(
+            &session.id,
+            &store,
+            Some(sink.as_ref()),
+            Some(&recorder),
+            &error,
+        );
+
+        let persisted = store.load().unwrap().unwrap();
+        assert_eq!(persisted.phase, ReleasePhase::Failed);
+        assert_eq!(persisted.workflow, session.workflow);
+        assert_eq!(
+            persisted.failure,
+            Some(crate::models::ReleaseFailureEvidence {
+                phase: ReleasePhase::WorkflowRunning,
+                step_id: "remoteRun".into(),
+                code: "GITHUB_PROCESS_TIMEOUT".into(),
+            })
+        );
+        let events = sink.events.lock().unwrap();
+        let log_index = events.iter().position(|event| matches!(event,
+            ReleaseEvent::StepLog { entry, .. }
+                if entry.step_id == "remoteRun" && entry.message.contains("GITHUB_PROCESS_TIMEOUT")
+        )).unwrap();
+        let snapshot_index = events
+            .iter()
+            .position(|event| {
+                matches!(event,
+                    ReleaseEvent::SessionUpdated { session } if session.as_ref() == &persisted
+                )
+            })
+            .unwrap();
+        let failure_index = events
+            .iter()
+            .position(|event| {
+                matches!(event,
+                    ReleaseEvent::StepFailed { step_id, code, message }
+                        if step_id == "remoteRun" && code == "GITHUB_PROCESS_TIMEOUT"
+                            && message.contains("继续监控同一 Run")
+                )
+            })
+            .unwrap();
+        assert!(log_index < snapshot_index && snapshot_index < failure_index);
     }
 
     #[test]

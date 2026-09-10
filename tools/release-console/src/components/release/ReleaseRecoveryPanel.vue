@@ -41,11 +41,34 @@ const finalizingPhases = new Set<ReleasePhase>([
   'monitoringCleanup',
 ])
 
+const canResumeMonitoring = computed(() => {
+  const current = props.session
+  const { failure, workflow, candidateSha } = current
+  if (current.phase !== 'failed' || failure?.phase !== 'workflowRunning'
+    || !workflow || !candidateSha) return false
+
+  const knownInterruption = failure.stepId === 'remoteRun'
+    && ['GITHUB_COMMAND_FAILED', 'GITHUB_PROCESS_TIMEOUT', 'GITHUB_RUN_TIMEOUT'].includes(failure.code)
+  const legacyInterruption = failure.stepId === 'releasePipeline'
+    && failure.code === 'RELEASE_REMOTE_FAILED'
+
+  // 这里只决定展示入口；Rust 在仓库锁内重新核验恢复条件与磁盘快照。
+  return (knownInterruption || legacyInterruption)
+    && /^[a-f0-9]{40}$/i.test(candidateSha)
+    && current.remoteMainSha === candidateSha
+    && workflow.runId > 0
+    && workflow.url === `https://github.com/hunxuankai/codex-relay/actions/runs/${workflow.runId}`
+    && current.draft === null && current.published === null
+    && current.cleanup === null && current.cleanupWarning === null
+})
+
 const action = computed<{ kind: RecoveryAction; label: string }>(() => {
   const phase = props.session.phase
   if (localPhases.has(phase)) return { kind: 'cancel', label: '取消并验证回滚' }
   if (phase === 'committed') return { kind: 'resume', label: '继续 Push' }
-  if (monitoringPhases.has(phase)) return { kind: 'resume', label: '继续监控' }
+  if (monitoringPhases.has(phase) || canResumeMonitoring.value) {
+    return { kind: 'resume', label: '继续监控' }
+  }
   if (phase === 'awaitingPublishApproval') {
     return { kind: 'reviewPublish', label: '查看并确认公开' }
   }

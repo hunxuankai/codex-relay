@@ -180,6 +180,16 @@ pub struct WorkflowDispatch {
     pub url: String,
 }
 
+impl WorkflowDispatch {
+    pub(crate) fn expected_url(run_id: u64) -> String {
+        format!("https://github.com/hunxuankai/codex-relay/actions/runs/{run_id}")
+    }
+
+    pub fn has_valid_identity(&self) -> bool {
+        self.run_id > 0 && self.url == Self::expected_url(self.run_id)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowRunStatus {
@@ -429,6 +439,36 @@ pub struct ReleaseSession {
 }
 
 impl ReleaseSession {
+    pub fn can_resume_remote_monitoring(&self) -> bool {
+        let Some(failure) = &self.failure else {
+            return false;
+        };
+        let allowed_failure = matches!(
+            (failure.step_id.as_str(), failure.code.as_str()),
+            ("releasePipeline", "RELEASE_REMOTE_FAILED")
+                | (
+                    "remoteRun",
+                    "GITHUB_COMMAND_FAILED" | "GITHUB_PROCESS_TIMEOUT" | "GITHUB_RUN_TIMEOUT"
+                )
+        );
+        self.phase == ReleasePhase::Failed
+            && failure.phase == ReleasePhase::WorkflowRunning
+            && allowed_failure
+            && self.candidate_sha.as_deref().is_some_and(|sha| {
+                sha.len() == 40
+                    && sha.bytes().all(|byte| byte.is_ascii_hexdigit())
+                    && self.remote_main_sha.as_deref() == Some(sha)
+            })
+            && self
+                .workflow
+                .as_ref()
+                .is_some_and(WorkflowDispatch::has_valid_identity)
+            && self.draft.is_none()
+            && self.published.is_none()
+            && self.cleanup.is_none()
+            && self.cleanup_warning.is_none()
+    }
+
     pub fn new(
         id: impl Into<String>,
         repository_path: impl Into<String>,

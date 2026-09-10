@@ -42,6 +42,7 @@ pub struct ReleaseStateStore {
 #[derive(Debug)]
 pub struct RepositorySessionLock {
     file: File,
+    state_root: PathBuf,
 }
 
 impl RepositorySessionLock {
@@ -57,7 +58,7 @@ impl RepositorySessionLock {
             .map_err(|_| ReleaseStateError::WriteFailed)?;
         file.try_lock_exclusive()
             .map_err(|_| ReleaseStateError::SessionLocked)?;
-        Ok(Self { file })
+        Ok(Self { file, state_root })
     }
 }
 
@@ -150,6 +151,25 @@ impl ReleaseStateStore {
             step_id: step_id.into(),
             code: code.into(),
         });
+        self.save(&updated)?;
+        *session = updated;
+        Ok(())
+    }
+
+    pub fn resume_remote_monitoring(
+        &self,
+        session: &mut ReleaseSession,
+        lock: &RepositorySessionLock,
+    ) -> Result<(), ReleaseStateError> {
+        if self.state_file.parent() != Some(lock.state_root.as_path())
+            || !session.can_resume_remote_monitoring()
+            || self.load()?.as_ref() != Some(&*session)
+        {
+            return Err(ReleaseStateError::InvalidState);
+        }
+        let mut updated = session.clone();
+        updated.phase = ReleasePhase::WorkflowRunning;
+        updated.failure = None;
         self.save(&updated)?;
         *session = updated;
         Ok(())

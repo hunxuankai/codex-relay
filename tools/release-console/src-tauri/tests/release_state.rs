@@ -11,6 +11,129 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
+fn failed_monitor_session() -> ReleaseSession {
+    let mut session = ReleaseSession::new("session-monitor", r"D:\safe-temp\repository", "0.5.0");
+    session.phase = ReleasePhase::Failed;
+    session.candidate_sha = Some("a".repeat(40));
+    session.remote_main_sha = session.candidate_sha.clone();
+    session.workflow = Some(WorkflowDispatch {
+        run_id: 42,
+        url: "https://github.com/hunxuankai/codex-relay/actions/runs/42".into(),
+    });
+    session.failure = Some(ReleaseFailureEvidence {
+        phase: ReleasePhase::WorkflowRunning,
+        step_id: "releasePipeline".into(),
+        code: "RELEASE_REMOTE_FAILED".into(),
+    });
+    session
+}
+
+#[test]
+fn failed_monitor_resume_atomically_restores_only_supported_checkpoints() {
+    for (step_id, code) in [
+        ("releasePipeline", "RELEASE_REMOTE_FAILED"),
+        ("remoteRun", "GITHUB_COMMAND_FAILED"),
+        ("remoteRun", "GITHUB_PROCESS_TIMEOUT"),
+        ("remoteRun", "GITHUB_RUN_TIMEOUT"),
+    ] {
+        let git_dir = tempfile::tempdir().unwrap();
+        let store = ReleaseStateStore::new(git_dir.path().to_path_buf());
+        let lock = RepositorySessionLock::acquire(git_dir.path()).unwrap();
+        let mut session = failed_monitor_session();
+        let failure = session.failure.as_mut().unwrap();
+        failure.step_id = step_id.into();
+        failure.code = code.into();
+        store.save(&session).unwrap();
+        let original_workflow = session.workflow.clone();
+
+        store.resume_remote_monitoring(&mut session, &lock).unwrap();
+
+        assert_eq!(session.phase, ReleasePhase::WorkflowRunning);
+        assert_eq!(session.failure, None);
+        assert_eq!(session.workflow, original_workflow);
+        assert_eq!(session.candidate_sha, session.remote_main_sha);
+        assert_eq!(store.load().unwrap().unwrap(), session);
+        assert!(
+            ReleasePhase::Failed
+                .transition_to(ReleasePhase::WorkflowRunning)
+                .is_err()
+        );
+        assert!(matches!(
+            store.initialize(&failed_monitor_session()),
+            Err(ReleaseStateError::ActiveSessionExists)
+        ));
+    }
+}
+
+#[test]
+fn failed_monitor_resume_rejects_untrusted_or_later_evidence_without_writing() {
+    let invalidators: [fn(&mut ReleaseSession); 12] = [
+        |session| session.failure = None,
+        |session| session.failure.as_mut().unwrap().phase = ReleasePhase::LocalChecks,
+        |session| session.failure.as_mut().unwrap().step_id = "draftAudit".into(),
+        |session| session.failure.as_mut().unwrap().code = "GITHUB_RUN_FAILED".into(),
+        |session| {
+            session.failure.as_mut().unwrap().code = "GITHUB_PROCESS_TREE_TERMINATION_FAILED".into()
+        },
+        |session| session.candidate_sha = None,
+        |session| {
+            session.candidate_sha = Some("invalid".into());
+            session.remote_main_sha = session.candidate_sha.clone();
+        },
+        |session| session.remote_main_sha = Some("b".repeat(40)),
+        |session| session.workflow = None,
+        |session| session.workflow.as_mut().unwrap().run_id = 0,
+        |session| session.workflow.as_mut().unwrap().url = "https://example.invalid/run/42".into(),
+        |session| session.cleanup_warning = Some("此前已进入清理阶段".into()),
+    ];
+    for invalidate in invalidators {
+        let git_dir = tempfile::tempdir().unwrap();
+        let store = ReleaseStateStore::new(git_dir.path().to_path_buf());
+        let lock = RepositorySessionLock::acquire(git_dir.path()).unwrap();
+        let mut session = failed_monitor_session();
+        invalidate(&mut session);
+        store.save(&session).unwrap();
+        let state_file = git_dir
+            .path()
+            .join("codex-relay-release-console/session.json");
+        let original = fs::read(&state_file).unwrap();
+        let original_session = session.clone();
+
+        assert!(!session.can_resume_remote_monitoring());
+        assert!(matches!(
+            store.resume_remote_monitoring(&mut session, &lock),
+            Err(ReleaseStateError::InvalidState)
+        ));
+        assert_eq!(session, original_session);
+        assert_eq!(fs::read(state_file).unwrap(), original);
+    }
+}
+
+#[test]
+fn failed_monitor_resume_rejects_a_foreign_lock_or_stale_snapshot() {
+    let git_dir = tempfile::tempdir().unwrap();
+    let other_dir = tempfile::tempdir().unwrap();
+    let store = ReleaseStateStore::new(git_dir.path().to_path_buf());
+    let mut stale = failed_monitor_session();
+    store.save(&stale).unwrap();
+    let wrong_lock = RepositorySessionLock::acquire(other_dir.path()).unwrap();
+    assert!(matches!(
+        store.resume_remote_monitoring(&mut stale, &wrong_lock),
+        Err(ReleaseStateError::InvalidState)
+    ));
+    assert_eq!(store.load().unwrap().unwrap(), stale);
+
+    let lock = RepositorySessionLock::acquire(git_dir.path()).unwrap();
+    let mut newer = stale.clone();
+    newer.id = "session-newer".into();
+    store.save(&newer).unwrap();
+    assert!(matches!(
+        store.resume_remote_monitoring(&mut stale, &lock),
+        Err(ReleaseStateError::InvalidState)
+    ));
+    assert_eq!(store.load().unwrap().unwrap(), newer);
+}
+
 struct TempGitDir {
     path: PathBuf,
 }

@@ -4,6 +4,7 @@ use codex_relay_release_console_lib::models::{
     ReleasePhase, ReleaseSession, WorkflowDispatch, WorkflowRunStatus,
 };
 use codex_relay_release_console_lib::services::git_release::GitPushOutcome;
+use codex_relay_release_console_lib::services::github_release::GithubReleaseError;
 use codex_relay_release_console_lib::services::local_verification::{
     LocalCommandEvidence, LocalVerificationBackend, LocalVerificationBackendError,
     LocalVerificationCommand, LocalVerificationFailure, LocalVerificationProcessError,
@@ -215,6 +216,7 @@ struct SuccessfulRemoteBackend {
     dispatch_calls: AtomicU64,
     publish_calls: AtomicU64,
     cleanup_succeeds: bool,
+    run_error: Option<GithubReleaseError>,
 }
 
 fn remote_draft() -> DraftAuditEvidence {
@@ -253,8 +255,12 @@ impl ReleaseRemoteBackend for SuccessfulRemoteBackend {
         &'a self,
         workflow: &'a WorkflowDispatch,
         candidate_sha: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<WorkflowRunStatus, String>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<WorkflowRunStatus, GithubReleaseError>> + Send + 'a>>
+    {
         Box::pin(async move {
+            if let Some(error) = self.run_error {
+                return Err(error);
+            }
             Ok(WorkflowRunStatus {
                 id: workflow.run_id,
                 status: "completed".into(),
@@ -1023,6 +1029,7 @@ fn remote_pipeline_persists_run_and_draft_then_stops_for_publish_approval() {
         dispatch_calls: AtomicU64::new(0),
         publish_calls: AtomicU64::new(0),
         cleanup_succeeds: true,
+        run_error: None,
     };
     let log_store = ReleaseLogStore::new(git_dir.clone());
     log_store.initialize(&session.id).unwrap();
@@ -1103,6 +1110,7 @@ fn cleanup_failure_finishes_with_warnings_without_losing_published_evidence() {
         dispatch_calls: AtomicU64::new(0),
         publish_calls: AtomicU64::new(0),
         cleanup_succeeds: false,
+        run_error: None,
     };
     let log_store = ReleaseLogStore::new(git_dir.clone());
     log_store.initialize(&session.id).unwrap();
@@ -1173,6 +1181,7 @@ fn resumed_workflow_session_reuses_the_persisted_run_without_dispatching_again()
         dispatch_calls: AtomicU64::new(0),
         publish_calls: AtomicU64::new(0),
         cleanup_succeeds: true,
+        run_error: None,
     };
 
     tauri::async_runtime::block_on(ReleaseOrchestrator::new().run_remote_to_draft(
@@ -1186,6 +1195,103 @@ fn resumed_workflow_session_reuses_the_persisted_run_without_dispatching_again()
 
     assert_eq!(remote.dispatch_calls.load(Ordering::SeqCst), 0);
     assert_eq!(session.phase, ReleasePhase::AwaitingPublishApproval);
+}
+
+#[test]
+fn remote_monitor_failure_preserves_specific_safe_code_and_run_checkpoint() {
+    let repository = TempRepository::new();
+    let git_dir = repository.root.join(".git");
+    let store = ReleaseStateStore::new(git_dir.clone());
+    let mut session = ReleaseSession::new(
+        "session-monitor-failure",
+        repository.root.to_string_lossy(),
+        "0.5.0",
+    );
+    session.phase = ReleasePhase::WorkflowRunning;
+    session.candidate_sha = Some("a".repeat(40));
+    session.remote_main_sha = session.candidate_sha.clone();
+    session.workflow = Some(WorkflowDispatch {
+        run_id: 123,
+        url: "https://github.com/hunxuankai/codex-relay/actions/runs/123".into(),
+    });
+    store.save(&session).unwrap();
+    let remote = SuccessfulRemoteBackend {
+        dispatch_calls: AtomicU64::new(0),
+        publish_calls: AtomicU64::new(0),
+        cleanup_succeeds: true,
+        run_error: Some(GithubReleaseError::ProcessTimeout),
+    };
+    let log_store = ReleaseLogStore::new(git_dir.clone());
+    log_store.initialize(&session.id).unwrap();
+    let recorder = Arc::new(ReleaseLogRecorder::new(&session.id, log_store, 0, None));
+
+    let error = tauri::async_runtime::block_on(
+        ReleaseOrchestrator::new()
+            .with_progress(recorder)
+            .run_remote_to_draft(&mut session, &store, &git_dir, VALID_RELEASE_NOTES, &remote),
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code(), "GITHUB_PROCESS_TIMEOUT");
+    assert_eq!(remote.dispatch_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(store.load().unwrap().unwrap().workflow, session.workflow);
+    assert!(session.draft.is_none());
+    let page = ReleaseLogStore::new(git_dir)
+        .load_page(&session.id, None)
+        .unwrap();
+    assert!(page.entries.iter().any(|entry| {
+        entry.step_id == "remoteRun"
+            && entry.level == ReleaseLogLevel::Error
+            && entry.message.contains("GITHUB_PROCESS_TIMEOUT")
+    }));
+}
+
+#[test]
+fn legacy_failed_monitor_session_resumes_the_same_run_without_dispatching() {
+    let repository = TempRepository::new();
+    let git_dir = repository.root.join(".git");
+    let store = ReleaseStateStore::new(git_dir.clone());
+    let mut session = ReleaseSession::new(
+        "session-legacy-monitor-failure",
+        repository.root.to_string_lossy(),
+        "0.5.0",
+    );
+    session.phase = ReleasePhase::WorkflowRunning;
+    session.candidate_sha = Some("a".repeat(40));
+    session.remote_main_sha = session.candidate_sha.clone();
+    session.workflow = Some(WorkflowDispatch {
+        run_id: 123,
+        url: "https://github.com/hunxuankai/codex-relay/actions/runs/123".into(),
+    });
+    store.save(&session).unwrap();
+    store
+        .fail(&mut session, "releasePipeline", "RELEASE_REMOTE_FAILED")
+        .unwrap();
+    let mut restarted = store.load().unwrap().unwrap();
+    let remote = SuccessfulRemoteBackend {
+        dispatch_calls: AtomicU64::new(0),
+        publish_calls: AtomicU64::new(0),
+        cleanup_succeeds: true,
+        run_error: None,
+    };
+
+    let draft = tauri::async_runtime::block_on(ReleaseOrchestrator::new().run_remote_to_draft(
+        &mut restarted,
+        &store,
+        &git_dir,
+        VALID_RELEASE_NOTES,
+        &remote,
+    ))
+    .expect("历史监控失败应重新查询原 Run，而不是创建新 Run");
+
+    assert_eq!(remote.dispatch_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(remote.publish_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(restarted.phase, ReleasePhase::AwaitingPublishApproval);
+    assert_eq!(restarted.workflow, session.workflow);
+    assert_eq!(restarted.candidate_sha, session.candidate_sha);
+    assert_eq!(restarted.failure, None);
+    assert_eq!(restarted.draft.as_ref(), Some(&draft));
+    assert_eq!(store.load().unwrap().unwrap(), restarted);
 }
 
 #[test]
@@ -1217,6 +1323,7 @@ fn resumed_published_session_skips_publish_and_continues_online_verification() {
         dispatch_calls: AtomicU64::new(0),
         publish_calls: AtomicU64::new(0),
         cleanup_succeeds: true,
+        run_error: None,
     };
 
     tauri::async_runtime::block_on(ReleaseOrchestrator::new().publish_and_finalize(
