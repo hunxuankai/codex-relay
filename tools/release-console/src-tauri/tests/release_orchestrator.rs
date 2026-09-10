@@ -311,8 +311,11 @@ impl ReleaseRemoteBackend for SuccessfulRemoteBackend {
 
     fn monitor_cleanup<'a>(
         &'a self,
-        _published_at: &'a str,
+        published: &'a PublishedReleaseEvidence,
     ) -> Pin<Box<dyn Future<Output = Result<CleanupRunEvidence, String>> + Send + 'a>> {
+        assert_eq!(published.release_id, 42);
+        assert_eq!(published.tag_name, "v0.5.0");
+        assert_eq!(published.published_at, "2026-07-31T11:00:00Z");
         let succeeded = self.cleanup_succeeds;
         Box::pin(async move {
             Ok(CleanupRunEvidence {

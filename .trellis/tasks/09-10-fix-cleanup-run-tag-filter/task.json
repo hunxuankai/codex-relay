@@ -1,0 +1,32 @@
+{
+  "id": "fix-cleanup-run-tag-filter",
+  "name": "fix-cleanup-run-tag-filter",
+  "title": "修复发布后 cleanup Run 的标签筛选",
+  "description": "修复发布后 cleanup Run 误用 main 过滤造成的未确认警告，绑定已公开标签与发布时间并补充回归和交付证据。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "release-console",
+  "package": null,
+  "priority": "P2",
+  "creator": "kai",
+  "assignee": "kai",
+  "createdAt": "2026-09-10",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "tools/release-console/src-tauri/src/infrastructure/gh.rs",
+    "tools/release-console/src-tauri/src/services/github_release.rs",
+    "tools/release-console/src-tauri/src/services/release_orchestrator.rs",
+    "tools/release-console/src-tauri/tests/github_release.rs",
+    "tools/release-console/src-tauri/tests/release_orchestrator.rs"
+  ],
+  "notes": "",
+  "meta": {}
+}

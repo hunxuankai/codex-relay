@@ -54,6 +54,7 @@ struct PublishedFixtureGhBackend {
 struct CleanupFixtureGhBackend {
     conclusion: &'static str,
     requests: Mutex<Vec<GhRequest>>,
+    listed_runs: Option<Vec<serde_json::Value>>,
 }
 
 struct AlreadyPublishedGhBackend {
@@ -414,14 +415,19 @@ impl GhBackend for CleanupFixtureGhBackend {
         self.requests.lock().unwrap().push(request.clone());
         Box::pin(async move {
             let stdout = match request.operation {
-                GhOperation::CleanupRuns => serde_json::to_vec(&serde_json::json!([{
-                    "databaseId": 900,
-                    "status": "completed",
-                    "conclusion": self.conclusion,
-                    "createdAt": "2026-07-31T11:00:02Z",
-                    "url": "https://github.com/hunxuankai/codex-relay/actions/runs/900"
-                }]))
-                .unwrap(),
+                GhOperation::CleanupRuns => {
+                    let runs = self.listed_runs.clone().unwrap_or_else(|| {
+                        vec![serde_json::json!({
+                            "databaseId": 900,
+                            "headBranch": "v0.5.0",
+                            "status": "completed",
+                            "conclusion": self.conclusion,
+                            "createdAt": "2026-07-31T11:00:02Z",
+                            "url": "https://github.com/hunxuankai/codex-relay/actions/runs/900"
+                        })]
+                    });
+                    serde_json::to_vec(&runs).unwrap()
+                }
                 GhOperation::ViewReleaseRun => serde_json::to_vec(&serde_json::json!({
                     "databaseId": 900,
                     "status": "completed",
@@ -932,8 +938,8 @@ fn system_gh_backend_builds_fixed_dispatch_and_direct_asset_download_invocations
             operation: GhOperation::CleanupRuns,
             repository: "hunxuankai/codex-relay".into(),
             workflow: Some("cleanup-old-releases.yml".into()),
-            git_ref: Some("main".into()),
-            tag_name: None,
+            git_ref: None,
+            tag_name: Some("v0.5.0".into()),
             head_sha: None,
             created_after: Some("2026-07-31T11:00:00Z".into()),
             resource_id: None,
@@ -950,7 +956,7 @@ fn system_gh_backend_builds_fixed_dispatch_and_direct_asset_download_invocations
             "--workflow",
             "cleanup-old-releases.yml",
             "--branch",
-            "main",
+            "v0.5.0",
             "--event",
             "release",
             "--created",
@@ -958,7 +964,7 @@ fn system_gh_backend_builds_fixed_dispatch_and_direct_asset_download_invocations
             "--limit",
             "10",
             "--json",
-            "databaseId,status,conclusion,createdAt,url",
+            "databaseId,status,conclusion,headBranch,createdAt,url",
         ]
     );
 }
@@ -1349,15 +1355,136 @@ fn published_release_audit_rejects_a_tag_ref_that_drifted_from_the_candidate() {
 }
 
 #[test]
+fn cleanup_invocation_filters_the_published_tag_instead_of_main() {
+    let directory = tempfile::tempdir().unwrap();
+    let (_sender, cancel) = tokio::sync::watch::channel(false);
+    let backend = SystemGhBackend::new(
+        PathBuf::from(r"D:\tools\gh.exe"),
+        Vec::new(),
+        directory.path().to_path_buf(),
+        cancel,
+    );
+    let invocation = backend
+        .invocation_for(&GhRequest {
+            operation: GhOperation::CleanupRuns,
+            repository: "hunxuankai/codex-relay".into(),
+            workflow: Some("cleanup-old-releases.yml".into()),
+            git_ref: None,
+            tag_name: Some("v0.5.2".into()),
+            head_sha: None,
+            created_after: Some("2026-09-10T11:04:53Z".into()),
+            resource_id: None,
+            stdin: None,
+        })
+        .expect("cleanup 查询必须接受已公开的版本标签");
+
+    assert!(
+        invocation
+            .args
+            .windows(2)
+            .any(|args| args == ["--branch", "v0.5.2"])
+    );
+    assert!(
+        invocation
+            .args
+            .windows(2)
+            .any(|args| args == ["--event", "release"])
+    );
+    assert!(!invocation.args.iter().any(|arg| arg == "main"));
+}
+
+#[test]
+fn cleanup_invocation_rejects_missing_non_version_and_ambiguous_refs() {
+    let directory = tempfile::tempdir().unwrap();
+    let (_sender, cancel) = tokio::sync::watch::channel(false);
+    let backend = SystemGhBackend::new(
+        PathBuf::from(r"D:\tools\gh.exe"),
+        Vec::new(),
+        directory.path().to_path_buf(),
+        cancel,
+    );
+    let request = GhRequest {
+        operation: GhOperation::CleanupRuns,
+        repository: "hunxuankai/codex-relay".into(),
+        workflow: Some("cleanup-old-releases.yml".into()),
+        git_ref: None,
+        tag_name: None,
+        head_sha: None,
+        created_after: Some("2026-09-10T11:04:53Z".into()),
+        resource_id: None,
+        stdin: None,
+    };
+    for tag in [
+        None,
+        Some("main"),
+        Some("vnext"),
+        Some("v0.5.2 --limit 100"),
+        Some("v0.5.2/other"),
+    ] {
+        let mut candidate = request.clone();
+        candidate.tag_name = tag.map(str::to_string);
+        assert!(backend.invocation_for(&candidate).is_err());
+    }
+    let mut ambiguous = request;
+    ambiguous.tag_name = Some("v0.5.2".into());
+    ambiguous.git_ref = Some("main".into());
+    assert!(backend.invocation_for(&ambiguous).is_err());
+}
+
+#[test]
+fn cleanup_discovery_selects_only_the_published_tag_after_its_publication() {
+    let runs = [
+        (901, "v0.6.0", "2026-07-31T11:00:03Z"),
+        (902, "v0.5.0", "2026-07-31T10:59:59Z"),
+        (900, "v0.5.0", "2026-07-31T11:00:02Z"),
+    ]
+    .into_iter()
+    .map(|(id, tag, created_at)| {
+        serde_json::json!({
+            "databaseId": id,
+            "headBranch": tag,
+            "createdAt": created_at,
+            "url": format!("https://github.com/hunxuankai/codex-relay/actions/runs/{id}"),
+        })
+    })
+    .collect();
+    let backend = CleanupFixtureGhBackend {
+        conclusion: "success",
+        requests: Mutex::new(Vec::new()),
+        listed_runs: Some(runs),
+    };
+    let cleanup = tauri::async_runtime::block_on(
+        GithubReleaseService::new().monitor_cleanup(&backend, &cleanup_published_release()),
+    )
+    .unwrap();
+
+    assert_eq!(cleanup.run_id, 900);
+    assert!(cleanup.succeeded);
+    let requests = backend.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].operation, GhOperation::CleanupRuns);
+    assert_eq!(requests[0].tag_name.as_deref(), Some("v0.5.0"));
+    assert_eq!(requests[0].git_ref, None);
+    assert_eq!(
+        requests[0].created_after.as_deref(),
+        Some("2026-07-31T11:00:00Z")
+    );
+    assert_eq!(requests[1].operation, GhOperation::ViewReleaseRun);
+    assert_eq!(requests[1].resource_id, Some(900));
+    assert_eq!(requests[1].tag_name, requests[0].tag_name);
+}
+
+#[test]
 fn cleanup_success_and_failure_remain_separate_from_published_release_success() {
     for (conclusion, expected_success) in [("success", true), ("failure", false)] {
         let backend = CleanupFixtureGhBackend {
             conclusion,
             requests: Mutex::new(Vec::new()),
+            listed_runs: None,
         };
 
         let cleanup = tauri::async_runtime::block_on(
-            GithubReleaseService::new().monitor_cleanup(&backend, "2026-07-31T11:00:00Z"),
+            GithubReleaseService::new().monitor_cleanup(&backend, &cleanup_published_release()),
         )
         .unwrap();
 
@@ -1372,6 +1499,7 @@ fn cleanup_monitor_logs_the_first_completed_run_projection() {
     let backend = CleanupFixtureGhBackend {
         conclusion: "success",
         requests: Mutex::new(Vec::new()),
+        listed_runs: None,
     };
     let git_dir = tempfile::tempdir().unwrap();
     let store = ReleaseLogStore::new(git_dir.path().to_path_buf());
@@ -1380,9 +1508,10 @@ fn cleanup_monitor_logs_the_first_completed_run_projection() {
     let service =
         GithubReleaseService::new().with_progress(recorder.clone() as Arc<dyn ReleaseProgressSink>);
 
-    let cleanup =
-        tauri::async_runtime::block_on(service.monitor_cleanup(&backend, "2026-07-31T11:00:00Z"))
-            .unwrap();
+    let cleanup = tauri::async_runtime::block_on(
+        service.monitor_cleanup(&backend, &cleanup_published_release()),
+    )
+    .unwrap();
 
     assert_eq!(cleanup.run_id, 900);
     let page = ReleaseLogStore::new(git_dir.path().to_path_buf())
@@ -1395,4 +1524,12 @@ fn cleanup_monitor_logs_the_first_completed_run_projection() {
     assert!(page.entries[0].message.contains("conclusion=success"));
     assert!(!page.entries[0].message.contains("https://"));
     assert!(!page.entries[0].message.contains("aaaaaaaaaaaaaaaa"));
+}
+
+fn cleanup_published_release() -> PublishedReleaseEvidence {
+    PublishedReleaseEvidence {
+        release_id: 42,
+        tag_name: "v0.5.0".into(),
+        published_at: "2026-07-31T11:00:00Z".into(),
+    }
 }

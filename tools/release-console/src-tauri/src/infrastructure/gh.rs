@@ -275,11 +275,17 @@ impl SystemGhBackend {
                     .as_deref()
                     .filter(|workflow| *workflow == "cleanup-old-releases.yml")
                     .ok_or_else(|| "unsupported workflow".to_string())?;
-                let git_ref = request
-                    .git_ref
+                if request.git_ref.is_some() {
+                    return Err("unsupported ref".into());
+                }
+                let tag_name = request
+                    .tag_name
                     .as_deref()
-                    .filter(|git_ref| *git_ref == "main")
-                    .ok_or_else(|| "unsupported ref".to_string())?;
+                    .filter(|tag| {
+                        tag.strip_prefix('v')
+                            .is_some_and(|version| semver::Version::parse(version).is_ok())
+                    })
+                    .ok_or_else(|| "invalid release tag".to_string())?;
                 let created_after = request
                     .created_after
                     .as_deref()
@@ -293,7 +299,7 @@ impl SystemGhBackend {
                     "--workflow".into(),
                     workflow.into(),
                     "--branch".into(),
-                    git_ref.into(),
+                    tag_name.into(),
                     "--event".into(),
                     "release".into(),
                     "--created".into(),
@@ -301,7 +307,7 @@ impl SystemGhBackend {
                     "--limit".into(),
                     "10".into(),
                     "--json".into(),
-                    "databaseId,status,conclusion,createdAt,url".into(),
+                    "databaseId,status,conclusion,headBranch,createdAt,url".into(),
                 ]
                 .to_vec()
             }

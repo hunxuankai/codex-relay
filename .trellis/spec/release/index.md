@@ -25,6 +25,7 @@
 - GitHub Run 发现与监控预算是否覆盖已观测的一小时以上 Windows 冷构建？
 - Run 查询是否保留具体安全错误、只对允许的查询故障有界重试，并在持锁核验后恢复同一 Run？
 - 真实失败 Run 是否保留最后的 Job/Step 证据，过期恢复请求是否保持其他会话不变？
+- cleanup Run 是否按已公开 Release 的标签、release 事件和发布时间筛选，并核对响应 headBranch？
 - 正式 Release 公开后，历史 Release、资产和对应 tag 是否由清理工作流删除，且当前
   `releases/latest` 对象被排除？
 - 构建、安装与签名是否按实际证据分别报告？

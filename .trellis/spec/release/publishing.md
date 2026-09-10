@@ -197,6 +197,69 @@ store.resume_remote_monitoring(&mut session, &lock)?;
 // session.workflow 保持原值；随后查询并核对同一 Run。
 ```
 
+### 0.1.2 发布后 cleanup Run 的标签归属
+
+#### 1. 范围/触发条件
+
+修改 cleanup Run 发现、gh 参数或发布收尾上下文时遵循本节。GitHub `release` 事件 Run 的
+`headBranch` 是发布标签；用 `main` 筛选会遗漏已成功的清理并产生未确认警告。
+
+#### 2. 签名
+
+```rust
+GithubReleaseService::monitor_cleanup(backend, published: &PublishedReleaseEvidence)
+    -> Result<CleanupRunEvidence, GithubReleaseError>
+ReleaseRemoteBackend::monitor_cleanup(published: &PublishedReleaseEvidence)
+    -> Future<Output = Result<CleanupRunEvidence, String>>
+```
+
+使用已核验的 Release 身份，保留 `releaseId`、`tagName`、`publishedAt`，不单独传一个缺少标签上下文的时间字符串。
+
+#### 3. 契约
+
+- `CleanupRuns` 的 GhRequest 固定仓库与 `cleanup-old-releases.yml`，使用
+  `tag_name=Some(published.tag_name)`、`git_ref=None` 和 `created_after=published_at`。
+- 原生 argv 固定 `--event release`，`--branch` 使用经校验的 `v<SemVer>` 标签；缺少标签、任意分支、
+  非法 SemVer 或额外 git_ref 都拒绝生成 invocation，不回退到 main。
+- 列表 JSON 显式请求 `headBranch`。Rust 只选择标签完全匹配且创建时间不早于发布时刻的唯一 Run，
+  随后继续核对 Run ID/URL。其他标签或旧 Run 不能被用来确认当前版本清理成功。
+- 发布构建的 `workflow_dispatch` 仍固定 main；其分支规则与发布后 `release` 事件的标签规则分别维护。
+- cleanup 成功正常完成；真实失败或无法确认仍保留 warning 和已公开 Release 证据。该查询修复不重写
+  既有 `completedWithWarnings` 历史会话，也不修改删除策略或触发新清理操作。
+
+#### 4. 验证与错误矩阵
+
+| 条件 | 必需结果 |
+|---|---|
+| 已公开 `v0.5.2`，cleanup Run 的 headBranch 为 `v0.5.2` | 原生参数使用该标签，找到并监控当前 Run |
+| 响应同时含其他标签/发布前 Run | 排除不匹配项，只接受当前标签与时间范围内的唯一 Run |
+| 标签缺失、非 SemVer 或同时传 git_ref | invocation 拒绝，不使用 main 兜底 |
+| 缺少 headBranch 或响应字段不合法 | `GITHUB_RESPONSE_INVALID`，不确认清理成功 |
+| 没有唯一目标 Run | 在既有发现预算内处理，仍无法确认则保留警告 |
+| cleanup 确认真正失败 | 保留失败结论；公开 Release 的成功证据不丢失 |
+
+#### 5. 良好/基线/错误用例
+
+- 良好：Release 事件使用 `v0.5.2`，匹配同标签的已完成 cleanup Run。
+- 基线：手动触发发布构建仍使用 main，之后的 cleanup 查询消费已公开 Release 的标签。
+- 错误：所有 GitHub Actions 共用 main 分支过滤，导致成功 cleanup 永远查不到。
+
+#### 6. 必需测试
+
+- `cleanup_invocation_filters_the_published_tag_instead_of_main`：验证生产 argv 的 tag 与 release 事件。
+- `cleanup_invocation_rejects_missing_non_version_and_ambiguous_refs`：验证缺标签、非法标签及冲突 ref 拒绝。
+- `cleanup_discovery_selects_only_the_published_tag_after_its_publication`：混合标签与时间的响应只选当前 Run。
+- 发布编排 mock 必须断言收到完整 PublishedReleaseEvidence；保留 cleanup success/failure、首次完成日志和 dispatch main 的既有测试。
+
+#### 7. 错误与正确做法
+
+```text
+错误：cleanup 查询 --branch main --event release
+正确：cleanup 查询 --branch <已公开 tagName> --event release --created >=<publishedAt>
+```
+
+只读核对实际 GitHub Run 的 headBranch 可以验证上述行为；不得为验证查询而重复执行删除工作流。
+
 ### 0.2 仓库偏好与 Latest 预检契约
 
 #### 1. 范围/触发条件

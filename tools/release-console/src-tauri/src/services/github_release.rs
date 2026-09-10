@@ -693,9 +693,9 @@ impl GithubReleaseService {
     pub async fn monitor_cleanup(
         &self,
         backend: &dyn GhBackend,
-        published_at: &str,
+        published: &PublishedReleaseEvidence,
     ) -> Result<CleanupRunEvidence, GithubReleaseError> {
-        let published_at = DateTime::parse_from_rfc3339(published_at)
+        let published_at = DateTime::parse_from_rfc3339(&published.published_at)
             .map_err(|_| GithubReleaseError::InvalidResponse)?;
         let created_after = published_at.to_rfc3339_opts(SecondsFormat::Secs, true);
         let mut cleanup_run = None;
@@ -705,8 +705,8 @@ impl GithubReleaseService {
                     operation: GhOperation::CleanupRuns,
                     repository: TARGET_REPOSITORY.to_string(),
                     workflow: Some(CLEANUP_WORKFLOW.to_string()),
-                    git_ref: Some(DEFAULT_BRANCH.to_string()),
-                    tag_name: None,
+                    git_ref: None,
+                    tag_name: Some(published.tag_name.clone()),
                     head_sha: None,
                     created_after: Some(created_after.clone()),
                     resource_id: None,
@@ -719,9 +719,10 @@ impl GithubReleaseService {
             let matching = runs
                 .into_iter()
                 .filter(|run| {
-                    DateTime::parse_from_rfc3339(&run.created_at)
-                        .map(|created_at| created_at >= published_at)
-                        .unwrap_or(false)
+                    run.head_branch == published.tag_name
+                        && DateTime::parse_from_rfc3339(&run.created_at)
+                            .map(|created_at| created_at >= published_at)
+                            .unwrap_or(false)
                 })
                 .collect::<Vec<_>>();
             match matching.as_slice() {
@@ -746,8 +747,8 @@ impl GithubReleaseService {
                     operation: GhOperation::ViewReleaseRun,
                     repository: TARGET_REPOSITORY.to_string(),
                     workflow: Some(CLEANUP_WORKFLOW.to_string()),
-                    git_ref: Some(DEFAULT_BRANCH.to_string()),
-                    tag_name: None,
+                    git_ref: None,
+                    tag_name: Some(published.tag_name.clone()),
                     head_sha: None,
                     created_after: None,
                     resource_id: Some(run_id),
@@ -829,6 +830,7 @@ struct RawListedWorkflowRun {
 #[serde(rename_all = "camelCase")]
 struct RawCleanupRun {
     database_id: u64,
+    head_branch: String,
     created_at: String,
     url: String,
 }

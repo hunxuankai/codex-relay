@@ -153,7 +153,7 @@ pub trait ReleaseRemoteBackend: Send + Sync {
 
     fn monitor_cleanup<'a>(
         &'a self,
-        published_at: &'a str,
+        published: &'a PublishedReleaseEvidence,
     ) -> Pin<Box<dyn Future<Output = Result<CleanupRunEvidence, String>> + Send + 'a>>;
 }
 
@@ -355,12 +355,12 @@ impl ReleaseRemoteBackend for GithubRemoteBackend<'_> {
 
     fn monitor_cleanup<'a>(
         &'a self,
-        published_at: &'a str,
+        published: &'a PublishedReleaseEvidence,
     ) -> Pin<Box<dyn Future<Output = Result<CleanupRunEvidence, String>> + Send + 'a>> {
         Box::pin(async move {
             GithubReleaseService::new()
                 .with_progress(Arc::clone(&self.progress))
-                .monitor_cleanup(self.backend, published_at)
+                .monitor_cleanup(self.backend, published)
                 .await
                 .map_err(|error| error.code().to_string())
         })
@@ -1091,15 +1091,14 @@ impl ReleaseOrchestrator {
         if session.phase != ReleasePhase::MonitoringCleanup {
             return Err(ReleaseOrchestratorError::RemoteStateInvalid);
         }
-        let published_at = session
+        let published = session
             .published
             .as_ref()
-            .map(|published| published.published_at.clone())
             .ok_or(ReleaseOrchestratorError::RemoteStateInvalid)?;
         let cleanup_started = Instant::now();
         self.progress
             .started("cleanup", "开始监控历史 Release cleanup Run。");
-        match remote.monitor_cleanup(&published_at).await {
+        match remote.monitor_cleanup(published).await {
             Ok(cleanup) => {
                 let succeeded = cleanup.succeeded;
                 if !succeeded {
