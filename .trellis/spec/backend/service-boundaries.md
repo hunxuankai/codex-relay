@@ -147,10 +147,11 @@ pub fn serialize_store(store: &ProviderPreferenceStore) -> Result<Vec<u8>, AppEr
 ### 3. 契约
 
 - `gpt-6-astra` 仅支持 `low / medium / high / xhigh / max`，默认 `low`，支持 Fast。
-- `gpt-6.1-sol` 支持 `none / low / medium / high / xhigh / max`，默认 `medium`，支持 Fast。
+- `gpt-6.1-sol` 支持 `low / medium / high / xhigh / max / ultra`，默认 `low`，支持 Fast；不支持 `none`。
+- 新增模型能力以可核验的模型元数据为依据，不能按名称沿用旧代型号；目录测试必须覆盖完整推理强度集合和默认值。
 - v0.5.1 曾在 v4 文件保存 Astra 的 `ultra`。当前 v4 读取时仅将这一精确组合映射为 `max`，并设置 `needs_upgrade=true`；未选中的 Astra 偏好同样适用。
 - 读取保持无写入，指纹和事务备份仍使用原始磁盘字节。沿用既有升级校准规则，后续显式 Provider 事务才持久化规范化结果。
-- 用户选择和 `serialize_store` 始终严格校验。兼容逻辑不进入通用验证器，不允许新 `ultra`，不猜测其他模型或未知强度。
+- 用户选择和 `serialize_store` 始终严格校验。兼容逻辑不进入通用验证器，不允许新的 Astra `ultra`，不猜测其他模型或未知强度。
 - 保持 v4 结构和既有 v1/v2/v3 迁移契约；原始备份恢复后仍可只读加载旧值。
 
 ### 4. 验证与错误矩阵
@@ -160,7 +161,8 @@ pub fn serialize_store(store: &ProviderPreferenceStore) -> Result<Vec<u8>, AppEr
 | Astra 的五个有效强度 | 可保存并按当前/非当前 Provider 语义投影 |
 | 新选择 Astra `ultra`、`none` | `INVALID_MODEL_REASONING_EFFORT`，受管文件不变 |
 | v4 文件中的 Astra `ultra` | 读取为 `max`，标记待升级，磁盘不变 |
-| 其他模型的 `ultra` 或 Astra `ULTRA` | 严格拒绝，不进行宽泛纠错 |
+| GPT-6.1 Sol 的 `ultra` | 正常保存和读取，不做 Astra 旧偏好转换 |
+| 目录不支持 `ultra` 的模型使用该值，或 Astra `ULTRA` | 严格拒绝，不进行宽泛纠错 |
 | 序列化仍含 Astra `ultra` 的新数据 | 严格拒绝 |
 | 已规范化偏好再次保存、加载 | 保持原值，`needs_upgrade=false` |
 

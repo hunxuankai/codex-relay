@@ -260,9 +260,9 @@ async fn editing_provider_to_gpt_6_1_sol_saves_and_applies_model_preferences() {
         .expect("the editor catalog should offer gpt-6.1-sol");
     assert_eq!(
         sol.reasoning_efforts,
-        ["none", "low", "medium", "high", "xhigh", "max"]
+        ["low", "medium", "high", "xhigh", "max", "ultra"]
     );
-    assert_eq!(sol.default_reasoning_effort, "medium");
+    assert_eq!(sol.default_reasoning_effort, "low");
     assert!(sol.supports_fast);
 
     service
@@ -282,13 +282,59 @@ async fn editing_provider_to_gpt_6_1_sol_saves_and_applies_model_preferences() {
     let provider = &state.providers[0];
     assert_eq!(provider.models, ["gpt-6.1-sol"]);
     assert_eq!(provider.selected_model.as_deref(), Some("gpt-6.1-sol"));
-    assert_eq!(provider.reasoning_efforts["gpt-6.1-sol"], "medium");
+    assert_eq!(provider.reasoning_efforts["gpt-6.1-sol"], "low");
     assert!(provider.fast_enabled);
     let config = fs::read_to_string(&paths.config_file).unwrap();
     let document = config.parse::<toml_edit::DocumentMut>().unwrap();
     assert_eq!(document["model"].as_str(), Some("gpt-6.1-sol"));
-    assert_eq!(document["model_reasoning_effort"].as_str(), Some("medium"));
+    assert_eq!(document["model_reasoning_effort"].as_str(), Some("low"));
     assert_eq!(document["service_tier"].as_str(), Some("fast"));
+
+    for effort in ["low", "medium", "high", "xhigh", "max", "ultra"] {
+        service
+            .update_provider_preference(UpdateProviderPreferenceInput {
+                provider_id: "provider-a".into(),
+                model: "gpt-6.1-sol".into(),
+                reasoning_effort: effort.into(),
+                expected_files: service.list_providers().unwrap().fingerprints,
+            })
+            .await
+            .unwrap();
+
+        let state = service.list_providers().unwrap();
+        assert_eq!(state.providers[0].reasoning_efforts["gpt-6.1-sol"], effort);
+        assert!(state.providers[0].fast_enabled);
+        let config = fs::read_to_string(&paths.config_file).unwrap();
+        let document = config.parse::<toml_edit::DocumentMut>().unwrap();
+        assert_eq!(document["model_reasoning_effort"].as_str(), Some(effort));
+        assert_eq!(document["service_tier"].as_str(), Some("fast"));
+        assert_eq!(document["model_provider"].as_str(), Some("provider-a"));
+        assert_eq!(document["features"]["web_search"].as_bool(), Some(true));
+        assert!(config.contains("# preserve this user comment"));
+    }
+    assert_eq!(fs::read_to_string(&paths.auth_file).unwrap(), INITIAL_AUTH);
+
+    let managed_paths = [
+        &paths.config_file,
+        &paths.auth_file,
+        &paths.providers_file,
+        &paths.provider_preferences_file,
+    ];
+    let original_files = managed_paths.map(|path| fs::read(path).unwrap());
+    let error = service
+        .update_provider_preference(UpdateProviderPreferenceInput {
+            provider_id: "provider-a".into(),
+            model: "gpt-6.1-sol".into(),
+            reasoning_effort: "none".into(),
+            expected_files: service.list_providers().unwrap().fingerprints,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), "INVALID_MODEL_REASONING_EFFORT");
+    assert_eq!(
+        managed_paths.map(|path| fs::read(path).unwrap()),
+        original_files
+    );
 }
 
 #[tokio::test]

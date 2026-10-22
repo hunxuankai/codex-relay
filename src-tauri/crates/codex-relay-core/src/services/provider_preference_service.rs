@@ -50,8 +50,8 @@ const MODEL_CATALOG: &[ModelCatalogEntry] = &[
     },
     ModelCatalogEntry {
         id: "gpt-6.1-sol",
-        reasoning_efforts: GPT_56_EFFORTS,
-        default_reasoning_effort: "medium",
+        reasoning_efforts: &["low", "medium", "high", "xhigh", "max", "ultra"],
+        default_reasoning_effort: "low",
         supports_fast: true,
     },
     ModelCatalogEntry {
@@ -745,9 +745,9 @@ mod tests {
             .unwrap();
         assert_eq!(
             sol_61.reasoning_efforts,
-            ["none", "low", "medium", "high", "xhigh", "max"]
+            ["low", "medium", "high", "xhigh", "max", "ultra"]
         );
-        assert_eq!(sol_61.default_reasoning_effort, "medium");
+        assert_eq!(sol_61.default_reasoning_effort, "low");
         assert!(sol_61.supports_fast);
         let sol = catalog
             .iter()
