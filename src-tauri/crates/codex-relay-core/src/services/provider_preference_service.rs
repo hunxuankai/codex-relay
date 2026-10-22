@@ -49,6 +49,12 @@ const MODEL_CATALOG: &[ModelCatalogEntry] = &[
         supports_fast: true,
     },
     ModelCatalogEntry {
+        id: "gpt-6.1-sol",
+        reasoning_efforts: GPT_56_EFFORTS,
+        default_reasoning_effort: "medium",
+        supports_fast: true,
+    },
+    ModelCatalogEntry {
         id: "gpt-5.6-sol",
         reasoning_efforts: GPT_56_EFFORTS,
         default_reasoning_effort: "medium",
@@ -732,7 +738,17 @@ mod tests {
     fn model_catalog_exposes_verified_reasoning_efforts_and_defaults() {
         let catalog = model_catalog();
 
-        assert_eq!(catalog.len(), 7);
+        assert_eq!(catalog.len(), 8);
+        let sol_61 = catalog
+            .iter()
+            .find(|model| model.id == "gpt-6.1-sol")
+            .unwrap();
+        assert_eq!(
+            sol_61.reasoning_efforts,
+            ["none", "low", "medium", "high", "xhigh", "max"]
+        );
+        assert_eq!(sol_61.default_reasoning_effort, "medium");
+        assert!(sol_61.supports_fast);
         let sol = catalog
             .iter()
             .find(|model| model.id == "gpt-5.6-sol")
@@ -861,6 +877,7 @@ mod tests {
     fn fast_can_only_be_enabled_for_supported_catalog_models() {
         let supported_ids = [
             "gpt-6-astra",
+            "gpt-6.1-sol",
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-5.6-luna",

@@ -250,8 +250,8 @@ interface RestoreProviderConnectionInput {
 
 - `fastEnabled` 是 Provider 私有布尔偏好，默认 `false`；不是 Provider 块字段，也不是通用
   `service_tier` 枚举编辑器。
-- 内置模型目录是能力唯一事实来源：GPT-5.6 Sol/Terra/Luna、GPT-5.5、GPT-5.4 支持，
-  GPT-5.4 Mini 不支持。UI 只读取 `supportsFast`，Rust 在所有写入口再次校验。
+- 内置模型目录是能力唯一事实来源：GPT-6 Astra、GPT-6.1 Sol、GPT-5.6 Sol/Terra/Luna、
+  GPT-5.5、GPT-5.4 支持，GPT-5.4 Mini 不支持。UI 只读取 `supportsFast`，Rust 在所有写入口再次校验。
 - 开启 Fast 时用 `toml_edit` 写顶层 `service_tier = "fast"`，并单向确保
   `[features].fast_mode = true`；已有标准表、inline table、注释和其他 feature 必须保留。
 - 关闭 Fast 只删除顶层 `service_tier`，不得删除 `fast_mode` 或写 `fast_mode = false`。

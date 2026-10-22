@@ -250,6 +250,48 @@ async fn legacy_gpt_6_astra_ultra_is_read_only_until_a_transaction_saves_max() {
 }
 
 #[tokio::test]
+async fn editing_provider_to_gpt_6_1_sol_saves_and_applies_model_preferences() {
+    let (_directory, paths, service) = setup();
+    let state = service.list_providers().unwrap();
+    let sol = state
+        .model_catalog
+        .iter()
+        .find(|model| model.id == "gpt-6.1-sol")
+        .expect("the editor catalog should offer gpt-6.1-sol");
+    assert_eq!(
+        sol.reasoning_efforts,
+        ["none", "low", "medium", "high", "xhigh", "max"]
+    );
+    assert_eq!(sol.default_reasoning_effort, "medium");
+    assert!(sol.supports_fast);
+
+    service
+        .update_provider(UpdateProviderInput {
+            id: "provider-a".into(),
+            name: "Provider A".into(),
+            wire_api: "responses".into(),
+            models: vec!["gpt-6.1-sol".into()],
+            fast_enabled: true,
+            sync_if_active: true,
+            expected_files: state.fingerprints,
+        })
+        .await
+        .unwrap();
+
+    let state = service.list_providers().unwrap();
+    let provider = &state.providers[0];
+    assert_eq!(provider.models, ["gpt-6.1-sol"]);
+    assert_eq!(provider.selected_model.as_deref(), Some("gpt-6.1-sol"));
+    assert_eq!(provider.reasoning_efforts["gpt-6.1-sol"], "medium");
+    assert!(provider.fast_enabled);
+    let config = fs::read_to_string(&paths.config_file).unwrap();
+    let document = config.parse::<toml_edit::DocumentMut>().unwrap();
+    assert_eq!(document["model"].as_str(), Some("gpt-6.1-sol"));
+    assert_eq!(document["model_reasoning_effort"].as_str(), Some("medium"));
+    assert_eq!(document["service_tier"].as_str(), Some("fast"));
+}
+
+#[tokio::test]
 async fn provider_workflow_preserves_unknown_config_and_restores_original_bytes() {
     let (_directory, paths, service) = setup();
     let original_config = fs::read(&paths.config_file).unwrap();
