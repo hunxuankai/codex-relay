@@ -238,7 +238,7 @@ describe('useProviders', () => {
     })
   })
 
-  it('refreshes after switching a Provider', async () => {
+  it('refreshes and shows the newly active Provider after switching', async () => {
     const listProviders = vi
       .fn()
       .mockResolvedValueOnce(state([provider('provider-a', true), provider('provider-b')]))
@@ -253,12 +253,34 @@ describe('useProviders', () => {
       subscribe: false,
     })
     await flushPromises()
+    expect(providers.selectedProvider.value?.id).toBe('provider-a')
 
     await providers.switchTo('provider-b')
 
     expect(switchProvider).toHaveBeenCalledWith('provider-b')
     expect(providers.activeProvider.value?.id).toBe('provider-b')
+    expect(providers.selectedProvider.value?.id).toBe('provider-b')
     expect(providers.successMessage.value).toBe('已切换到「Provider B」。')
+  })
+
+  it('keeps showing the previous Provider when switching fails', async () => {
+    const providers = useProviders({
+      client: client({
+        listProviders: vi.fn().mockResolvedValue(
+          state([provider('provider-a', true), provider('provider-b')]),
+        ),
+        switchProvider: vi.fn().mockRejectedValue(
+          new RelayCommandError('EXTERNAL_MODIFICATION_CONFLICT', '配置文件已变化，请重试。'),
+        ),
+      }),
+      subscribe: false,
+    })
+    await flushPromises()
+
+    await providers.switchTo('provider-b')
+
+    expect(providers.error.value?.code).toBe('EXTERNAL_MODIFICATION_CONFLICT')
+    expect(providers.selectedProvider.value?.id).toBe('provider-a')
   })
 
   it('saves Base URLs and independently selects URL and API Key using the current fingerprint', async () => {
@@ -415,22 +437,27 @@ describe('useProviders', () => {
     expect(JSON.stringify(providers.error.value)).not.toContain('stack')
   })
 
-  it('does not report mutation success when the required refresh fails', async () => {
+  it('does not show a successful switch when the required refresh fails', async () => {
     const listProviders = vi
       .fn()
-      .mockResolvedValueOnce(state([]))
+      .mockResolvedValueOnce(state([provider('provider-a', true), provider('provider-b')]))
       .mockRejectedValueOnce(new RelayCommandError('REFRESH_FAILED', '刷新失败。'))
     const providers = useProviders({
       client: client({
         listProviders,
-        createProvider: vi.fn().mockResolvedValue(mutation('Provider 已保存。')),
+        switchProvider: vi.fn().mockResolvedValue({
+          providers: [provider('provider-a'), provider('provider-b', true)],
+          activeProviderId: 'provider-b',
+          message: '已切换。',
+        } satisfies SwitchOutcome),
       }),
       subscribe: false,
     })
     await flushPromises()
 
-    await providers.create({ id: 'provider-a' } as CreateProviderInput)
+    await providers.switchTo('provider-b')
 
+    expect(providers.selectedProvider.value?.id).toBe('provider-a')
     expect(providers.successMessage.value).toBeNull()
     expect(providers.error.value).toEqual({ code: 'REFRESH_FAILED', message: '刷新失败。' })
   })

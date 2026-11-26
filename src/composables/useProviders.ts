@@ -236,8 +236,12 @@ export function useProviders(options: UseProvidersOptions = {}) {
     return mutate(() => client.deleteProvider(providerId, expectedFiles))
   }
 
-  function switchTo(providerId: string) {
-    return mutate(() => client.switchProvider(providerId))
+  async function switchTo(providerId: string) {
+    const outcome = await mutate(() => client.switchProvider(providerId))
+    if (outcome && activeProvider.value?.id === outcome.activeProviderId) {
+      selectProvider(outcome.activeProviderId)
+    }
+    return outcome
   }
 
   async function importCurrentKey(providerId: string, name: string) {
