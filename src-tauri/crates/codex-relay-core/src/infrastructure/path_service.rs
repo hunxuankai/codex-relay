@@ -23,6 +23,8 @@ pub struct AppPaths {
     pub settings_file: PathBuf,
     pub backups_dir: PathBuf,
     pub logs_dir: PathBuf,
+    #[cfg(windows)]
+    permits_native_user_environment: bool,
 }
 
 impl AppPaths {
@@ -37,12 +39,19 @@ impl AppPaths {
             logs_dir: app_data_dir.join("logs"),
             codex_home,
             app_data_dir,
+            #[cfg(windows)]
+            permits_native_user_environment: false,
         }
     }
 
     pub fn for_test(codex_home: PathBuf, app_data_dir: PathBuf) -> Result<Self, AppError> {
         ensure_test_paths_are_safe(&codex_home, &app_data_dir)?;
         Ok(Self::from_roots(codex_home, app_data_dir))
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn permits_native_user_environment(&self) -> bool {
+        self.permits_native_user_environment
     }
 }
 
@@ -51,7 +60,17 @@ pub fn resolve_paths(mode: PathMode) -> Result<AppPaths, AppError> {
     let app_data_dir = resolve_app_data_dir(mode)?;
 
     match mode {
-        PathMode::Production => Ok(AppPaths::from_roots(codex_home, app_data_dir)),
+        PathMode::Production => {
+            let paths = AppPaths::from_roots(codex_home, app_data_dir);
+            #[cfg(windows)]
+            let paths = AppPaths {
+                permits_native_user_environment: !cfg!(any(debug_assertions, test))
+                    && env::var_os(RELAY_CODEX_HOME).is_none()
+                    && env::var_os(RELAY_APP_DATA).is_none(),
+                ..paths
+            };
+            Ok(paths)
+        }
         PathMode::Test => AppPaths::for_test(codex_home, app_data_dir),
     }
 }

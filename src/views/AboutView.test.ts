@@ -3,6 +3,15 @@ import { describe, expect, it } from 'vitest'
 import AboutView from './AboutView.vue'
 
 describe('AboutView', () => {
+  it('documents CLI Profiles without conflating their environment keys with default credentials', () => {
+    const wrapper = mount(AboutView, { props: { appVersion: '0.5.3', configDirectory: null } })
+    expect(wrapper.text()).toContain('CLI Profiles')
+    expect(wrapper.text()).toContain('保留原生 codex -p 启动方式')
+    expect(wrapper.text()).toContain('只更换目标 Windows 用户环境变量')
+    expect(wrapper.text()).toContain('已运行的终端和 Codex 不会更新')
+    expect(wrapper.text()).toContain('也不会删除 CLI Profiles 使用的用户环境变量')
+  })
+
   it('explains how Codex Relay works and what it modifies', async () => {
     const wrapper = mount(AboutView, {
       props: {

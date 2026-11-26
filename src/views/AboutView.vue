@@ -49,8 +49,17 @@ defineEmits<{
         <li><code>providers.json</code> 保存每个 Provider 的多个命名 API Key 与密钥预选。</li>
         <li>Base URL 与 API Key 可以独立切换；当前 Provider 立即同步，非当前 Provider 只保存预选。</li>
         <li>切换 Provider 时，将其预选地址、密钥、模型、推理强度和 Fast 偏好同步到 <code>config.toml</code> 与 <code>auth.json</code>。</li>
-        <li>每次受管写入前创建备份；写入失败时尝试恢复所有已触及文件。</li>
+        <li>每次受管配置文件写入前创建备份；写入失败时尝试恢复所有已触及文件。</li>
       </ol>
+    </ElCard>
+
+    <ElCard class="info-card" shadow="never" aria-labelledby="cli-profiles-title">
+      <h2 id="cli-profiles-title">CLI Profiles</h2>
+      <ul class="availability-list">
+        <li>发现已有的 <code>*.config.toml</code> 和其 <code>env_key</code> 引用，保留原生 <code>codex -p</code> 启动方式，不切换默认供应商。</li>
+        <li>显式保存只更换目标 Windows 用户环境变量，不修改 TOML、<code>auth.json</code> 或 Relay 密钥库；共享、系统和通用变量不直接编辑。</li>
+        <li>不回显旧值，也不复制 Key。用户环境变量不是加密密钥库，已运行的终端和 Codex 不会更新，启动脚本仍可覆盖。</li>
+      </ul>
     </ElCard>
 
     <ElCard class="info-card" shadow="never" aria-labelledby="fast-title">
@@ -125,6 +134,7 @@ defineEmits<{
             </li>
             <li><code>logs/</code>：经过密钥脱敏的软件日志。</li>
             <li><code>transaction.json</code>：配置事务进行期间使用的临时标记。</li>
+            <li><code>profile-env-pending/</code>：仅记录环境变量保存事务的待确认状态，不含密钥或旧值备份。</li>
           </ul>
         </article>
 
@@ -146,7 +156,7 @@ defineEmits<{
         <li>API Key 只在用户打开“管理与查看”对话框时返回前端，打开管理器后默认明文显示；关闭后清空该对话框的密钥状态。</li>
         <li>除用户显式启动 Provider 可用性或 Codex 兼容性测试外，本程序不会调用模型接口验证 Base URL 或 API Key；自动更新检查失败时静默处理，也不会自动下载或安装。</li>
         <li>删除或替换本机命名密钥不会在 Provider 平台吊销远端凭据；怀疑泄漏时必须在 Provider 平台轮换。</li>
-        <li>卸载程序不会删除 Codex 配置、Codex Relay 应用数据、API Key、日志或备份。</li>
+        <li>卸载程序不会删除 Codex 配置、Codex Relay 应用数据、API Key、日志或备份，也不会删除 CLI Profiles 使用的用户环境变量。</li>
       </ul>
     </ElCard>
   </main>

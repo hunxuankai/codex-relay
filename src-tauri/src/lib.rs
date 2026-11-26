@@ -71,6 +71,10 @@ pub fn run() {
         })
         .on_window_event(tray::handle_window_event)
         .invoke_handler(tauri::generate_handler![
+            commands::cli_profile_commands::list_cli_profiles,
+            commands::cli_profile_commands::prepare_profile_key_edit,
+            commands::cli_profile_commands::save_profile_env_key,
+            commands::cli_profile_commands::open_profile_environment_settings,
             commands::provider_commands::list_providers,
             commands::provider_commands::reorder_providers,
             commands::provider_commands::get_provider_api_keys_for_management,

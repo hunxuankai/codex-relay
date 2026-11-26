@@ -9,3 +9,4 @@ pub mod path_service;
 pub mod provider_http;
 pub mod rustls_provider;
 pub mod safe_log;
+pub(crate) mod user_environment;

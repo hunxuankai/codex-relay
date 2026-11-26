@@ -18,6 +18,9 @@ use tokio::sync::Mutex as AsyncMutex;
 use toml_edit::DocumentMut;
 use uuid::Uuid;
 
+mod profile_environment;
+pub(super) use profile_environment::profile_key_conflict;
+
 const MAX_BACKUPS: usize = 20;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

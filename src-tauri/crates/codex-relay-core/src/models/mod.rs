@@ -1,4 +1,5 @@
 pub mod backup;
+pub mod cli_profile;
 pub mod health;
 pub mod provider;
 pub mod provider_availability;

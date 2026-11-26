@@ -18,6 +18,7 @@ import { useUpdater } from './composables/useUpdater'
 import * as relay from './services/tauri'
 import AboutView from './views/AboutView.vue'
 import BackupsView from './views/BackupsView.vue'
+import CliProfilesView from './views/CliProfilesView.vue'
 import OnboardingView from './views/OnboardingView.vue'
 import ProvidersView from './views/ProvidersView.vue'
 import SettingsView from './views/SettingsView.vue'
@@ -35,6 +36,7 @@ const updater = useUpdater({
   },
 })
 const activeView = shallowRef<AppView>('providers')
+const providerPage = shallowRef<'default' | 'profiles'>('default')
 const healthCheckTarget = shallowRef<{ id: string } | null>(null)
 const onboardingDismissed = shallowRef(false)
 const startCreatingProvider = shallowRef(false)
@@ -102,7 +104,14 @@ async function addFirstProvider() {
   onboardingDismissed.value = true
   pendingFirstProvider.value = true
   startCreatingProvider.value = true
+  providerPage.value = 'default'
   activeView.value = 'providers'
+}
+
+function openExistingCliProfiles() {
+  onboardingDismissed.value = true
+  providerPage.value = 'profiles'
+  selectView('providers')
 }
 
 async function configureLater() {
@@ -219,6 +228,7 @@ onUnmounted(() => {
       :error-message="providerState.error.value?.message ?? settingsState.error.value?.message ?? null"
       @open-directory="settingsState.openDirectory"
       @add-provider="addFirstProvider"
+      @open-cli-profiles="openExistingCliProfiles"
       @later="configureLater"
       @exit="exitApplication"
       @import-current-key="importCurrentKey"
@@ -291,14 +301,33 @@ onUnmounted(() => {
     />
 
     <section class="app-content">
-      <ProvidersView
-        v-if="activeView === 'providers'"
-        :key="startCreatingProvider ? 'providers-create' : 'providers-list'"
-        :start-creating="startCreatingProvider"
-        :network-proxy-enabled="settingsState.settings.value?.networkProxy.enabled ?? false"
-        @provider-created="handleProviderCreated"
-        @create-cancelled="handleCreateCancelled"
-      />
+      <div v-if="activeView === 'providers'" class="provider-workspace">
+        <nav class="provider-pages" aria-label="供应商使用方式">
+          <ElButton
+            native-type="button"
+            :type="providerPage === 'default' ? 'primary' : 'default'"
+            :aria-current="providerPage === 'default' ? 'page' : undefined"
+            aria-label="打开默认供应商"
+            @click="providerPage = 'default'"
+          >默认供应商</ElButton>
+          <ElButton
+            native-type="button"
+            :type="providerPage === 'profiles' ? 'primary' : 'default'"
+            :aria-current="providerPage === 'profiles' ? 'page' : undefined"
+            aria-label="打开 CLI Profiles"
+            @click="providerPage = 'profiles'"
+          >CLI Profiles</ElButton>
+        </nav>
+        <ProvidersView
+          v-if="providerPage === 'default'"
+          :key="startCreatingProvider ? 'providers-create' : 'providers-list'"
+          :start-creating="startCreatingProvider"
+          :network-proxy-enabled="settingsState.settings.value?.networkProxy.enabled ?? false"
+          @provider-created="handleProviderCreated"
+          @create-cancelled="handleCreateCancelled"
+        />
+        <CliProfilesView v-else />
+      </div>
       <HealthStatus
         v-else-if="activeView === 'health'"
         class="health-view"
@@ -434,6 +463,26 @@ onUnmounted(() => {
   height: 1.15rem;
 }
 
+.provider-workspace {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  height: 100%;
+}
+
+.provider-pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.provider-pages :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
 .health-view {
   padding: 1rem;
 }
@@ -452,6 +501,10 @@ onUnmounted(() => {
 
 @media (max-width: 760px) {
   .app-shell {
+    height: auto;
+  }
+
+  .provider-workspace {
     height: auto;
   }
 }

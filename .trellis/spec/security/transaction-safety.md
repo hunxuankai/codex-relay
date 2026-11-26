@@ -4,6 +4,8 @@
 
 Provider 创建、编辑、删除、列表排序、地址与密钥管理、Fast 更新、普通切换和备份恢复都必须经过 `TransactionService`。command、托盘、Vue 层和单个配置服务不得绕过它直接修改受管文件。
 
+CLI Profile 用户变量写入同样使用该服务和共享锁，但注册表事务的隔离、暂存与回滚不同于文件事务；见 [CLI Profile 环境变量凭据](profile-environment-credentials.md)。下文的文件快照流程不得用于环境变量明文。
+
 ## 强制顺序
 
 1. 获取应用级共享异步写锁。

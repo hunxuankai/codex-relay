@@ -15,6 +15,7 @@ defineProps<{
 const emit = defineEmits<{
   openDirectory: []
   addProvider: []
+  openCliProfiles: []
   later: []
   exit: []
   importCurrentKey: [name: string]
@@ -33,7 +34,7 @@ function importCurrentKey(name: string) {
     <ElCard class="onboarding-card" shadow="always" aria-label="首次设置">
       <p class="eyebrow">Codex Relay</p>
       <h1>首次设置</h1>
-      <p>尚未检测到可用的 Codex Provider 配置。你可以现在新增，也可以稍后再设置。</p>
+      <p>尚未检测到可用的默认 Provider。你可以新增，也可以直接打开已有 CLI Profiles。</p>
 
       <AppNotification :message="successMessage" level="success" />
       <AppNotification :message="errorMessage" level="error" />
@@ -71,6 +72,13 @@ function importCurrentKey(name: string) {
         >
           新增第一个 Provider
         </ElButton>
+        <ElButton
+          native-type="button"
+          data-onboarding-action
+          aria-label="打开已有 CLI Profiles"
+          :disabled="busy"
+          @click="emit('openCliProfiles')"
+        >打开已有 CLI Profiles</ElButton>
         <ElButton
           native-type="button"
           data-onboarding-action
@@ -115,6 +123,10 @@ function importCurrentKey(name: string) {
 .onboarding-actions {
   display: grid;
   gap: 1rem;
+}
+
+.onboarding-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .onboarding-card {

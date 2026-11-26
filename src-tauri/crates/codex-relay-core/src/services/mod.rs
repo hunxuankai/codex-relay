@@ -1,5 +1,7 @@
 pub mod auth_service;
 pub mod backup_service;
+mod cli_profile_catalog;
+pub mod cli_profile_service;
 pub mod config_service;
 pub mod provider_availability_service;
 pub mod provider_preference_service;

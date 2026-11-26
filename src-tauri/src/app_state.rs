@@ -4,6 +4,7 @@ use crate::infrastructure::safe_log::LogGuard;
 use crate::models::backup::BackupFileName;
 use crate::models::settings::{Settings, SettingsState};
 use crate::services::autostart_service::AutostartService;
+use crate::services::cli_profile_service::CliProfileService;
 use crate::services::file_watch_service::{ApplicationWriteGuard, FileWatchService};
 use crate::services::provider_availability_service::ProviderAvailabilityService;
 use crate::services::provider_service::ProviderService;
@@ -17,6 +18,7 @@ use std::sync::{Arc, Mutex};
 pub struct AppState {
     pub paths: AppPaths,
     pub provider_service: ProviderService,
+    pub cli_profile_service: CliProfileService,
     pub provider_availability_service: ProviderAvailabilityService,
     pub settings_service: SettingsService,
     pub autostart_service: AutostartService,
@@ -37,6 +39,7 @@ impl AppState {
         let settings_service = SettingsService::new(paths.clone());
         settings_service.bootstrap()?;
         let provider_service = ProviderService::new(paths.clone(), app_version.clone());
+        let cli_profile_service = provider_service.cli_profile_service();
         let provider_availability_service = ProviderAvailabilityService::new(
             provider_service.clone(),
             settings_service.clone(),
@@ -52,6 +55,7 @@ impl AppState {
         Ok(Self {
             paths,
             provider_service,
+            cli_profile_service,
             provider_availability_service,
             settings_service,
             autostart_service,

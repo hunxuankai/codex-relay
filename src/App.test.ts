@@ -137,6 +137,7 @@ function updaterController(): UpdaterController {
 }
 
 const stubs = {
+  CliProfilesView: { template: '<div data-view="cli-profiles">现有 CLI Profiles</div>' },
   ProvidersView: {
     props: ['startCreating', 'networkProxyEnabled'],
     emits: ['providerCreated', 'createCancelled'],
@@ -164,6 +165,27 @@ describe('App', () => {
     mocks.useUpdater.mockReturnValue(updater)
     mocks.getCurrentVersion.mockResolvedValue('0.1.2')
     mocks.onAppNotification.mockResolvedValue(() => {})
+  })
+
+  it('opens existing CLI Profiles before first-run Provider setup without saving defaults', async () => {
+    const state = controllers({ onboarding: true })
+    mocks.useProviders.mockReturnValue(state.providerState)
+    mocks.useHealth.mockReturnValue(state.healthState)
+    mocks.useSettings.mockReturnValue(state.settingsState)
+    const wrapper = mount(App, { global: { stubs } })
+    await flushPromises()
+
+    await wrapper.get('[aria-label="打开已有 CLI Profiles"]').trigger('click')
+    expect(wrapper.find('[data-view="cli-profiles"]').exists()).toBe(true)
+    expect(wrapper.find('[data-view="providers"]').exists()).toBe(false)
+    expect(state.settingsState.save).not.toHaveBeenCalled()
+
+    await wrapper.get('[aria-label="打开默认供应商"]').trigger('click')
+    expect(wrapper.find('[data-view="providers"]').exists()).toBe(true)
+    expect(wrapper.find('[data-view="cli-profiles"]').exists()).toBe(false)
+    await wrapper.get('[aria-label="打开 CLI Profiles"]').trigger('click')
+    expect(wrapper.find('[data-view="cli-profiles"]').exists()).toBe(true)
+    wrapper.unmount()
   })
 
   it('shows onboarding for missing configuration and opens the first Provider editor', async () => {

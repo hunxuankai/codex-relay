@@ -1,4 +1,5 @@
 pub mod backup_commands;
+pub mod cli_profile_commands;
 pub mod provider_availability_commands;
 pub mod provider_commands;
 pub mod self_check_commands;
@@ -113,6 +114,39 @@ mod tests {
         assert!(!json.contains("test-key-a-not-real"));
         assert!(!json.contains("test-key-b-not-real"));
         assert!(!json.contains("\"apiKey\":"));
+    }
+
+    #[test]
+    fn cli_profile_commands_list_without_exposing_or_touching_user_environment_in_tests() {
+        let (_directory, state) = create_state();
+        let profile = state.paths.codex_home.join("fixture.config.toml");
+        let config = r#"
+model_provider = "fixture_vendor"
+[model_providers.fixture_vendor]
+name = "Fixture"
+base_url = "https://fixture.example.test/v1"
+env_key = "FIXTURE_VENDOR_TOKEN"
+"#;
+        fs::write(&profile, config).unwrap();
+
+        let result = cli_profile_commands::list_cli_profiles_inner(&state);
+        let json = serde_json::to_value(result).unwrap();
+        let item = &json["data"]["profiles"][0];
+        assert_eq!(item["command"], "codex -p fixture");
+        assert_eq!(item["variable"], "FIXTURE_VENDOR_TOKEN");
+        assert_eq!(item["keyStatus"]["restriction"], "environmentUnavailable");
+        assert_eq!(item["keyStatus"]["user"], "unavailable");
+        assert_eq!(item["keyStatus"]["relayProcess"], "unavailable");
+        let denied = cli_profile_commands::prepare_profile_key_edit_inner(&state, "fixture");
+        assert_eq!(denied.error.unwrap().code, "PROFILE_KEY_READ_ONLY");
+        assert_eq!(fs::read_to_string(profile).unwrap(), config);
+        assert!(
+            !state
+                .paths
+                .app_data_dir
+                .join("profile-env-pending")
+                .exists()
+        );
     }
 
     #[tokio::test]

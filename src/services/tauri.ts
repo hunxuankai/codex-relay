@@ -3,6 +3,7 @@ import { listen, type Event, type UnlistenFn } from '@tauri-apps/api/event'
 import { getVersion } from '@tauri-apps/api/app'
 import { check, type DownloadEvent } from '@tauri-apps/plugin-updater'
 import type { BackupFileName, BackupInventory } from '../types/backup'
+import type { CliProfileList, ProfileKeyEdit, ProfileKeySaved, SaveProfileKeyInput } from '../types/cliProfile'
 import type { CommandResult } from '../types/command'
 import type { HealthReport } from '../types/health'
 import type { ProviderAvailabilityResult } from '../types/providerAvailability'
@@ -65,6 +66,22 @@ function subscribe<T>(eventName: string, handler: (payload: T) => void): Promise
 
 export function listProviders(): Promise<ProviderListState> {
   return call('list_providers')
+}
+
+export function listCliProfiles(): Promise<CliProfileList> {
+  return call('list_cli_profiles')
+}
+
+export function prepareProfileKeyEdit(profileName: string): Promise<ProfileKeyEdit> {
+  return call('prepare_profile_key_edit', { profileName })
+}
+
+export function saveProfileEnvKey(input: SaveProfileKeyInput): Promise<ProfileKeySaved> {
+  return call('save_profile_env_key', { input })
+}
+
+export function openProfileEnvironmentSettings(): Promise<void> {
+  return call('open_profile_environment_settings')
 }
 
 export function reorderProviders(

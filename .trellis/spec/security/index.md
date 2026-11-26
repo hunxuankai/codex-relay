@@ -6,6 +6,7 @@
 
 - 涉及路径、fixture、启动脚本、日志或密钥：读取 [path-and-secret-safety.md](path-and-secret-safety.md)。
 - 涉及任何配置写入、切换、同步、删除或恢复：读取 [transaction-safety.md](transaction-safety.md)。
+- 涉及 CLI Profile 或 Windows 用户环境变量凭据：读取 [profile-environment-credentials.md](profile-environment-credentials.md)。
 - 涉及备份、卸载、清理或保留策略：读取 [data-retention.md](data-retention.md)。
 
 ## 质量检查
@@ -19,4 +20,5 @@
 
 - [路径与密钥安全](path-and-secret-safety.md)
 - [事务安全](transaction-safety.md)
+- [CLI Profile 环境变量凭据](profile-environment-credentials.md)
 - [数据保留](data-retention.md)

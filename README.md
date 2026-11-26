@@ -10,6 +10,7 @@ Codex Relay 是一款面向 Windows 10/11 的轻量桌面工具，用于管理�
 - 新增、编辑、删除 Provider，保留无关 TOML 注释、未知字段和功能开关。
 - 为每个 Provider 保存多个命名 Base URL 和多个命名 API Key，在详情页按名称独立切换。
 - Base URL 与 API Key 分别管理；当前 Provider 的选择立即写入 Codex 配置，非当前 Provider 只保存预选。
+- 发现独立的 CLI Profiles，复制原有启动命令，并在应用内更换专用 Windows 用户环境变量的 Key。
 - 为每个 Provider 保存独立 Fast 偏好；支持模型开启后投影到 Codex 的 Fast/priority 服务层。
 - API Key 管理器打开后直接查看全部明文密钥，可统一隐藏/显示并逐项复制；关闭后清空前端密钥状态。
 - 在 Provider 详情显式运行 API 可用性测试或 Codex 兼容性测试，分别验证最小 Responses 请求和一次正常 Codex 回合。
@@ -80,9 +81,17 @@ AGENTS.md                    每轮必须加载的最高优先级规则
 
 Release 构建完成后，运行 `src-tauri/target/release/bundle/nsis/` 下实际生成的 `.exe` 安装器。安装模式是所有用户（per-machine），需要管理员权限。首次安装时，如果 `D:` 是固定磁盘，默认目录为 `D:\Program Files\Codex Relay`；否则使用与构建目标架构匹配的系统 Program Files 目录，当前交付的 x64 安装包通常回退到 `C:\Program Files\Codex Relay`。新鲜安装可以选择目录；已登记的 per-machine 版本升级（包括手动运行安装器和应用内更新）固定沿用上次目录，不允许在升级流程中并存安装。若要更换位置，请先从 Windows“已安装的应用”卸载旧版，再重新运行安装器；卸载不会删除 Codex 配置和应用数据。开始菜单项位于“Codex Relay”目录。若电脑上安装过旧的 current-user 版本，也请先卸载旧版，避免 AppData 与 Program Files 中同时保留两套程序。
 
-首次启动且 `config.toml` 不存在或没有 Provider 时，会出现引导页。可打开配置目录、新增第一个 Provider、稍后设置或退出。应用不会自动创建带虚假地址的 Provider。
+首次启动且 `config.toml` 不存在或没有 Provider 时，会出现引导页。可打开配置目录、新增第一个 Provider、直接打开已有 CLI Profiles、稍后设置或退出。应用不会自动创建带虚假地址的 Provider。
 
 Provider 可用性测试不会在启动、自检、列表刷新或文件监控时自动运行；只有用户在 Provider 详情点击测试按钮后，应用才会访问目标模型网络。测试不修改当前 `config.toml`、`auth.json`、Provider 选择或模型偏好。
+
+### CLI Profiles 与环境变量 Key
+
+1. 在 **Providers → CLI Profiles** 查看当前 Codex 配置目录下已有的 `<名称>.config.toml`。此文件形式需要 Codex CLI 0.134.0 或更高版本，不需要导入。终端需使用同一个 `CODEX_HOME`；可继续运行 `codex -p agentrouter` 或 `codex -p qiandao`，也可以从列表复制启动命令。
+2. 列表按用户配置层解析 `model_provider` 与目标供应商的 `env_key`，区分 Windows 用户变量是否设置、当前 Relay 进程是否可见，并标注继承。这里不读取其他终端的环境，也不测试 Key 是否有效。
+3. 对可明确关联的专用 `*_API_KEY` 或 `*_TOKEN`，选择「设置 Key」或「更换 Key」，输入新值并确认「保存到 Windows 用户变量」。共享、通用、同名系统变量和特殊类型变量只读，仍可通过 Windows 环境变量入口管理。要分别使用两把 Key，应在各 Profile 中引用两个不同的专用变量。
+
+写入仅影响当前 Windows 用户的目标变量，不修改任何 TOML、`auth.json` 或默认供应商，也不把 Key 另存到 Relay。用户环境变量不是加密密钥库。保存确认表示持久值已回读，不代表现有终端已更新；请从已刷新的终端启动 Codex，必要时完全退出终端宿主再重开。启动脚本或当前会话仍可覆盖该值。开发或 Relay 路径覆盖模式不接触真实用户环境变量。
 
 ## 开发
 
@@ -407,7 +416,7 @@ Tauri 更新包签名用于证明下载资产与客户端内置信任根匹配�
 
 ## 卸载与数据保留
 
-NSIS 卸载器移除应用程序和快捷方式，但没有自定义卸载钩子去删除 `.codex`、`%LOCALAPPDATA%\CodexRelay`、API Key、日志或备份。需要彻底清理时，请先退出应用并在确认不再需要恢复后手动删除这些目录。卸载前建议保留必要配置副本。
+NSIS 卸载器移除应用程序和快捷方式，但没有自定义卸载钩子去删除 `.codex`、`%LOCALAPPDATA%\CodexRelay`、API Key、日志、备份或 CLI Profiles 使用的 Windows 用户环境变量。需要彻底清理时，请先退出应用，在确认不再需要恢复后手动清理。卸载前建议保留必要配置副本。
 
 ## 当前限制
 

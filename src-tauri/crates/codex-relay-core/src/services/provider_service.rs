@@ -14,6 +14,7 @@ use crate::models::provider_availability::ProviderAvailabilityTarget;
 use crate::models::transaction::TransactionOperation;
 use crate::services::auth_service::{AuthService, render_auth_json};
 use crate::services::backup_service::BackupService;
+use crate::services::cli_profile_service::CliProfileService;
 use crate::services::config_service::{
     self, ProviderConfig, ProviderInput, ValidatedProviderInput,
 };
@@ -88,6 +89,10 @@ impl ProviderService {
 
     pub fn paths(&self) -> &AppPaths {
         &self.paths
+    }
+
+    pub fn cli_profile_service(&self) -> CliProfileService {
+        CliProfileService::new(self.transaction_service.clone())
     }
 
     pub async fn restore_backup(

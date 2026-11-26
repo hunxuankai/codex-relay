@@ -15,11 +15,12 @@ describe('OnboardingView', () => {
     })
 
     const actions = wrapper.findAll('[data-onboarding-action]').map((button) => button.text())
-    expect(actions).toEqual(['打开 Codex 配置目录', '新增第一个 Provider', '稍后设置', '退出'])
+    expect(actions).toEqual(['打开 Codex 配置目录', '新增第一个 Provider', '打开已有 CLI Profiles', '稍后设置', '退出'])
 
     for (const [event, label] of [
       ['openDirectory', '打开 Codex 配置目录'],
       ['addProvider', '新增第一个 Provider'],
+      ['openCliProfiles', '打开已有 CLI Profiles'],
       ['later', '稍后设置'],
       ['exit', '退出'],
     ] as const) {
