@@ -8,8 +8,6 @@ pub enum TransactionOperation {
     DeleteProvider,
     SwitchProvider,
     RestoreBackup,
-    SyncCurrentProvider,
-    RestoreCurrentProvider,
     UpdateProviderPreference,
     UpdateProviderFast,
     SaveProviderBaseUrls,

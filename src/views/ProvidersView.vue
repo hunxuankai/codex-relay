@@ -9,8 +9,6 @@ import ProviderEditor from '../components/ProviderEditor.vue'
 import ProviderAvailabilityPanel from '../components/ProviderAvailabilityPanel.vue'
 import ProviderBaseUrlManagerDialog from '../components/ProviderBaseUrlManagerDialog.vue'
 import ProviderCredentialControls from '../components/ProviderCredentialControls.vue'
-import ProviderConnectionConfirmDialog from '../components/ProviderConnectionConfirmDialog.vue'
-import ProviderConnectionRiskDialog from '../components/ProviderConnectionRiskDialog.vue'
 import ProviderEndpointControls from '../components/ProviderEndpointControls.vue'
 import ProviderList from '../components/ProviderList.vue'
 import ProviderPreferenceControls from '../components/ProviderPreferenceControls.vue'
@@ -22,7 +20,6 @@ import { RelayCommandError } from '../services/tauri'
 import type {
   CreateProviderInput,
   ProviderBaseUrlDraft,
-  ProviderConnectionAction,
   UpdateProviderInput,
 } from '../types/provider'
 import type { ProviderTestKind } from '../types/providerAvailability'
@@ -63,33 +60,12 @@ const baseUrlManagerProviderId = shallowRef<string | null>(null)
 const apiKeyManagerProviderId = shallowRef<string | null>(null)
 const apiKeyManagerSuccessMessage = shallowRef<string | null>(null)
 const apiKeyManagerSuccessMessageId = shallowRef(0)
-const connectionRiskOpen = shallowRef(false)
-const connectionRiskRequestedFromConfirmation = shallowRef(false)
-const connectionConfirmation = shallowRef<{
-  action: Exclude<ProviderConnectionAction, 'applied'>
-  providerId: string
-  sourceProviderName: string | null
-  targetProviderId: string
-  baseUrlName: string
-  apiKeyName: string
-} | null>(null)
-const connectionConfirmationOpen = computed(() =>
-  Boolean(connectionConfirmation.value) &&
-  !connectionRiskRequestedFromConfirmation.value &&
-  !connectionRiskOpen.value,
-)
-
 const interactionBusy = computed(() =>
   providerState.busy.value ||
   availabilityState.busy.value ||
   apiKeyManager.loading.value ||
   apiKeyManager.busy.value,
 )
-const selectedProviderDeletionLocked = computed(() => {
-  const connection = providerState.selectedProvider.value?.connection
-  return connection?.role != null && connection.status !== 'none'
-})
-
 const editingProvider = computed(
   () =>
     providerState.providers.value.find((provider) => provider.id === editingProviderId.value) ??
@@ -145,82 +121,6 @@ async function submitEditor(input: CreateProviderInput | UpdateProviderInput) {
 
 function requestDelete(providerId: string) {
   deleteProviderId.value = providerId
-}
-
-function requestProviderConnection(providerId: string) {
-  const provider = providerState.providers.value.find((item) => item.id === providerId)
-  const action = provider?.connection.action
-  if (!provider || !action || action === 'applied') return
-
-  const restoring = action === 'restore'
-  const targetProviderId = provider.connection.targetProviderId
-  const baseUrlName = restoring
-    ? provider.connection.restoreBaseUrlName
-    : provider.connection.appliedBaseUrlName
-  const apiKeyName = restoring
-    ? provider.connection.restoreApiKeyName
-    : provider.connection.appliedApiKeyName
-  if (!targetProviderId || !baseUrlName || !apiKeyName) return
-
-  connectionConfirmation.value = {
-    action,
-    providerId,
-    sourceProviderName: restoring ? null : provider.connection.sourceProviderName,
-    targetProviderId,
-    baseUrlName,
-    apiKeyName,
-  }
-}
-
-function openProviderConnectionRisk(providerId: string) {
-  const action = providerState.providers.value.find(
-    (provider) => provider.id === providerId,
-  )?.connection.action
-  if (action === 'apply' || action === 'applied' || action === 'update') {
-    connectionRiskRequestedFromConfirmation.value = false
-    connectionRiskOpen.value = true
-  }
-}
-
-function requestConnectionRiskFromConfirmation() {
-  if (!connectionConfirmation.value || connectionConfirmation.value.action === 'restore') return
-  connectionRiskRequestedFromConfirmation.value = true
-}
-
-function handleConnectionConfirmationClosed() {
-  if (connectionRiskRequestedFromConfirmation.value && connectionConfirmation.value) {
-    connectionRiskOpen.value = true
-  }
-}
-
-function closeProviderConnectionRisk() {
-  connectionRiskOpen.value = false
-}
-
-function handleConnectionRiskClosed() {
-  if (connectionRiskRequestedFromConfirmation.value) {
-    connectionRiskRequestedFromConfirmation.value = false
-  }
-}
-
-function cancelProviderConnectionConfirmation() {
-  connectionConfirmation.value = null
-  connectionRiskRequestedFromConfirmation.value = false
-}
-
-async function confirmProviderConnection() {
-  const confirmation = connectionConfirmation.value
-  if (!confirmation) return
-  try {
-    if (confirmation.action === 'restore') {
-      await providerState.restoreConnection()
-    } else {
-      await providerState.applyConnection(confirmation.providerId)
-    }
-  } finally {
-    connectionConfirmation.value = null
-    connectionRiskRequestedFromConfirmation.value = false
-  }
 }
 
 async function confirmDelete() {
@@ -357,8 +257,6 @@ watch(apiKeyManagerProvider, (provider) => {
       @select="providerState.selectProvider"
       @edit="openEdit"
       @use="providerState.switchTo"
-      @connection="requestProviderConnection"
-      @connection-risk="openProviderConnectionRisk"
       @delete="requestDelete"
       @reorder="providerState.reorder"
     />
@@ -483,11 +381,7 @@ watch(apiKeyManagerProvider, (provider) => {
             plain
             native-type="button"
             aria-label="删除所选 Provider"
-            :disabled="
-              interactionBusy ||
-              providerState.selectedProvider.value.isActive ||
-              selectedProviderDeletionLocked
-            "
+            :disabled="interactionBusy || providerState.selectedProvider.value.isActive"
             @click="requestDelete(providerState.selectedProvider.value.id)"
           >
             删除
@@ -524,25 +418,6 @@ watch(apiKeyManagerProvider, (provider) => {
       confirm-label="删除"
       @confirm="confirmDelete"
       @cancel="deleteProviderId = null"
-    />
-    <ProviderConnectionConfirmDialog
-      v-if="connectionConfirmation"
-      :open="connectionConfirmationOpen"
-      :action="connectionConfirmation.action"
-      :source-provider-name="connectionConfirmation.sourceProviderName"
-      :target-provider-id="connectionConfirmation.targetProviderId"
-      :base-url-name="connectionConfirmation.baseUrlName"
-      :api-key-name="connectionConfirmation.apiKeyName"
-      :busy="providerState.busy.value"
-      @confirm="confirmProviderConnection"
-      @cancel="cancelProviderConnectionConfirmation"
-      @show-risk="requestConnectionRiskFromConfirmation"
-      @closed="handleConnectionConfirmationClosed"
-    />
-    <ProviderConnectionRiskDialog
-      :open="connectionRiskOpen"
-      @close="closeProviderConnectionRisk"
-      @closed="handleConnectionRiskClosed"
     />
     <ProviderBaseUrlManagerDialog
       v-if="baseUrlManagerProvider"

@@ -1,7 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import type { ProviderProfile } from '../types/provider'
-import { providerConnection } from '../test-utils/provider'
 import ProviderList from './ProviderList.vue'
 
 function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
@@ -24,7 +23,6 @@ function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
     apiKeyConfigured: true,
     configurationComplete: true,
     disabledReason: null,
-    connection: providerConnection(),
     isActive: true,
     isValid: true,
     validationMessage: null,
@@ -97,14 +95,21 @@ describe('ProviderList', () => {
     expect(wrapper.get('[aria-label="删除 Provider B"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('emits create, select, edit, use, and delete actions', async () => {
+  it('shows and emits only the ordinary actions even with an outdated Provider snapshot', async () => {
+    const outdatedSnapshot = {
+      ...provider({ isActive: false }),
+      connection: { action: 'apply' },
+    }
     const wrapper = mount(ProviderList, {
       props: {
-        providers: [provider({ isActive: false })],
+        providers: [outdatedSnapshot],
         selectedProviderId: null,
         busy: false,
       },
     })
+
+    expect(wrapper.findAll('.provider-actions button').map(button => button.attributes('aria-label')))
+      .toEqual(['编辑 Provider A', '使用 Provider A', '删除 Provider A'])
 
     await wrapper.get('[aria-label="新增 Provider"]').trigger('click')
     await wrapper.get('[aria-label="选择 Provider A"]').trigger('click')
@@ -117,140 +122,6 @@ describe('ProviderList', () => {
     expect(wrapper.emitted('edit')?.[0]).toEqual(['provider-a'])
     expect(wrapper.emitted('use')?.[0]).toEqual(['provider-a'])
     expect(wrapper.emitted('delete')?.[0]).toEqual(['provider-a'])
-  })
-
-  it.each([
-    ['apply', '仅应用连接', false],
-    ['applied', '已应用', true],
-    ['update', '更新连接', false],
-    ['restore', '恢复自身连接', false],
-  ] as const)(
-    'renders the %s connection action with an accessible Provider name',
-    async (action, label, disabled) => {
-      const wrapper = mount(ProviderList, {
-        props: {
-          providers: [provider({
-            isActive: action === 'restore',
-            connection: providerConnection({
-              role: action === 'restore' ? 'identity' : 'source',
-              status: action === 'apply' ? 'none' : action === 'restore' ? 'stale' : 'active',
-              action,
-              disabledReason: action === 'restore' ? '当前连接已失效；请恢复自身连接。' : null,
-            }),
-          })],
-          selectedProviderId: 'provider-a',
-          busy: false,
-        },
-      })
-
-      const button = wrapper.get(`[aria-label="${label} Provider A"]`)
-      expect(button.text()).toBe(label)
-      expect(button.attributes('disabled') !== undefined).toBe(disabled)
-      if (!disabled) {
-        await button.trigger('click')
-        expect(wrapper.emitted('connection')?.[0]).toEqual(['provider-a'])
-      }
-    },
-  )
-
-  it.each(['apply', 'applied', 'update'] as const)(
-    'keeps the %s compatibility explanation independent from the connection mutation',
-    async (action) => {
-      const wrapper = mount(ProviderList, {
-        props: {
-          providers: [provider({
-            configurationComplete: action !== 'apply',
-            connection: providerConnection({
-              role: 'source',
-              status: action === 'apply' ? 'none' : 'active',
-              action,
-              disabledReason: action === 'apply' ? '缺少受管 API Key。' : null,
-            }),
-          })],
-          selectedProviderId: 'provider-a',
-          busy: false,
-        },
-      })
-
-      const explanation = wrapper.get(
-        '[aria-label="查看 Provider A 的旧会话兼容性说明"]',
-      )
-      expect(explanation.attributes('disabled')).toBeUndefined()
-
-      await explanation.trigger('click')
-
-      expect(wrapper.emitted('connectionRisk')?.[0]).toEqual(['provider-a'])
-      expect(wrapper.emitted('connection')).toBeUndefined()
-
-      await wrapper.setProps({ busy: true })
-      expect(explanation.attributes('disabled')).toBeDefined()
-    },
-  )
-
-  it('does not show the compatibility explanation for restore or absent connection actions', () => {
-    const wrapper = mount(ProviderList, {
-      props: {
-        providers: [
-          provider({
-            connection: providerConnection({
-              role: 'identity',
-              status: 'stale',
-              action: 'restore',
-            }),
-          }),
-          provider({
-            id: 'provider-b',
-            name: 'Provider B',
-            isActive: false,
-          }),
-        ],
-        selectedProviderId: null,
-        busy: false,
-      },
-    })
-
-    expect(wrapper.findAll('[aria-label$="旧会话兼容性说明"]')).toHaveLength(0)
-  })
-
-  it('prevents deleting an identity that still owns a stale connection recovery point', () => {
-    const wrapper = mount(ProviderList, {
-      props: {
-        providers: [provider({
-          isActive: false,
-          connection: providerConnection({
-            role: 'identity',
-            status: 'stale',
-            action: 'restore',
-            disabledReason: '当前连接已失效；请恢复自身连接。',
-          }),
-        })],
-        selectedProviderId: 'provider-a',
-        busy: false,
-      },
-    })
-
-    expect(wrapper.get('[aria-label="删除 Provider A"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('当前连接已失效；请恢复自身连接。')
-  })
-
-  it('prevents deleting the Provider used as the active connection source', () => {
-    const wrapper = mount(ProviderList, {
-      props: {
-        providers: [provider({
-          isActive: false,
-          connection: providerConnection({
-            role: 'source',
-            status: 'active',
-            action: 'applied',
-          }),
-        })],
-        selectedProviderId: 'provider-a',
-        busy: false,
-      },
-    })
-
-    expect(wrapper.get('[aria-label="删除 Provider A"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('当前连接')
   })
 
   it('emits the complete order when a Provider is dropped and disables dragging while busy', async () => {

@@ -289,8 +289,6 @@ fn operation_name(operation: TransactionOperation) -> &'static str {
         TransactionOperation::DeleteProvider => "delete_provider",
         TransactionOperation::SwitchProvider => "switch_provider",
         TransactionOperation::RestoreBackup => "restore_backup",
-        TransactionOperation::SyncCurrentProvider => "sync_current_provider",
-        TransactionOperation::RestoreCurrentProvider => "restore_current_provider",
         TransactionOperation::UpdateProviderPreference => "update_provider_preference",
         TransactionOperation::UpdateProviderFast => "update_provider_fast",
         TransactionOperation::SaveProviderBaseUrls => "save_provider_base_urls",

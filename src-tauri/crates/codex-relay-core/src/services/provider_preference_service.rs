@@ -19,17 +19,6 @@ pub struct NamedBaseUrl {
     pub url: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderConnectionOverride {
-    pub target_provider_id: String,
-    pub source_provider_id: String,
-    pub applied_base_url_id: String,
-    pub applied_api_key_id: String,
-    pub restore_base_url_id: String,
-    pub restore_api_key_id: String,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ModelCatalogEntry {
     pub id: &'static str,
@@ -193,12 +182,6 @@ pub struct ProviderPreferenceStore {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub provider_order: Vec<String>,
-    #[serde(
-        default,
-        rename = "connectionOverride",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub connection_override: Option<ProviderConnectionOverride>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -267,7 +250,6 @@ impl Default for ProviderPreferenceStore {
             version: PROVIDER_PREFERENCE_VERSION,
             providers: BTreeMap::new(),
             provider_order: Vec::new(),
-            connection_override: None,
         }
     }
 }
@@ -535,7 +517,6 @@ fn parse_legacy_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, App
             version: PROVIDER_PREFERENCE_VERSION,
             providers,
             provider_order: Vec::new(),
-            connection_override: None,
         },
         needs_upgrade: true,
     })
@@ -575,7 +556,6 @@ fn parse_v2_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, AppErro
             })
             .collect(),
         provider_order: legacy.provider_order,
-        connection_override: None,
     };
 
     Ok(LoadedProviderPreferenceStore {
@@ -605,7 +585,6 @@ fn parse_v3_store(bytes: &[u8]) -> Result<LoadedProviderPreferenceStore, AppErro
             version: PROVIDER_PREFERENCE_VERSION,
             providers: legacy.providers,
             provider_order: legacy.provider_order,
-            connection_override: None,
         })?,
         needs_upgrade: true,
     })
@@ -651,39 +630,7 @@ fn normalize_store(
             ));
         }
     }
-    if let Some(connection_override) = &store.connection_override {
-        validate_connection_override(connection_override)?;
-    }
     Ok(store)
-}
-
-fn validate_connection_override(
-    connection_override: &ProviderConnectionOverride,
-) -> Result<(), AppError> {
-    validate_provider_store_id(&connection_override.target_provider_id)?;
-    validate_provider_store_id(&connection_override.source_provider_id)?;
-    if connection_override.target_provider_id == connection_override.source_provider_id {
-        return Err(AppError::new(
-            "INVALID_PROVIDER_PREFERENCES",
-            "provider-preferences.json 包含无效的连接覆盖关系。",
-            "connection override target and source provider ids are identical",
-        ));
-    }
-    for reference_id in [
-        &connection_override.applied_base_url_id,
-        &connection_override.applied_api_key_id,
-        &connection_override.restore_base_url_id,
-        &connection_override.restore_api_key_id,
-    ] {
-        if reference_id.trim().is_empty() || reference_id.trim() != reference_id {
-            return Err(AppError::new(
-                "INVALID_PROVIDER_PREFERENCES",
-                "provider-preferences.json 包含无效的连接覆盖关系。",
-                "connection override entry reference id is empty or not normalized",
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn validate_provider_store_id(provider_id: &str) -> Result<(), AppError> {
@@ -1022,96 +969,27 @@ mod tests {
     }
 
     #[test]
-    fn v4_connection_override_round_trips_stable_reference_ids() {
+    fn v4_ignores_obsolete_field_even_when_its_references_are_invalid() {
         let source = br#"{
   "version": 4,
   "providers": {},
+  "providerOrder": ["provider-a"],
   "connectionOverride": {
     "targetProviderId": "provider-a",
-    "sourceProviderId": "provider-b",
-    "appliedBaseUrlId": "url-b-primary",
-    "appliedApiKeyId": "key-b-primary",
-    "restoreBaseUrlId": "url-a-primary",
-    "restoreApiKeyId": "key-a-primary"
+    "sourceProviderId": "provider-a"
   }
 }"#;
 
         let loaded = parse_store(source).unwrap();
+        assert!(!loaded.needs_upgrade);
         let serialized: serde_json::Value =
             serde_json::from_slice(&serialize_store(&loaded.store).unwrap()).unwrap();
-
+        assert_eq!(serialized["version"], 4);
         assert_eq!(
-            serialized["connectionOverride"]["targetProviderId"],
-            "provider-a"
+            serialized["providerOrder"],
+            serde_json::json!(["provider-a"])
         );
-        assert_eq!(
-            serialized["connectionOverride"]["sourceProviderId"],
-            "provider-b"
-        );
-        assert_eq!(
-            serialized["connectionOverride"]["appliedBaseUrlId"],
-            "url-b-primary"
-        );
-        assert_eq!(
-            serialized["connectionOverride"]["appliedApiKeyId"],
-            "key-b-primary"
-        );
-        assert_eq!(
-            serialized["connectionOverride"]["restoreBaseUrlId"],
-            "url-a-primary"
-        );
-        assert_eq!(
-            serialized["connectionOverride"]["restoreApiKeyId"],
-            "key-a-primary"
-        );
-    }
-
-    #[test]
-    fn v4_rejects_structurally_invalid_connection_overrides() {
-        let invalid_sources: [&[u8]; 3] = [
-            br#"{
-  "version": 4,
-  "providers": {},
-  "connectionOverride": {
-    "targetProviderId": "provider-a",
-    "sourceProviderId": "provider-a",
-    "appliedBaseUrlId": "url-b-primary",
-    "appliedApiKeyId": "key-b-primary",
-    "restoreBaseUrlId": "url-a-primary",
-    "restoreApiKeyId": "key-a-primary"
-  }
-}"#,
-            br#"{
-  "version": 4,
-  "providers": {},
-  "connectionOverride": {
-    "targetProviderId": "provider-a",
-    "sourceProviderId": "provider-b",
-    "appliedBaseUrlId": "",
-    "appliedApiKeyId": "key-b-primary",
-    "restoreBaseUrlId": "url-a-primary",
-    "restoreApiKeyId": "key-a-primary"
-  }
-}"#,
-            br#"{
-  "version": 4,
-  "providers": {},
-  "connectionOverride": {
-    "targetProviderId": "provider-a",
-    "sourceProviderId": "provider-b",
-    "appliedBaseUrlId": " url-b-primary ",
-    "appliedApiKeyId": "key-b-primary",
-    "restoreBaseUrlId": "url-a-primary",
-    "restoreApiKeyId": "key-a-primary"
-  }
-}"#,
-        ];
-
-        for source in invalid_sources {
-            let error = parse_store(source).unwrap_err();
-
-            assert_eq!(error.code(), "INVALID_PROVIDER_PREFERENCES");
-        }
+        assert!(serialized.get("connectionOverride").is_none());
     }
 
     #[test]

@@ -28,7 +28,7 @@
 - `transaction_service`：锁、指纹、备份、临时写、验证和回滚。
 - `provider_service`：组合配置、密钥、认证与事务，作为主界面和托盘的唯一业务入口。
 - `provider_preference_service`：版本化 `provider-preferences.json` v1/v2/v3/v4，保存 Provider 显示
-  顺序、命名 Base URL、Relay 私有模型/Fast 偏好与可选无密 `connectionOverride`；不得保存第二份
+  顺序、命名 Base URL 和 Relay 私有模型/Fast 偏好；不得保存第二份
   URL 选择游标、URL/Key 值副本，或把该元数据写入 Codex Provider 块。
 - `settings_service` / `autostart_service`：保存偏好并核对 Windows 实际自启状态。
 - `self_check_service`：关键自检和扩展自检。
@@ -114,19 +114,12 @@ async fn command(...) -> Result<CommandResult<T>, InvokeError> {
 | Fast 独立更新 | 同上，`UpdateProviderFast` | 目录能力、当前/非当前语义、v4 偏好、tier/feature 单向投影与回滚 |
 | Provider 列表排序 | 同上，只写 preferences | 完整 ID 排列、指纹冲突、创建追加/删除移除、其他三文件字节不变 |
 | 删除 | 同上 | 当前 Provider 禁止删除；其他 Provider/密钥保留 |
-| 普通切换/创建后启用 | 同上 | 有覆盖时先恢复旧目标块并清除关系；再验证新顶层 Provider/模型/认证一致 |
-| 应用/更新连接 | 同上，`SyncCurrentProvider` | 输入只有来源 ID/四文件指纹；顶层身份不变，目标 URL、当前认证与 v4 关系一致 |
-| 恢复自身连接 | 同上，`RestoreCurrentProvider` | 恢复点完整；按当前顶层身份决定恢复 URL+认证或仅旧目标 URL；关系清除 |
+| 普通切换/创建后启用 | 同上 | 验证新顶层 Provider、模型和认证与目标配置一致，不修改其他 Provider 的地址 |
 | 恢复 | `BackupService` + `TransactionService` | 路径合法、恢复前备份、原字节与存在状态一致 |
 
 ## 扩展规则
 
 新增受管文件或新写操作时，先扩展事务快照、备份、解析器、写后验证器、回滚验证和路径安全测试；不得只在 command 中增加一次文件写入。
-
-连接 action/status/role、禁用原因和安全条目名称必须由 `ProviderService` 的单一 resolver 投影。
-command、前端和自检不得分别按 URL/Key 值重新推导来源；失效关系必须保留并返回稳定错误，直到
-显式恢复或经受管普通切换安全清除。关系来源和目标的删除分别返回
-`PROVIDER_CONNECTION_SOURCE_DELETE_FORBIDDEN` 与 `PROVIDER_CONNECTION_TARGET_DELETE_FORBIDDEN`。
 
 ## Scenario：模型目录与旧偏好兼容
 

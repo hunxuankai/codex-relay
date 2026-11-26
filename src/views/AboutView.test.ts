@@ -61,7 +61,7 @@ describe('AboutView', () => {
     expect(wrapper.emitted('openDirectory')).toHaveLength(1)
   })
 
-  it('describes connection routing and explicit recovery without overstating secret handling', () => {
+  it('describes Provider switching without advertising removed actions or overstating secret handling', () => {
     const text = mount(AboutView, {
       props: {
         appVersion: '0.3.0',
@@ -69,12 +69,9 @@ describe('AboutView', () => {
       },
     }).text()
 
-    expect(text).toContain('保持 model_provider')
-    expect(text).toContain('恢复自身连接')
-    expect(text).toContain('首次覆盖前')
-    expect(text).toContain('普通切换')
-    expect(text).toContain('稳定条目 ID')
-    expect(text).toContain('已选中的 Base URL 与 API Key')
+    expect(text).toContain('切换 Provider 时，将其预选地址、密钥、模型、推理强度和 Fast 偏好同步')
+    expect(text).not.toContain('仅应用连接')
+    expect(text).not.toContain('恢复自身连接')
     expect(text).not.toContain('自动验证 API Key')
     expect(text).not.toContain('加密 API Key')
   })

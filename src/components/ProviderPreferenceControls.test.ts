@@ -2,7 +2,6 @@ import { mount } from '@vue/test-utils'
 import { ElSegmented, ElSwitch } from 'element-plus'
 import { describe, expect, it } from 'vitest'
 import type { ModelCatalogItem, ProviderProfile } from '../types/provider'
-import { providerConnection } from '../test-utils/provider'
 import ProviderPreferenceControls from './ProviderPreferenceControls.vue'
 
 const modelCatalog: ModelCatalogItem[] = [
@@ -20,7 +19,6 @@ function provider(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
     reasoningEfforts: { 'gpt-5.6-sol': 'high', 'gpt-5.4-mini': 'low' }, preferenceConfigured: true,
     fastEnabled: false,
     apiKeyConfigured: true, configurationComplete: true, disabledReason: null,
-    connection: providerConnection(),
     isActive: false, isValid: true, validationMessage: null, ...overrides,
   }
 }
