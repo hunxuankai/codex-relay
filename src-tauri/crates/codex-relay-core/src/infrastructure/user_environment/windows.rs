@@ -167,12 +167,10 @@ fn valid_wide_string(bytes: &[u8]) -> bool {
     let Some(text) = bytes.strip_suffix(&[0, 0]) else {
         return false;
     };
-    text.len().is_multiple_of(2)
-        && char::decode_utf16(
-            text.chunks_exact(2)
-                .map(|unit| u16::from_le_bytes([unit[0], unit[1]])),
-        )
-        .all(|character| character.is_ok_and(|character| character != '\0'))
+    let (units, remainder) = text.as_chunks::<2>();
+    remainder.is_empty()
+        && char::decode_utf16(units.iter().copied().map(u16::from_le_bytes))
+            .all(|character| character.is_ok_and(|character| character != '\0'))
 }
 
 fn open_key(root: HKEY, subkey: &[u16]) -> Result<Option<RegistryKey>, AppError> {
