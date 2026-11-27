@@ -8,7 +8,7 @@ import { useCliProfiles } from '../composables/useCliProfiles'
 
 const {
   inventory, edit, loading, busy, saving, readError, actionError, success,
-  refresh, prepare, cancel, save, copy, openWindowsSettings,
+  refresh, prepare, cancel, save, applyProviderKey, copy, openWindowsSettings,
 } = useCliProfiles()
 
 onMounted(refresh)
@@ -57,7 +57,13 @@ onMounted(refresh)
       <ElEmpty v-else-if="inventory && !readError" description="未找到独立的 *.config.toml Profile 文件。" :image-size="72" />
     </section>
 
-    <ProfileKeyDialog :edit="edit" :saving="saving" :save="save" @cancel="cancel" />
+    <ProfileKeyDialog
+      :edit="edit"
+      :saving="saving"
+      :save="save"
+      :apply-provider-key="applyProviderKey"
+      @cancel="cancel"
+    />
   </main>
 </template>
 

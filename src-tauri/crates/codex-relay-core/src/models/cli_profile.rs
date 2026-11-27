@@ -1,3 +1,4 @@
+use crate::models::provider::ProviderApiKeySummary;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -67,6 +68,7 @@ pub struct ProfileKeyEdit {
     pub token: String,
     pub replaces_value: bool,
     pub relay_process_has_value: bool,
+    pub provider_keys: Vec<ProviderApiKeySummary>,
 }
 
 #[derive(Deserialize)]
@@ -75,6 +77,14 @@ pub struct SaveProfileKeyInput {
     pub profile_name: String,
     pub token: String,
     pub new_key: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplyProfileProviderKeyInput {
+    pub profile_name: String,
+    pub token: String,
+    pub api_key_id: String,
 }
 
 #[derive(Debug, Serialize)]

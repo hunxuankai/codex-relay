@@ -1,6 +1,6 @@
 import { computed, onScopeDispose, readonly, shallowRef } from 'vue'
 import * as relay from '../services/tauri'
-import type { CliProfileList, ProfileKeyEdit } from '../types/cliProfile'
+import type { CliProfileList, ProfileKeyEdit, ProfileKeySaved } from '../types/cliProfile'
 
 function messageFor(error: unknown, fallback: string) {
   return error instanceof relay.RelayCommandError ? error.message : fallback
@@ -68,14 +68,12 @@ export function useCliProfiles() {
     if (!saving.value) edit.value = null
   }
 
-  async function save(newKey: string) {
+  async function runSave(request: (target: ProfileKeyEdit) => Promise<ProfileKeySaved>) {
     const target = edit.value
     if (!active || !target || saving.value) return
     action.value = 'save'
     try {
-      const pending = relay.saveProfileEnvKey({ profileName: target.profileName, token: target.token, newKey })
-      newKey = ''
-      const outcome = await pending
+      const outcome = await request(target)
       if (active) {
         showSuccess(outcome.windowsNotified
           ? '已保存到 Windows 用户环境变量。请从已刷新的终端环境重新启动 Codex。'
@@ -90,6 +88,18 @@ export function useCliProfiles() {
       }
     }
     await refresh()
+  }
+
+  function save(newKey: string) {
+    return runSave(({ profileName, token }) => {
+      const pending = relay.saveProfileEnvKey({ profileName, token, newKey })
+      newKey = ''
+      return pending
+    })
+  }
+
+  function applyProviderKey(apiKeyId: string) {
+    return runSave(({ profileName, token }) => relay.applyProfileProviderKey({ profileName, token, apiKeyId }))
   }
 
   async function copy(value: string, kind: 'command' | 'variable') {
@@ -123,6 +133,7 @@ export function useCliProfiles() {
     prepare,
     cancel,
     save,
+    applyProviderKey,
     copy,
     openWindowsSettings,
   }

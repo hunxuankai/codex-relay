@@ -2,7 +2,8 @@ use crate::app_state::AppState;
 use crate::commands::command_result;
 use crate::error::CommandResult;
 use crate::models::cli_profile::{
-    CliProfileList, ProfileKeyEdit, ProfileKeySaved, SaveProfileKeyInput,
+    ApplyProfileProviderKeyInput, CliProfileList, ProfileKeyEdit, ProfileKeySaved,
+    SaveProfileKeyInput,
 };
 use tauri::ipc::InvokeError;
 
@@ -37,6 +38,16 @@ pub async fn save_profile_env_key(
 ) -> Result<CommandResult<ProfileKeySaved>, InvokeError> {
     Ok(command_result(
         state.cli_profile_service.save_key(input).await,
+    ))
+}
+
+#[tauri::command]
+pub async fn apply_profile_provider_key(
+    state: tauri::State<'_, AppState>,
+    input: ApplyProfileProviderKeyInput,
+) -> Result<CommandResult<ProfileKeySaved>, InvokeError> {
+    Ok(command_result(
+        state.cli_profile_service.apply_provider_key(input).await,
     ))
 }
 

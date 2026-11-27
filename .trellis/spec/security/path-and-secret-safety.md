@@ -36,7 +36,7 @@ fixture 只能使用明确标识的 `test-key-*-not-real`。专用密钥管理�
 不得复用该返回类型。完整密钥只能存在于短生命周期 manager，对话框关闭、scope dispose 和
 请求作废时必须清空，晚响应不得恢复已关闭状态。
 
-CLI Profile 环境变量的旧值从不返回前端。新值只存在于遮挡表单和专用保存请求；不进入事件、剪贴板、普通状态或持久化副本。遵守 [CLI Profile 环境变量凭据](profile-environment-credentials.md) 的路径及原生适配隔离。
+CLI Profile 环境变量的旧值从不返回前端。手填新值只进入遮挡表单和专用保存请求；复用的命名 Key 只在后端解析，IPC 只传条目 ID、名称和编辑目标。不把凭据值放入事件、剪贴板、普通状态或其他持久化副本。遵守 [CLI Profile 环境变量凭据](profile-environment-credentials.md) 的路径及原生适配隔离。
 
 ## 威胁模型
 

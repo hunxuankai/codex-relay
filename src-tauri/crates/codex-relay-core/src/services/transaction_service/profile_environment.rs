@@ -141,7 +141,10 @@ fn recover_after_failure(
     if fs::remove_file(marker).is_err() {
         return rollback_incomplete();
     }
-    if error.code() == "PROFILE_KEY_CONFLICT" {
+    if matches!(
+        error.code(),
+        "PROFILE_KEY_CONFLICT" | "PROFILE_PROVIDER_KEY_UNAVAILABLE"
+    ) {
         error
     } else {
         write_failed()

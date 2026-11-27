@@ -10,7 +10,7 @@ Codex Relay 是一款面向 Windows 10/11 的轻量桌面工具，用于管理�
 - 新增、编辑、删除 Provider，保留无关 TOML 注释、未知字段和功能开关。
 - 为每个 Provider 保存多个命名 Base URL 和多个命名 API Key，在详情页按名称独立切换。
 - Base URL 与 API Key 分别管理；当前 Provider 的选择立即写入 Codex 配置，非当前 Provider 只保存预选。
-- 发现独立的 CLI Profiles，复制原有启动命令，并在应用内更换专用 Windows 用户环境变量的 Key。
+- 发现独立的 CLI Profiles，复制原有启动命令，并一键将同供应商已保存的 Key 应用到专用 Windows 用户环境变量。
 - 为每个 Provider 保存独立 Fast 偏好；支持模型开启后投影到 Codex 的 Fast/priority 服务层。
 - API Key 管理器打开后直接查看全部明文密钥，可统一隐藏/显示并逐项复制；关闭后清空前端密钥状态。
 - 在 Provider 详情显式运行 API 可用性测试或 Codex 兼容性测试，分别验证最小 Responses 请求和一次正常 Codex 回合。
@@ -89,9 +89,10 @@ Provider 可用性测试不会在启动、自检、列表刷新或文件监控�
 
 1. 在 **Providers → CLI Profiles** 查看当前 Codex 配置目录下已有的 `<名称>.config.toml`。此文件形式需要 Codex CLI 0.134.0 或更高版本，不需要导入。终端需使用同一个 `CODEX_HOME`；可继续运行 `codex -p agentrouter` 或 `codex -p qiandao`，也可以从列表复制启动命令。
 2. 列表按用户配置层解析 `model_provider` 与目标供应商的 `env_key`，区分 Windows 用户变量是否设置、当前 Relay 进程是否可见，并标注继承。这里不读取其他终端的环境，也不测试 Key 是否有效。
-3. 对可明确关联的专用 `*_API_KEY` 或 `*_TOKEN`，选择「设置 Key」或「更换 Key」，输入新值并确认「保存到 Windows 用户变量」。共享、通用、同名系统变量和特殊类型变量只读，仍可通过 Windows 环境变量入口管理。要分别使用两把 Key，应在各 Profile 中引用两个不同的专用变量。
+3. 对可明确关联的专用 `*_API_KEY` 或 `*_TOKEN`，选择「设置 Key」或「更换 Key」。弹窗按供应商 ID 列出主 Providers 页面为同一供应商保存的可用 Key；核对目标主机与变量后，点击某个 Key 名称即可保存。也可以手动输入新值并点击「保存到 Windows 用户变量」。
+4. 共享、通用、同名系统变量和特殊类型变量只读，仍可通过 Windows 环境变量入口管理。要分别使用两把 Key，应在各 Profile 中引用两个不同的专用变量。
 
-写入仅影响当前 Windows 用户的目标变量，不修改任何 TOML、`auth.json` 或默认供应商，也不把 Key 另存到 Relay。用户环境变量不是加密密钥库。保存确认表示持久值已回读，不代表现有终端已更新；请从已刷新的终端启动 Codex，必要时完全退出终端宿主再重开。启动脚本或当前会话仍可覆盖该值。开发或 Relay 路径覆盖模式不接触真实用户环境变量。
+写入仅影响当前 Windows 用户的目标变量，不修改任何 TOML、`auth.json`、默认供应商当前选中的 Key 或 Relay 密钥库。此操作只保存一次，不会自动跟随 Providers 后续换 Key。用户环境变量不是加密密钥库。保存确认表示持久值已回读，不代表现有终端已更新；请从已刷新的终端启动 Codex，必要时完全退出终端宿主再重开。启动脚本或当前会话仍可覆盖该值。开发或 Relay 路径覆盖模式不接触真实用户环境变量。
 
 ## 开发
 

@@ -74,6 +74,7 @@ pub fn run() {
             commands::cli_profile_commands::list_cli_profiles,
             commands::cli_profile_commands::prepare_profile_key_edit,
             commands::cli_profile_commands::save_profile_env_key,
+            commands::cli_profile_commands::apply_profile_provider_key,
             commands::cli_profile_commands::open_profile_environment_settings,
             commands::provider_commands::list_providers,
             commands::provider_commands::reorder_providers,

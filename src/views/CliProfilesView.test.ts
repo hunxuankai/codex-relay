@@ -7,6 +7,7 @@ const commands = vi.hoisted(() => ({
   listCliProfiles: vi.fn(),
   prepareProfileKeyEdit: vi.fn(),
   saveProfileEnvKey: vi.fn(),
+  applyProfileProviderKey: vi.fn(),
   openProfileEnvironmentSettings: vi.fn(),
 }))
 
@@ -35,6 +36,7 @@ const inventory = {
 const edit = {
   profileName: 'agentrouter', providerId: 'regional-route', host: 'regional.example.test',
   variable: 'REGIONAL_API_KEY', token: 'edit-token', replacesValue: false, relayProcessHasValue: true,
+  providerKeys: [],
 } as const
 
 const draft = 'test-key-profile-ui-not-real'
@@ -84,6 +86,7 @@ describe('CLI Profiles', () => {
     const input = wrapper.get<HTMLInputElement>('[name="profile-new-key"]')
     expect(input.attributes('type')).toBe('password')
     expect(input.element.value).toBe('')
+    expect(wrapper.text()).toContain('没有可复用的同供应商 Key')
     expect(wrapper.text()).toContain('不会导入当前 Relay 进程中的值')
     await input.setValue(draft)
     expect(wrapper.text()).not.toContain(draft)
@@ -148,6 +151,46 @@ describe('CLI Profiles', () => {
     expect(wrapper.text()).toContain('有一次保存结果未确认')
     expect(wrapper.text()).not.toContain(draft)
     expect(wrapper.text()).not.toContain('已保存到 Windows 用户环境变量')
+    wrapper.unmount()
+  })
+
+  it('applies a named key in one click by entry ID and refreshes persisted status', async () => {
+    commands.prepareProfileKeyEdit.mockResolvedValueOnce({
+      ...edit,
+      providerKeys: [{ id: 'primary-id', name: '主用' }, { id: 'backup-id', name: '备用' }],
+    })
+    let completeSave!: (outcome: { windowsNotified: boolean }) => void
+    commands.applyProfileProviderKey.mockReturnValue(new Promise((resolve) => { completeSave = resolve }))
+    const wrapper = mount(CliProfilesView)
+    await flushPromises()
+    await wrapper.get('[aria-label="设置 agentrouter 的 Key"]').trigger('click')
+    await flushPromises()
+    expect(commands.applyProfileProviderKey).not.toHaveBeenCalled()
+    const primary = wrapper.get<HTMLButtonElement>('[aria-label="使用已保存的 Key：主用"]')
+    const backup = wrapper.get<HTMLButtonElement>('[aria-label="使用已保存的 Key：备用"]')
+    const input = wrapper.get<HTMLInputElement>('[name="profile-new-key"]')
+    await input.setValue(draft)
+    await backup.trigger('click')
+    expect(input.element.value).toBe('')
+    expect(primary.element.disabled).toBe(true)
+    expect(backup.element.disabled).toBe(true)
+    await primary.trigger('click')
+    expect(commands.applyProfileProviderKey).toHaveBeenCalledExactlyOnceWith({
+      profileName: 'agentrouter', token: 'edit-token', apiKeyId: 'backup-id',
+    })
+    expect(commands.saveProfileEnvKey).not.toHaveBeenCalled()
+    expect(writeText).not.toHaveBeenCalled()
+
+    commands.listCliProfiles.mockResolvedValueOnce({
+      ...inventory, profiles: [
+        { ...inventory.profiles[0], keyStatus: { ...inventory.profiles[0].keyStatus, user: 'set' } },
+        inventory.profiles[1],
+      ],
+    })
+    completeSave({ windowsNotified: true })
+    await flushPromises()
+    expect(wrapper.find('[aria-label="更换 agentrouter 的 Key"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('请从已刷新的终端环境重新启动 Codex')
     wrapper.unmount()
   })
 })

@@ -57,6 +57,7 @@ defineEmits<{
       <h2 id="cli-profiles-title">CLI Profiles</h2>
       <ul class="availability-list">
         <li>发现已有的 <code>*.config.toml</code> 和其 <code>env_key</code> 引用，保留原生 <code>codex -p</code> 启动方式，不切换默认供应商。</li>
+        <li>可按供应商 ID 复用已保存的命名 Key，也可手动输入；点选只保存一次，不会跟随 Providers 后续切换。</li>
         <li>显式保存只更换目标 Windows 用户环境变量，不修改 TOML、<code>auth.json</code> 或 Relay 密钥库；共享、系统和通用变量不直接编辑。</li>
         <li>不回显旧值，也不复制 Key。用户环境变量不是加密密钥库，已运行的终端和 Codex 不会更新，启动脚本仍可覆盖。</li>
       </ul>

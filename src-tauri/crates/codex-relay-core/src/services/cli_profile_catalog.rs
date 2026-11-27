@@ -16,6 +16,7 @@ pub(super) struct ProfileConfig {
     pub name: String,
     pub command: Option<String>,
     pub provider_id: Option<String>,
+    pub provider_defined_in_base: bool,
     pub host: Option<String>,
     pub variable: Option<String>,
     pub inherits_default: bool,
@@ -83,6 +84,7 @@ impl ProfileConfig {
             name,
             command,
             provider_id: None,
+            provider_defined_in_base: false,
             host: None,
             variable: None,
             inherits_default: false,
@@ -255,6 +257,12 @@ fn resolve_profile(
         return output;
     }
     output.provider_id = Some(provider_id.to_owned());
+    output.provider_defined_in_base = base
+        .get("model_providers")
+        .and_then(Item::as_table_like)
+        .and_then(|providers| providers.get(provider_id))
+        .and_then(Item::as_table_like)
+        .is_some();
     output.inherits_default = provider_inherited
         || settings
             .get("model")

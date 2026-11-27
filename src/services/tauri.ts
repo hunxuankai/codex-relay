@@ -3,7 +3,13 @@ import { listen, type Event, type UnlistenFn } from '@tauri-apps/api/event'
 import { getVersion } from '@tauri-apps/api/app'
 import { check, type DownloadEvent } from '@tauri-apps/plugin-updater'
 import type { BackupFileName, BackupInventory } from '../types/backup'
-import type { CliProfileList, ProfileKeyEdit, ProfileKeySaved, SaveProfileKeyInput } from '../types/cliProfile'
+import type {
+  ApplyProfileProviderKeyInput,
+  CliProfileList,
+  ProfileKeyEdit,
+  ProfileKeySaved,
+  SaveProfileKeyInput,
+} from '../types/cliProfile'
 import type { CommandResult } from '../types/command'
 import type { HealthReport } from '../types/health'
 import type { ProviderAvailabilityResult } from '../types/providerAvailability'
@@ -78,6 +84,10 @@ export function prepareProfileKeyEdit(profileName: string): Promise<ProfileKeyEd
 
 export function saveProfileEnvKey(input: SaveProfileKeyInput): Promise<ProfileKeySaved> {
   return call('save_profile_env_key', { input })
+}
+
+export function applyProfileProviderKey(input: ApplyProfileProviderKeyInput): Promise<ProfileKeySaved> {
+  return call('apply_profile_provider_key', { input })
 }
 
 export function openProfileEnvironmentSettings(): Promise<void> {

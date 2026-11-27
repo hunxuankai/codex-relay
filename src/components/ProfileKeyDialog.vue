@@ -7,12 +7,15 @@ const props = defineProps<{
   edit: Readonly<ProfileKeyEdit> | null
   saving: boolean
   save: (newKey: string) => Promise<void>
+  applyProviderKey: (apiKeyId: string) => Promise<void>
 }>()
 
 const emit = defineEmits<{ cancel: [] }>()
 const keyInput = useTemplateRef<HTMLInputElement>('keyInput')
+const providerKeyOptions = useTemplateRef<HTMLFieldSetElement>('providerKeyOptions')
 const inputId = useId()
 const noteId = useId()
+const providerKeysHelpId = useId()
 const hasDraft = shallowRef(false)
 
 function clearDraft() {
@@ -30,14 +33,20 @@ function submit() {
   void props.save(key)
 }
 
+function applySavedKey(apiKeyId: string) {
+  if (!props.edit || props.saving) return
+  clearDraft()
+  void props.applyProviderKey(apiKeyId)
+}
+
 function cancel() {
   if (!props.edit || props.saving) return
   clearDraft()
   emit('cancel')
 }
 
-function focusKey() {
-  keyInput.value?.focus()
+function focusEditor() {
+  (providerKeyOptions.value ?? keyInput.value)?.focus()
 }
 </script>
 
@@ -46,15 +55,16 @@ function focusKey() {
     :model-value="Boolean(edit)"
     :title="`${edit?.replacesValue ? '更换' : '设置'} Profile Key`"
     width="min(31rem, calc(100vw - 2rem))"
+    top="min(8vh, 3rem)"
     :close-on-click-modal="false"
     :close-on-press-escape="!saving"
     :show-close="false"
     destroy-on-close
     :aria-describedby="noteId"
-    @opened="focusKey"
+    @opened="focusEditor"
     @close="cancel"
   >
-    <form v-if="edit" class="key-form" aria-label="设置 Profile Key" @submit.prevent="submit">
+    <form v-if="edit" class="key-form" aria-label="设置 Profile Key" :aria-busy="saving" @submit.prevent="submit">
       <dl class="key-target">
         <dt>Profile / 供应商</dt>
         <dd>{{ edit.profileName }} / {{ edit.providerId }}<template v-if="edit.host"> · {{ edit.host }}</template></dd>
@@ -67,7 +77,29 @@ function focusKey() {
       <p v-if="!edit.replacesValue && edit.relayProcessHasValue" class="key-note">
         将创建用户变量，不会导入当前 Relay 进程中的值。
       </p>
-      <label :for="inputId" class="key-label">新 Key</label>
+      <fieldset
+        v-if="edit.providerKeys.length"
+        ref="providerKeyOptions"
+        class="provider-key-options"
+        tabindex="-1"
+        :aria-describedby="providerKeysHelpId"
+      >
+        <legend>使用供应商已保存的 Key</legend>
+        <p :id="providerKeysHelpId" class="key-note">点击名称，立即保存到当前 Profile 的目标变量。</p>
+        <div class="provider-key-list">
+          <ElButton
+            v-for="entry in edit.providerKeys"
+            :key="entry.id"
+            class="provider-key-button"
+            native-type="button"
+            :aria-label="`使用已保存的 Key：${entry.name}`"
+            :disabled="saving"
+            @click="applySavedKey(entry.id)"
+          >{{ entry.name }}</ElButton>
+        </div>
+      </fieldset>
+      <p v-else class="key-note">没有可复用的同供应商 Key，可手动输入。</p>
+      <label :for="inputId" class="key-label">手动输入新 Key</label>
       <input
         :id="inputId"
         ref="keyInput"
@@ -114,6 +146,43 @@ function focusKey() {
   font-weight: 600;
 }
 
+.provider-key-options {
+  display: grid;
+  gap: 0.4rem;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--el-border-radius-base);
+}
+
+.provider-key-options legend {
+  padding-inline: 0.25rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.provider-key-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-block-size: min(8rem, 25vh);
+  padding: 0.15rem;
+  overflow: auto;
+}
+
+.provider-key-button {
+  max-inline-size: 100%;
+  min-block-size: 36px;
+  height: auto;
+  white-space: normal;
+  text-align: start;
+}
+
+.provider-key-list :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
 .profile-key-field {
   box-sizing: border-box;
   width: 100%;
@@ -126,7 +195,8 @@ function focusKey() {
   font: inherit;
 }
 
-.profile-key-field:focus-visible {
+.profile-key-field:focus-visible,
+.provider-key-options:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }

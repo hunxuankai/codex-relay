@@ -1,3 +1,5 @@
+import type { ProviderApiKeySummary } from './provider'
+
 export type ProfileProblem =
   | 'invalidConfiguration'
   | 'missingProvider'
@@ -45,12 +47,19 @@ export interface ProfileKeyEdit {
   token: string
   replacesValue: boolean
   relayProcessHasValue: boolean
+  providerKeys: readonly ProviderApiKeySummary[]
 }
 
 export interface SaveProfileKeyInput {
   profileName: string
   token: string
   newKey: string
+}
+
+export interface ApplyProfileProviderKeyInput {
+  profileName: string
+  token: string
+  apiKeyId: string
 }
 
 export interface ProfileKeySaved {
