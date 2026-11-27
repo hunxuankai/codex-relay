@@ -19,9 +19,10 @@
 ## 验收标准
 
 - [x] 版本、锁文件与说明一致，发布请求校验、完整检查和普通 Windows 构建通过并有产物证据。
-- [ ] 精确提交与普通推送候选，唯一 Windows 发布 Run 绑定 `0.5.4` 和候选 SHA，CI 成功后仅生成 Draft。
-- [ ] 核对 Draft 的身份、目标、说明、三项资产与实际 updater 签名，随后公开并验证同一 Release ID、公开 tag 与固定 Latest 下载端点。
-- [ ] 核对历史清理 Run 及旧 Release、资产、tag 的状态，记录实际限制；提交验证证据、归档与会话日志并确认 `origin/main` 与本地 `HEAD` 一致。
+- [x] 精确提交与普通推送候选，唯一 Windows 发布 Run 绑定 `0.5.4` 和候选 SHA，CI 成功后仅生成 Draft。
+- [x] 核对 Draft 的身份、目标、说明、三项资产与实际 updater 签名，随后公开并验证同一 Release ID、公开 tag 与固定 Latest 下载端点。
+- [x] 核对历史清理 Run 及旧 Release、资产、tag 的状态，记录实际限制。
+- Git 交付门禁：提交验证证据、归档和会话日志后，单独核对 `origin/main`、远端和本地 `HEAD`，结果在阶段 3.5 的最终交付中报告。
 
 ## 范围外
 
