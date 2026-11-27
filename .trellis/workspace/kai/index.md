@@ -7,8 +7,8 @@
 ## 当前状态
 
 <!-- @@@auto:current-status -->
-- **活动文件**：`journal-1.md`
-- **会话总数**：58
+- **活动文件**：`journal-2.md`
+- **会话总数**：59
 - **最近活动**：2026-11-27
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | 文件 | 行数 | 状态 |
 |------|-------|--------|
-| `journal-1.md` | ~1984 | 活动 |
+| `journal-2.md` | ~41 | 活动 |
+| `journal-1.md` | ~1984 | 已归档 |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | 日期 | 标题 | 提交 | 分支 |
 |---|------|-------|---------|--------|
+| 59 | 2026-11-27 | 发布 v0.5.4 CLI Profile 更新 | `094d96ff6c7b569d442f85da84d7fa5be6821d31`, `b5199f238241a2f9471f33f0104dbff37daa89d1` | `main` |
 | 58 | 2026-11-27 | CLI Profile 一键复用同供应商的 Key | `53ae3bf55a7ed2b024416334bcd8ebe736dd4e2b` | `main` |
 | 57 | 2026-11-27 | 管理 CLI Profile 的 Windows 用户环境变量 Key | `ec84725` | `main` |
 | 56 | 2026-11-27 | 移除仅应用连接功能 | `75908b314d32011fab25fd15d5e42924079e194a` | `main` |
