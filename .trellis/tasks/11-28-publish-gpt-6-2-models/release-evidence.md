@@ -21,3 +21,41 @@
 | --- | ---: | --- | --- |
 | `src-tauri/target/release/CodexRelay.exe` | 19455488 | 2026-11-28T11:18:24.7072504Z | `1b6ea1489d332a583e424ed03d10dda333076041858676a6f2325164a1bc1480` |
 | `src-tauri/target/release/bundle/nsis/Codex Relay_0.5.5_x64-setup.exe` | 4714517 | 2026-11-28T11:18:24.2154358Z | `227bcaa23ae27bffa52f270892fb26932d8c1f3fe57ab8f5a3c8d3534b489b5d` |
+
+## 候选与 Actions
+
+- 候选 `fa26ef77101b9ffcf23ffc72b6cd735fc9795c58`。暂存范围、差异空白检查、凭据模式扫描和最终 SHA 的发布请求校验均通过。普通推送 `HEAD:refs/heads/main` 返回 `5047610..fa26ef7`；本地 HEAD、跟踪分支、远端 Git ref 与 GitHub API 查验一致。
+- UTC `11:20:29` 仅触发一次 `release.yml`，输入 `expected_version=0.5.5` 和候选完整 SHA，得到 Run [46139422066](https://github.com/hunxuankai/codex-relay/actions/runs/46139422066)。没有推送 tag。
+- 临时审计探针直接链接旧缓存产物时被 Rust 版本兼容检查拒绝；随后用 Rust 1.100.0 和本地依赖构建成功，未改发布控制台代码。生产公开审计路径验证既有 `v0.5.4`，实际安装器的 updater 签名通过，翻转一字节的负向对照被拒绝。
+- 匿名读取旧版固定 updater 端点与 asset API 成功，实际 `latest.json` 和 `.sig` 的 SHA-256 与基线一致。
+- Run `46139422066` 是 `main` 上绑定候选 SHA 的唯一 `workflow_dispatch`、attempt 1。监视在约 13 分钟时遇到 EOF 退出 1；恢复时仅查询原 Run，确认 `completed/success`，未重新触发。
+- Run UTC `11:20:32` 创建，Job `140961832344` 于 `11:20:35` 开始、`11:34:33` 结束：排队 3 秒，Job 13 分 58 秒；完整检查 `11:21:35`–`11:28:53`，7 分 18 秒；Draft 构建 `11:28:53`–`11:34:16`，5 分 23 秒，均成功。
+
+## Draft 审计
+
+- Draft Release `461511927`，标题 `Codex Relay v0.5.5`，`target_commitish` 为候选 SHA，`draft=true`、`prerelease=false`；远端仍只有 `v0.5.4` tag。
+- 初次生产审计报告 `AssetDownloadFailed`，未公开。分别对同三项资产做只读下载，大小/hash 均匹配；随后只重试同一 Draft 审计，UTC `11:37:33` 退出 0。未据此推定 GitHub 故障原因，也未产生新候选或资产。
+- 生产 `DraftAuditService` 验证最终说明、三项资产大小和 SHA-256、manifest 版本 `0.5.5` 与说明、两个 Windows 平台的安装器 URL、内联签名及独立签名一致。使用仓库公开 updater 公钥验证实际 NSIS 的 minisign 签名通过，翻转一个字节后被拒绝。安装器 FileVersion `0.5.5`，Authenticode `NotSigned`。
+
+| Draft 资产 | GitHub ID | 字节 | SHA-256 |
+| --- | ---: | ---: | --- |
+| `Codex.Relay_0.5.5_x64-setup.exe` | 804334092 | 4719064 | `56359085d57dd4ed0bbffb7ad3e8e5ec450b60da4378f8c05358fce306b83824` |
+| `Codex.Relay_0.5.5_x64-setup.exe.sig` | 804334143 | 424 | `f65b669b2c985f33030c1f1b483ce235047e8374a81cef66aa1857cb7b53c381` |
+| `latest.json` | 804334174 | 2151 | `08f22b940de5d8a7da8d3365986e5b01baf1ad35183f3c56a154514089834009` |
+
+## 正式公开与复核
+
+- 使用生产 `GithubReleaseService::publish_release`，在更新前完整重审并比对同一 Draft，只按 Release ID 单次公开。正式 Release `461511927`（`v0.5.5`）公开时间 `2026-11-28T11:39:01Z`，tag 指向 `fa26ef77101b9ffcf23ffc72b6cd735fc9795c58`。
+- `verify_published_release` 验证在线 Latest、tag、说明与三项资产和 Draft 一致，实际公开安装器的 minisign 签名及篡改负向对照再次通过；UTC `11:39:34` 退出 0。
+- UTC `11:40:53` 独立匿名检查退出 0。Latest 和按 tag 查询命中同一公开 Release，三项资产下载的大小及 SHA-256 与 Draft 一致。固定 latest 及按 tag 下载的两份清单字节一致，两项 Windows 平台的 URL 与签名正确；手动安装器下载一致、Release 页面 HTTP 200。公开 NSIS FileVersion `0.5.5`，Authenticode `NotSigned`。
+
+## 历史清理
+
+- 唯一公开事件触发清理 Run [46140874028](https://github.com/hunxuankai/codex-relay/actions/runs/46140874028)，`release` 事件、`v0.5.5` 标签，候选 SHA 一致。UTC `11:39:02` 创建，Job `140966291212` 在 `11:39:04`–`11:39:09` 成功；清理步骤用时 3 秒。
+- UTC `11:40:14` 仅正式 `v0.5.5`、其三个已核验资产及 tag `v0.5.5` 保留；旧 Release `460212909` 和以前三个资产 API 均返回 404。未手动删除远端对象或另行触发清理。
+
+## 限制与收尾
+
+- 未执行实机或 Sandbox 安装、应用内升级、UAC、自动重启、卸载、真实用户数据保留或供应商调用验证。已验证的构建、托管和 Tauri 更新签名不代表上述行为或 Authenticode 已通过。
+- 临时审计目录及独立探针是本轮生成物；自动清理命令被工具策略拦截，残留路径只在当前会话提醒，不纳入仓库。
+- 发布证据提交后归档任务、记录日志，再普通推送到 `origin/main`；发布 tag 保持指向候选提交，最终 HEAD 与远端以归档后 Git 核验为准。
