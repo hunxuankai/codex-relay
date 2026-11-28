@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **活动文件**：`journal-2.md`
-- **会话总数**：60
-- **最近活动**：2026-11-28
+- **会话总数**：61
+- **最近活动**：2026-11-29
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | 文件 | 行数 | 状态 |
 |------|-------|--------|
-| `journal-2.md` | ~75 | 活动 |
+| `journal-2.md` | ~108 | 活动 |
 | `journal-1.md` | ~1984 | 已归档 |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | 日期 | 标题 | 提交 | 分支 |
 |---|------|-------|---------|--------|
+| 61 | 2026-11-29 | CLI Profiles 显示当前 Key 名称 | `dca1f0a04d6b2beff238702473f1fe75d466584f` | `main` |
 | 60 | 2026-11-28 | 新增 GPT-6.2 Astra 和 Sol 并发布 v0.5.5 | `fa26ef77101b9ffcf23ffc72b6cd735fc9795c58`, `9d9c6efc9050af19994b63b4dd9d6fe51776e9eb` | `main` |
 | 59 | 2026-11-27 | 发布 v0.5.4 CLI Profile 更新 | `094d96ff6c7b569d442f85da84d7fa5be6821d31`, `b5199f238241a2f9471f33f0104dbff37daa89d1` | `main` |
 | 58 | 2026-11-27 | CLI Profile 一键复用同供应商的 Key | `53ae3bf55a7ed2b024416334bcd8ebe736dd4e2b` | `main` |
