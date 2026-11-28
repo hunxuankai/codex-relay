@@ -18,6 +18,7 @@ export type KeyRestriction =
 export interface ProfileKeyStatus {
   user: VariablePresence
   relayProcess: VariablePresence
+  matchedUserKeyName: string | null
   restriction: KeyRestriction | null
   sharedWith: readonly string[]
 }

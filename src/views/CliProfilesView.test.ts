@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RelayCommandError } from '../services/tauri'
+import type { CliProfileList } from '../types/cliProfile'
 import CliProfilesView from './CliProfilesView.vue'
 
 const commands = vi.hoisted(() => ({
@@ -23,15 +24,15 @@ const inventory = {
     {
       name: 'agentrouter', command: 'codex -p agentrouter', providerId: 'regional-route',
       host: 'regional.example.test', variable: 'REGIONAL_API_KEY', inheritsDefault: false,
-      problem: null, keyStatus: { user: 'notDetected', relayProcess: 'set', restriction: null, sharedWith: [] },
+      problem: null, keyStatus: { user: 'notDetected', relayProcess: 'set', matchedUserKeyName: null, restriction: null, sharedWith: [] },
     },
     {
       name: 'qiandao', command: 'codex -p qiandao', providerId: 'shared-route',
       host: 'shared.example.test', variable: 'SHARED_TOKEN', inheritsDefault: true,
-      problem: null, keyStatus: { user: 'set', relayProcess: 'unavailable', restriction: 'sharedVariable', sharedWith: ['默认供应商'] },
+      problem: null, keyStatus: { user: 'set', relayProcess: 'unavailable', matchedUserKeyName: '共享备用', restriction: 'sharedVariable', sharedWith: ['默认供应商'] },
     },
   ],
-} as const
+} as const satisfies CliProfileList
 
 const edit = {
   profileName: 'agentrouter', providerId: 'regional-route', host: 'regional.example.test',
@@ -73,6 +74,31 @@ describe('CLI Profiles', () => {
     expect(commands.openProfileEnvironmentSettings).toHaveBeenCalledOnce()
     expect(commands.prepareProfileKeyEdit).not.toHaveBeenCalled()
     expect(commands.saveProfileEnvKey).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('shows the Windows user key name and updates matches on refresh', async () => {
+    const wrapper = mount(CliProfilesView)
+    await flushPromises()
+    const agentrouter = wrapper.get('[aria-label="CLI Profile 列表"] > li:nth-child(1)')
+    const qiandao = wrapper.get('[aria-label="CLI Profile 列表"] > li:nth-child(2)')
+    expect(agentrouter.text()).not.toContain('当前 Key')
+    expect(qiandao.text()).toContain('当前 Key（Windows 用户变量）：共享备用')
+
+    commands.listCliProfiles.mockResolvedValueOnce({
+      ...inventory, profiles: [
+        { ...inventory.profiles[0], keyStatus: { ...inventory.profiles[0].keyStatus, user: 'set' } },
+        { ...inventory.profiles[1], keyStatus: { ...inventory.profiles[1].keyStatus, matchedUserKeyName: '共享主用' } },
+      ],
+    })
+    const refresh = wrapper.findAll('button').find((button) => button.text() === '刷新')
+    if (!refresh) throw new Error('找不到刷新按钮')
+    await refresh.trigger('click')
+    await flushPromises()
+    expect(commands.listCliProfiles).toHaveBeenCalledTimes(2)
+    expect(agentrouter.text()).toContain('当前 Key（Windows 用户变量）：未能匹配已保存的 Key')
+    expect(qiandao.text()).toContain('当前 Key（Windows 用户变量）：共享主用')
+    expect(qiandao.text()).not.toContain('共享备用')
     wrapper.unmount()
   })
 
@@ -183,13 +209,14 @@ describe('CLI Profiles', () => {
 
     commands.listCliProfiles.mockResolvedValueOnce({
       ...inventory, profiles: [
-        { ...inventory.profiles[0], keyStatus: { ...inventory.profiles[0].keyStatus, user: 'set' } },
+        { ...inventory.profiles[0], keyStatus: { ...inventory.profiles[0].keyStatus, user: 'set', matchedUserKeyName: '备用' } },
         inventory.profiles[1],
       ],
     })
     completeSave({ windowsNotified: true })
     await flushPromises()
     expect(wrapper.find('[aria-label="更换 agentrouter 的 Key"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('当前 Key（Windows 用户变量）：备用')
     expect(wrapper.text()).toContain('请从已刷新的终端环境重新启动 Codex')
     wrapper.unmount()
   })

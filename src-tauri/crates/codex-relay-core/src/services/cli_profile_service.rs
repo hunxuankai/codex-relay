@@ -10,9 +10,12 @@ use crate::models::cli_profile::{
 };
 use crate::models::provider::ProviderApiKeySummary;
 use crate::services::cli_profile_catalog::{CliProfileCatalog, ProfileConfig};
-use crate::services::provider_secret_service::{NamedApiKey, ProviderSecretService};
+use crate::services::provider_secret_service::{
+    NamedApiKey, ProviderSecretService, ProviderSecretStore,
+};
 use crate::services::transaction_service::{TransactionService, profile_key_conflict};
 use sha2::{Digest, Sha256};
+use std::cell::OnceCell;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -129,9 +132,12 @@ impl CliProfileService {
         Ok(edit)
     }
 
+    fn read_provider_secret_store(&self) -> Result<ProviderSecretStore, AppError> {
+        ProviderSecretService::new(self.paths.providers_file.clone()).load_read_only()
+    }
+
     fn read_provider_keys(&self, provider_id: &str) -> Result<Vec<NamedApiKey>, AppError> {
-        let mut store =
-            ProviderSecretService::new(self.paths.providers_file.clone()).load_read_only()?;
+        let mut store = self.read_provider_secret_store()?;
         Ok(store
             .providers
             .remove(provider_id)
@@ -224,6 +230,7 @@ impl CliProfileService {
 
     pub fn list(&self) -> Result<CliProfileList, AppError> {
         let catalog = CliProfileCatalog::read(&self.paths)?;
+        let provider_secrets = OnceCell::new();
         let profiles = catalog
             .profiles
             .iter()
@@ -235,7 +242,7 @@ impl CliProfileService {
                 variable: profile.variable.clone(),
                 inherits_default: profile.inherits_default,
                 problem: profile.problem,
-                key_status: self.key_status(&catalog, profile),
+                key_status: self.key_status(&catalog, profile, &provider_secrets),
             })
             .collect();
         Ok(CliProfileList {
@@ -249,6 +256,7 @@ impl CliProfileService {
         &self,
         catalog: &CliProfileCatalog,
         profile: &ProfileConfig,
+        provider_secrets: &OnceCell<Option<ProviderSecretStore>>,
     ) -> Option<ProfileKeyStatus> {
         if profile.problem.is_some() {
             return None;
@@ -257,17 +265,38 @@ impl CliProfileService {
         let user_value = self.environment.user_value(variable);
         let shared_with = shared_references(catalog, profile, variable);
         let restriction = key_restriction(&*self.environment, variable, &shared_with, &user_value);
+        let user = match &user_value {
+            Ok(UserValue::Text(bytes)) if bytes.len() > 2 => VariablePresence::Set,
+            Ok(UserValue::Text(_) | UserValue::Missing) => VariablePresence::NotDetected,
+            Ok(UserValue::Unsupported) | Err(_) => VariablePresence::Unavailable,
+        };
+        let matched_user_key_name = if user == VariablePresence::Set
+            && profile.provider_defined_in_base
+            && let Some(provider_id) = profile.provider_id.as_deref()
+            && let Ok(value) = &user_value
+        {
+            provider_secrets
+                .get_or_init(|| self.read_provider_secret_store().ok())
+                .as_ref()
+                .and_then(|store| store.providers.get(provider_id))
+                .and_then(|secret| {
+                    secret
+                        .api_keys
+                        .iter()
+                        .find(|entry| value == &UserValue::text(&entry.api_key))
+                })
+                .map(|entry| entry.name.clone())
+        } else {
+            None
+        };
         Some(ProfileKeyStatus {
-            user: match user_value {
-                Ok(UserValue::Text(bytes)) if bytes.len() > 2 => VariablePresence::Set,
-                Ok(UserValue::Text(_) | UserValue::Missing) => VariablePresence::NotDetected,
-                Ok(UserValue::Unsupported) | Err(_) => VariablePresence::Unavailable,
-            },
+            user,
             relay_process: match self.environment.process_has_value(variable) {
                 Ok(true) => VariablePresence::Set,
                 Ok(false) => VariablePresence::NotDetected,
                 Err(_) => VariablePresence::Unavailable,
             },
+            matched_user_key_name,
             restriction,
             shared_with,
         })
@@ -380,7 +409,7 @@ mod tests {
     use crate::infrastructure::user_environment::{UserEnvironmentTransaction, unavailable};
     use crate::models::cli_profile::{KeyRestriction, VariablePresence};
     use crate::services::backup_service::BackupService;
-    use crate::services::provider_secret_service::{ProviderSecret, ProviderSecretStore};
+    use crate::services::provider_secret_service::ProviderSecret;
     use serde_json::json;
     use std::collections::{BTreeMap, BTreeSet};
     use std::fs;
@@ -599,6 +628,101 @@ base_url = "https://vendor.test"
     }
 
     #[test]
+    fn lists_the_key_name_from_the_windows_user_value_only_for_the_same_provider() {
+        let (_temporary, paths) = temporary_paths();
+        write_default_provider_fixture(&paths);
+        for (name, variable) in [
+            ("fixture", "VENDOR_API_KEY"),
+            ("shared-peer", "vendor_api_key"),
+            ("other-provider", "OTHER_API_KEY"),
+            ("not-exact", "DIFFERENT_API_KEY"),
+            ("process-only", "PROCESS_API_KEY"),
+        ] {
+            write_profile(&paths, name, variable);
+        }
+        ProviderSecretService::new(paths.providers_file.clone())
+            .save_store(&provider_key_fixture())
+            .unwrap();
+        let environment = Arc::new(FakeEnvironment {
+            users: Mutex::new(BTreeMap::from([
+                (
+                    "VENDOR_API_KEY".to_owned(),
+                    text("test-key-backup-not-real"),
+                ),
+                (
+                    "OTHER_API_KEY".to_owned(),
+                    text("test-key-other-provider-not-real"),
+                ),
+                (
+                    "DIFFERENT_API_KEY".to_owned(),
+                    text("test-key-backup-NOT-real"),
+                ),
+            ])),
+            process: BTreeSet::from(["PROCESS_API_KEY".to_owned()]),
+            ..Default::default()
+        });
+        let service = service_at(paths, environment);
+        let list = serde_json::to_value(service.list().unwrap()).unwrap();
+        let status = |name| {
+            &list["profiles"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|profile| profile["name"] == name)
+                .unwrap()["keyStatus"]
+        };
+
+        assert_eq!(status("fixture")["matchedUserKeyName"], json!("备用"));
+        assert_eq!(status("fixture")["restriction"], json!("sharedVariable"));
+        assert_eq!(status("shared-peer")["matchedUserKeyName"], json!("备用"));
+        for name in ["other-provider", "not-exact", "process-only"] {
+            assert_eq!(status(name).get("matchedUserKeyName"), Some(&json!(null)));
+        }
+        assert_eq!(status("process-only")["relayProcess"], json!("set"));
+        let response = list.to_string();
+        assert!(!response.contains("test-key-"));
+        assert!(!response.contains(BACKUP_KEY_ID));
+    }
+
+    #[test]
+    fn lists_no_key_name_when_the_saved_source_is_missing_or_unusable() {
+        let (_temporary, paths) = temporary_paths();
+        write_default_provider_fixture(&paths);
+        write_profile(&paths, "fixture", "VENDOR_API_KEY");
+        let environment = Arc::new(FakeEnvironment {
+            users: Mutex::new(BTreeMap::from([(
+                "VENDOR_API_KEY".to_owned(),
+                text("test-key-backup-not-real"),
+            )])),
+            ..Default::default()
+        });
+        let service = service_at(paths.clone(), environment);
+        let status = || {
+            let list = serde_json::to_value(service.list().unwrap()).unwrap();
+            list["profiles"][0]["keyStatus"].clone()
+        };
+
+        let missing_store = status();
+        assert_eq!(missing_store["user"], json!("set"));
+        assert_eq!(missing_store.get("matchedUserKeyName"), Some(&json!(null)));
+        assert!(!paths.app_data_dir.exists());
+
+        fs::create_dir_all(&paths.app_data_dir).unwrap();
+        let malformed = b"not a secret store fixture";
+        fs::write(&paths.providers_file, malformed).unwrap();
+        assert_eq!(status().get("matchedUserKeyName"), Some(&json!(null)));
+        assert_eq!(fs::read(&paths.providers_file).unwrap(), malformed);
+        assert_eq!(fs::read_dir(&paths.app_data_dir).unwrap().count(), 1);
+
+        ProviderSecretService::new(paths.providers_file.clone())
+            .save_store(&provider_key_fixture())
+            .unwrap();
+        let original = fs::read_to_string(&paths.config_file).unwrap();
+        fs::write(&paths.config_file, original.replace(".vendor]", ".Vendor]")).unwrap();
+        assert_eq!(status().get("matchedUserKeyName"), Some(&json!(null)));
+    }
+
+    #[test]
     fn reports_scopes_and_edit_restrictions_without_serializing_values() {
         let (_temporary, paths) = temporary_paths();
         for (name, variable) in [
@@ -734,7 +858,14 @@ base_url = "https://vendor.test"
         );
         assert!(environment.user_value("OTHER_API_KEY").unwrap() == text("test-key-peer-not-real"));
         assert!(before == unchanged.map(|path| fs::read(path).ok()));
-        assert!(!service.list().unwrap().pending_write);
+        let list = service.list().unwrap();
+        assert!(!list.pending_write);
+        let listed = serde_json::to_value(list).unwrap();
+        assert_eq!(listed["profiles"][0]["name"], json!("fixture"));
+        assert_eq!(
+            listed["profiles"][0]["keyStatus"]["matchedUserKeyName"],
+            json!("备用")
+        );
         assert_eq!(
             apply_saved_key(&service, &edit, PRIMARY_KEY_ID)
                 .await

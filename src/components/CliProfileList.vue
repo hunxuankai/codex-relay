@@ -63,6 +63,9 @@ const restrictionText: Record<KeyRestriction, string> = {
               Relay 进程：{{ profile.keyStatus.relayProcess === 'set' ? '可见' : presence[profile.keyStatus.relayProcess] }}
             </span>
           </div>
+          <p v-if="profile.keyStatus.user === 'set'" class="profile-note">
+            当前 Key（Windows 用户变量）：{{ profile.keyStatus.matchedUserKeyName ?? '未能匹配已保存的 Key' }}
+          </p>
           <p v-if="profile.keyStatus.restriction" class="profile-note">
             {{ restrictionText[profile.keyStatus.restriction] }}<template v-if="profile.keyStatus.restriction === 'sharedVariable'">{{ profile.keyStatus.sharedWith.join('、') }}。请为各 Profile 使用专用变量。</template>
           </p>

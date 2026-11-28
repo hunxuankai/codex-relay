@@ -88,7 +88,7 @@ Provider 可用性测试不会在启动、自检、列表刷新或文件监控�
 ### CLI Profiles 与环境变量 Key
 
 1. 在 **Providers → CLI Profiles** 查看当前 Codex 配置目录下已有的 `<名称>.config.toml`。此文件形式需要 Codex CLI 0.134.0 或更高版本，不需要导入。终端需使用同一个 `CODEX_HOME`；可继续运行 `codex -p agentrouter` 或 `codex -p qiandao`，也可以从列表复制启动命令。
-2. 列表按用户配置层解析 `model_provider` 与目标供应商的 `env_key`，区分 Windows 用户变量是否设置、当前 Relay 进程是否可见，并标注继承。这里不读取其他终端的环境，也不测试 Key 是否有效。
+2. 列表按用户配置层解析 `model_provider` 与目标供应商的 `env_key`，区分 Windows 用户变量是否设置、当前 Relay 进程是否可见，并标注继承。若 Windows 用户变量与同一供应商已保存的 Key 完全一致，只显示该 Key 的名称；否则不会猜测。外部修改后可点击「刷新」重新匹配。这里不读取其他终端的环境，也不测试 Key 是否有效。
 3. 对可明确关联的专用 `*_API_KEY` 或 `*_TOKEN`，选择「设置 Key」或「更换 Key」。弹窗按供应商 ID 列出主 Providers 页面为同一供应商保存的可用 Key；核对目标主机与变量后，点击某个 Key 名称即可保存。也可以手动输入新值并点击「保存到 Windows 用户变量」。
 4. 共享、通用、同名系统变量和特殊类型变量只读，仍可通过 Windows 环境变量入口管理。要分别使用两把 Key，应在各 Profile 中引用两个不同的专用变量。
 

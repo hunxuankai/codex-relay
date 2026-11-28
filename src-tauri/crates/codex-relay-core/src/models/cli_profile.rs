@@ -33,6 +33,7 @@ pub enum KeyRestriction {
 pub struct ProfileKeyStatus {
     pub user: VariablePresence,
     pub relay_process: VariablePresence,
+    pub matched_user_key_name: Option<String>,
     pub restriction: Option<KeyRestriction>,
     pub shared_with: Vec<String>,
 }
