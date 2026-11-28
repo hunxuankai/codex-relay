@@ -251,26 +251,40 @@ async fn legacy_gpt_6_astra_ultra_is_read_only_until_a_transaction_saves_max() {
 
 #[tokio::test]
 async fn editing_provider_to_gpt_6_1_sol_saves_and_applies_model_preferences() {
+    assert_gpt_6_ultra_model_preferences("gpt-6.1-sol").await;
+}
+
+#[tokio::test]
+async fn editing_provider_to_gpt_6_2_astra_saves_and_applies_model_preferences() {
+    assert_gpt_6_ultra_model_preferences("gpt-6.2-astra").await;
+}
+
+#[tokio::test]
+async fn editing_provider_to_gpt_6_2_sol_saves_and_applies_model_preferences() {
+    assert_gpt_6_ultra_model_preferences("gpt-6.2-sol").await;
+}
+
+async fn assert_gpt_6_ultra_model_preferences(model_id: &str) {
     let (_directory, paths, service) = setup();
     let state = service.list_providers().unwrap();
-    let sol = state
+    let model = state
         .model_catalog
         .iter()
-        .find(|model| model.id == "gpt-6.1-sol")
-        .expect("the editor catalog should offer gpt-6.1-sol");
+        .find(|model| model.id == model_id)
+        .unwrap_or_else(|| panic!("the editor catalog should offer {model_id}"));
     assert_eq!(
-        sol.reasoning_efforts,
+        model.reasoning_efforts,
         ["low", "medium", "high", "xhigh", "max", "ultra"]
     );
-    assert_eq!(sol.default_reasoning_effort, "low");
-    assert!(sol.supports_fast);
+    assert_eq!(model.default_reasoning_effort, "low");
+    assert!(model.supports_fast);
 
     service
         .update_provider(UpdateProviderInput {
             id: "provider-a".into(),
             name: "Provider A".into(),
             wire_api: "responses".into(),
-            models: vec!["gpt-6.1-sol".into()],
+            models: vec![model_id.into()],
             fast_enabled: true,
             sync_if_active: true,
             expected_files: state.fingerprints,
@@ -280,13 +294,13 @@ async fn editing_provider_to_gpt_6_1_sol_saves_and_applies_model_preferences() {
 
     let state = service.list_providers().unwrap();
     let provider = &state.providers[0];
-    assert_eq!(provider.models, ["gpt-6.1-sol"]);
-    assert_eq!(provider.selected_model.as_deref(), Some("gpt-6.1-sol"));
-    assert_eq!(provider.reasoning_efforts["gpt-6.1-sol"], "low");
+    assert_eq!(provider.models, [model_id]);
+    assert_eq!(provider.selected_model.as_deref(), Some(model_id));
+    assert_eq!(provider.reasoning_efforts[model_id], "low");
     assert!(provider.fast_enabled);
     let config = fs::read_to_string(&paths.config_file).unwrap();
     let document = config.parse::<toml_edit::DocumentMut>().unwrap();
-    assert_eq!(document["model"].as_str(), Some("gpt-6.1-sol"));
+    assert_eq!(document["model"].as_str(), Some(model_id));
     assert_eq!(document["model_reasoning_effort"].as_str(), Some("low"));
     assert_eq!(document["service_tier"].as_str(), Some("fast"));
 
@@ -294,7 +308,7 @@ async fn editing_provider_to_gpt_6_1_sol_saves_and_applies_model_preferences() {
         service
             .update_provider_preference(UpdateProviderPreferenceInput {
                 provider_id: "provider-a".into(),
-                model: "gpt-6.1-sol".into(),
+                model: model_id.into(),
                 reasoning_effort: effort.into(),
                 expected_files: service.list_providers().unwrap().fingerprints,
             })
@@ -302,7 +316,7 @@ async fn editing_provider_to_gpt_6_1_sol_saves_and_applies_model_preferences() {
             .unwrap();
 
         let state = service.list_providers().unwrap();
-        assert_eq!(state.providers[0].reasoning_efforts["gpt-6.1-sol"], effort);
+        assert_eq!(state.providers[0].reasoning_efforts[model_id], effort);
         assert!(state.providers[0].fast_enabled);
         let config = fs::read_to_string(&paths.config_file).unwrap();
         let document = config.parse::<toml_edit::DocumentMut>().unwrap();
@@ -324,7 +338,7 @@ async fn editing_provider_to_gpt_6_1_sol_saves_and_applies_model_preferences() {
     let error = service
         .update_provider_preference(UpdateProviderPreferenceInput {
             provider_id: "provider-a".into(),
-            model: "gpt-6.1-sol".into(),
+            model: model_id.into(),
             reasoning_effort: "none".into(),
             expected_files: service.list_providers().unwrap().fingerprints,
         })

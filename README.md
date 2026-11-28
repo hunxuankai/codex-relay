@@ -300,7 +300,11 @@ Codex Provider 配置的主要数据源。每个 Provider 的实际 `base_url` �
 
 ### Provider Fast 偏好
 
-Fast 默认关闭。当前内置目录支持 `gpt-6-astra`、`gpt-6.1-sol`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5` 和 `gpt-5.4`；`gpt-5.4-mini` 不支持。`gpt-6-astra` 的推理强度默认为 `low`，仅可选 `low`、`medium`、`high`、`xhigh` 和 `max`。`gpt-6.1-sol` 支持 `low`、`medium`、`high`、`xhigh`、`max` 和 `ultra`，默认 `low`。模型不支持时开关保持关闭并显示原因；已开启 Fast 后把模型集合改到不支持的偏好模型，会在同一 Provider 事务中自动关闭 Fast。Relay 不提供通用 `service_tier` 下拉框，也不会在运行时调用 `codex debug models` 或通过真实网络探测能力。
+Fast 默认关闭。内置目录中 `gpt-6.2-astra`、`gpt-6.2-sol`、`gpt-6-astra`、`gpt-6.1-sol`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5` 和 `gpt-5.4` 支持 Fast；`gpt-5.4-mini` 不支持。目录能力不代表供应商账户一定可用。
+
+`gpt-6.2-astra`、`gpt-6.2-sol` 和 `gpt-6.1-sol` 支持 `low`、`medium`、`high`、`xhigh`、`max` 和 `ultra`，默认 `low`。`gpt-6-astra` 同样默认 `low`，但不支持 `ultra`。
+
+模型不支持 Fast 时，开关保持关闭并显示原因；已开启 Fast 后把模型集合改到不支持的偏好模型，会在同一 Provider 事务中自动关闭 Fast。Relay 不提供通用 `service_tier` 下拉框，也不会在运行时调用 `codex debug models` 或通过真实网络探测能力。
 
 旧版已保存的 `gpt-6-astra` / `ultra` 偏好会按 `max` 读取，并在后续显式保存或切换 Provider 的事务中更新。读取不会自动改写配置，新选择不再接受 `ultra`。
 

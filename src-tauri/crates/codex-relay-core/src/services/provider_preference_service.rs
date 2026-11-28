@@ -29,8 +29,21 @@ pub struct ModelCatalogEntry {
 
 const STANDARD_EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
 const GPT_56_EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh", "max"];
+const GPT_6_ULTRA_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max", "ultra"];
 
 const MODEL_CATALOG: &[ModelCatalogEntry] = &[
+    ModelCatalogEntry {
+        id: "gpt-6.2-astra",
+        reasoning_efforts: GPT_6_ULTRA_EFFORTS,
+        default_reasoning_effort: "low",
+        supports_fast: true,
+    },
+    ModelCatalogEntry {
+        id: "gpt-6.2-sol",
+        reasoning_efforts: GPT_6_ULTRA_EFFORTS,
+        default_reasoning_effort: "low",
+        supports_fast: true,
+    },
     ModelCatalogEntry {
         id: "gpt-6-astra",
         reasoning_efforts: &["low", "medium", "high", "xhigh", "max"],
@@ -39,7 +52,7 @@ const MODEL_CATALOG: &[ModelCatalogEntry] = &[
     },
     ModelCatalogEntry {
         id: "gpt-6.1-sol",
-        reasoning_efforts: &["low", "medium", "high", "xhigh", "max", "ultra"],
+        reasoning_efforts: GPT_6_ULTRA_EFFORTS,
         default_reasoning_effort: "low",
         supports_fast: true,
     },
@@ -685,7 +698,7 @@ mod tests {
     fn model_catalog_exposes_verified_reasoning_efforts_and_defaults() {
         let catalog = model_catalog();
 
-        assert_eq!(catalog.len(), 8);
+        assert_eq!(catalog.len(), 10);
         let sol_61 = catalog
             .iter()
             .find(|model| model.id == "gpt-6.1-sol")
@@ -823,6 +836,8 @@ mod tests {
     #[test]
     fn fast_can_only_be_enabled_for_supported_catalog_models() {
         let supported_ids = [
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
             "gpt-6-astra",
             "gpt-6.1-sol",
             "gpt-5.6-sol",
